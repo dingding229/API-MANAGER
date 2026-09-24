@@ -61,7 +61,7 @@ jobs:
           CREDENTIAL_ENCRYPTION_KEY: ci-only-credential-key-at-least-thirty-two-characters
           POSTGRES_PASSWORD: ci-only-database-password
           GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
-      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
       - name: Lint Helm chart
         run: |
           helm lint deploy/helm/api-manager \
