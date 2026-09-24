@@ -1,0 +1,66 @@
+# Use from this repository with -f compose.yaml -f compose.game-discount.yaml.
+services:
+  api-manager:
+    environment:
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Use same ADMIN_TOKEN as compose.yaml}
+      API_UPSTREAM_CREDENTIALS: '{"game-discount":{"origin":"http://game-discount:8089","api_key":"${GAME_DISCOUNT_GATEWAY_KEY:?Gateway key required}"}}'
+    depends_on:
+      game-discount:
+        condition: service_healthy
+    networks:
+      - default
+      - game-discount-internal
+
+  game-discount:
+    build:
+      context: ${GAME_DISCOUNT_PROJECT_PATH:-../game-discount-api}
+    environment:
+      PORT: "8089"
+      ADMIN_TOKEN: ${GAME_DISCOUNT_ADMIN_TOKEN:?Game Discount admin token required}
+      GATEWAY_API_KEY: ${GAME_DISCOUNT_GATEWAY_KEY:?Gateway key required}
+      DATABASE_URL: postgres://game_discount:${GAME_DISCOUNT_DB_PASSWORD:?Database password required}@game-discount-postgres:5432/game_discount?sslmode=disable
+      FEED_FILE: /app/docs/authorized-feed.example.json
+      FEED_ALLOW_STALE: "false"
+      # Aggregate service budget; per-caller limits are enforced by API Manager.
+      RATE_LIMIT: ${GAME_DISCOUNT_RATE_LIMIT:-6000}
+      ANON_RATE_LIMIT: ${GAME_DISCOUNT_ANON_RATE_LIMIT:-12000}
+      TRUST_PROXY_HEADERS: "false"
+    # No host ports: neither its data API nor its admin UI bypasses the gateway.
+    networks:
+      - game-discount-internal
+    depends_on:
+      game-discount-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8089/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    labels:
+      observability: "true"
+    restart: unless-stopped
+
+  game-discount-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: game_discount
+      POSTGRES_PASSWORD: ${GAME_DISCOUNT_DB_PASSWORD:?Database password required}
+      POSTGRES_DB: game_discount
+    networks:
+      - game-discount-internal
+    volumes:
+      - game_discount_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U game_discount -d game_discount"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  game-discount-internal:
+    internal: true
+
+volumes:
+  game_discount_postgres_data:

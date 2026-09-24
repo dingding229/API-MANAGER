@@ -1,0 +1,26 @@
+id: game-discount.wasm-demo
+name: game-discount-wasm
+version: 1.0.0
+api_version: v1
+runtime: wasm
+entrypoint: plugin.wasm
+limits:
+  timeout_ms: 3000
+  memory_mb: 128
+routes:
+  - name: 服务状态
+    method: GET
+    path: /api/game-discount-wasm/v1/status
+    auth_mode: api_key
+  - name: 报价列表
+    method: GET
+    path: /api/game-discount-wasm/v1/offers
+    auth_mode: api_key
+    example_query:
+      region: HK
+  - name: 单品查询
+    method: GET
+    path: /api/game-discount-wasm/v1/offers/{external_id}
+    auth_mode: api_key
+    example_path_params:
+      external_id: wasm-demo-001

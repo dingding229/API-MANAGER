@@ -1,0 +1,2 @@
+ALTER TABLE plugins
+    ADD COLUMN IF NOT EXISTS signer_key_id TEXT NOT NULL DEFAULT '';

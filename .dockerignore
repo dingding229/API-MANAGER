@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.key
+**/__pycache__
+bin
+server
+coverage.out
+*.log

@@ -1,0 +1,158 @@
+name: CI and Docker Publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: dingding229/api-manager
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.26.6'
+          cache: true
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Static analysis
+        run: go vet ./...
+      - name: Build server
+        run: CGO_ENABLED=0 go build -trimpath ./cmd/server
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Test console JavaScript
+        run: node --test tests/web/*.test.cjs
+      - name: Validate production scripts and Compose
+        run: |
+          python3 -m py_compile scripts/init-production-secrets.py scripts/backup-production.py scripts/preflight-production.py scripts/verify-production.py
+          python3 -m unittest discover -s tests/production
+          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+          PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
+          docker compose --env-file /dev/null -f compose.production.yaml config -q
+          PROD_CA_CERTS_DIR=/tmp/ci-certs \
+          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+          PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
+          docker compose --env-file /dev/null -f compose.production.yaml -f compose.production.private-ca.yaml config -q
+      - name: Validate Grafana dashboard JSON
+        run: python3 -m json.tool configs/grafana/dashboards/api-manager.json >/dev/null
+      - name: Validate development Compose
+        run: docker compose config >/dev/null
+        env:
+          ADMIN_TOKEN: ci-only-admin-token-at-least-thirty-two-characters
+          USER_JWT_SECRET: ci-only-jwt-secret-at-least-thirty-two-characters
+          CREDENTIAL_ENCRYPTION_KEY: ci-only-credential-key-at-least-thirty-two-characters
+          POSTGRES_PASSWORD: ci-only-database-password
+          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+      - name: Lint Helm chart
+        run: |
+          helm lint deploy/helm/api-manager \
+            --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
+            --set secrets.USER_JWT_SECRET=ci-only-jwt-secret-at-least-thirty-two-characters \
+            --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
+            --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci
+          helm template api-manager deploy/helm/api-manager \
+            --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
+            --set secrets.USER_JWT_SECRET=ci-only-jwt-secret-at-least-thirty-two-characters \
+            --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
+            --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci >/dev/null
+          helm lint deploy/helm/api-manager \
+            --set productionMode=true --set serviceMonitor.enabled=true \
+            --set existingSecret=ci-placeholder \
+            --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set env.REDIS_TLS_ENABLED=true
+          helm template api-manager deploy/helm/api-manager \
+            --set productionMode=true --set serviceMonitor.enabled=true \
+            --set existingSecret=ci-placeholder \
+            --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set env.REDIS_TLS_ENABLED=true >/dev/null
+      - name: Scan repository for vulnerabilities, secrets, and misconfiguration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build image for security scan
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: api-manager:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan built image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: api-manager:scan
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Log in to private Docker Hub repository
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build and push private multi-platform image
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+      - name: Publish summary
+        run: |
+          echo '### Private Docker image published' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Repository: `${{ env.IMAGE_NAME }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Digest: `${{ steps.push.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"

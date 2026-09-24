@@ -1,0 +1,14 @@
+.DS_Store
+.env
+bin/
+coverage.out
+*.log
+
+integrations/game-discount/.env
+integrations/game-discount/*.key
+__pycache__/
+
+# Signing private keys
+*.key
+
+/server

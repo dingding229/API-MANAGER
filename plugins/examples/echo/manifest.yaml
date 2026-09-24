@@ -1,0 +1,13 @@
+id: dev.api-manager.echo
+name: echo
+version: 0.1.0
+api_version: v1
+runtime: builtin
+entrypoint: echo
+permissions: {}
+limits:
+  timeout_ms: 1000
+  memory_mb: 8
+hooks:
+  - handle_request
+  - health_check

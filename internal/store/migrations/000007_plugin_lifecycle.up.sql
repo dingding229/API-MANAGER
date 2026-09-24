@@ -1,0 +1,6 @@
+ALTER TABLE plugins
+    ADD COLUMN IF NOT EXISTS checksum TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS storage_path TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_plugins_name_enabled ON plugins(name, enabled);
