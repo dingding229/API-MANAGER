@@ -1,0 +1,15 @@
+.DS_Store
+.env
+bin/
+coverage.out
+*.log
+
+# Runtime plugin packages and local integration fixtures are never source artifacts.
+plugins/
+integrations/
+__pycache__/
+
+# Signing private keys
+*.key
+
+/server

@@ -1,0 +1,90 @@
+productionMode: false # set true in a production values file; enables runtime fail-closed guards
+replicaCount: 1 # in-process plugin registry; scale only after distributed reload is implemented
+
+image:
+  repository: dingding229/api-manager
+  tag: "1.0.0"
+  digest: "" # required with productionMode; immutable sha256 digest
+  pullPolicy: IfNotPresent
+
+# Required when pulling the private Docker Hub image.
+imagePullSecrets: []
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: api-manager.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 1
+    memory: 512Mi
+
+env:
+  HTTP_ADDR: ":8080"
+  LOG_LEVEL: info
+  USE_REDIS: "true"
+  REDIS_ADDR: redis:6379
+  OTEL_ENABLED: "false"
+  OTEL_SERVICE_NAME: api-manager
+  OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4317
+  OTEL_EXPORTER_OTLP_INSECURE: "true"
+
+existingSecret: "" # use a pre-created Secret instead of chart-managed values
+
+# Optional Secret containing redis-ca.pem and/or postgres-ca.pem (public CAs).
+# Set env.REDIS_TLS_CA_FILE and sslrootcert in the secret PostgreSQL DSN.
+trustedCA:
+  secretName: ""
+
+secrets:
+  ADMIN_TOKEN: ""
+  USER_JWT_SECRET: ""
+  REDIS_PASSWORD: ""
+  CREDENTIAL_ENCRYPTION_KEY: ""
+  POSTGRES_DSN: ""
+  METRICS_TOKEN: ""
+
+persistence:
+  enabled: true
+  accessModes: [ReadWriteOnce]
+  size: 1Gi
+  storageClass: ""
+
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  labels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+networkPolicy:
+  # In production ingress defaults to deny-all. Add explicit proxy and Prometheus
+  # namespace/pod selectors with TCP port 8080; never select all namespaces.
+  allowedIngress: []
+  # Extra explicit destinations required for upstream calls outside the namespace.
+  extraEgress: []

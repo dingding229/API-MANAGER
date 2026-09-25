@@ -1,0 +1,50 @@
+groups:
+  - name: api-manager
+    interval: 30s
+    rules:
+      - alert: APIManagerDown
+        expr: up{job="api-manager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: api-manager
+        annotations:
+          summary: API Manager is down
+          description: Prometheus cannot scrape the API Manager for more than two minutes.
+      - alert: APIManagerHighErrorRate
+        expr: sum(rate(api_manager_gateway_errors_total[5m])) / clamp_min(sum(rate(api_manager_gateway_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: api-manager
+        annotations:
+          summary: API Manager gateway error rate is high
+          description: More than 5% of gateway requests have failed during the last five minutes.
+      - alert: APIManagerHighP95Latency
+        expr: histogram_quantile(0.95, sum(rate(api_manager_gateway_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: api-manager
+        annotations:
+          summary: API Manager p95 latency is above one second
+          description: The gateway p95 latency has remained above one second for ten minutes.
+      - alert: APIManagerRateLimitSpike
+        expr: sum(rate(api_manager_gateway_rate_limit_hits_total[5m])) > 10
+        for: 10m
+        labels:
+          severity: info
+          service: api-manager
+        annotations:
+          summary: API Manager rate-limit rejections increased
+          description: The gateway is rejecting more than ten requests per second because of limits.
+
+      - alert: APIManagerCircuitBreakerOpen
+        expr: sum(rate(api_manager_gateway_circuit_breaker_rejections_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: api-manager
+        annotations:
+          summary: API Manager upstream circuit breaker is open
+          description: Requests have been rejected by an open upstream circuit for five minutes.

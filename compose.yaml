@@ -1,0 +1,153 @@
+services:
+  api-manager:
+    image: ${API_MANAGER_IMAGE:-dingding229/api-manager:latest}
+    pull_policy: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      HTTP_ADDR: ":8080"
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set ADMIN_TOKEN to a random 32+ character secret}
+      LOG_LEVEL: "info"
+      USE_REDIS: "true"
+      USER_JWT_SECRET: ${USER_JWT_SECRET:?Set USER_JWT_SECRET to a separate random 32+ character secret}
+      # Set a stable secret in .env for reversible API Key viewing.
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?Set an independent stable encryption key}
+      PLUGIN_DIR: "/data/plugins"
+      PLUGIN_MAX_BYTES: "20971520"
+      PLUGIN_DATABASE_WRITES_ENABLED: "false"
+      PLUGIN_LIBRARY_DIR: "/data/plugin-library"
+      OTEL_ENABLED: "true"
+      OTEL_SERVICE_NAME: "api-manager"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "tempo:4317"
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      POSTGRES_DSN: "postgres://api_manager:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/api_manager?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tempo:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - plugin_data:/data/plugins
+      - plugin_library:/data/plugin-library
+    labels:
+      observability: "true"
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: api_manager
+      POSTGRES_USER: api_manager
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U api_manager -d api_manager"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.5.5
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./configs/loki:/etc/loki:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.10.2
+    command: ["run", "/etc/alloy/config.alloy", "--server.http.listen-addr=0.0.0.0:12345"]
+    volumes:
+      - ./configs/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:12345:12345"
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.8.2
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./configs/tempo:/etc/tempo:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.6.0
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./configs/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./configs/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - loki
+      - prometheus
+      - tempo
+      - alertmanager
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  plugin_data:
+  redis_data:
+  loki_data:
+  prometheus_data:
+  tempo_data:
+  grafana_data:
+  alertmanager_data:
+
+  plugin_library:

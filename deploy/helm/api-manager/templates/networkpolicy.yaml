@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "api-manager.fullname" . }}
+  labels:
+    {{- include "api-manager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "api-manager.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress, Egress]
+  {{- if .Values.productionMode }}
+  ingress: {{- if not .Values.networkPolicy.allowedIngress }} []{{ else }}
+    {{- toYaml .Values.networkPolicy.allowedIngress | nindent 4 }}
+    {{- end }}
+  {{- else }}
+  ingress:
+    - ports:
+        - port: http
+          protocol: TCP
+  {{- end }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if not .Values.productionMode }}
+    - to:
+        - podSelector: {} # development convenience; production needs explicit extraEgress
+    {{- end }}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

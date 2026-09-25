@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'viewer';
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

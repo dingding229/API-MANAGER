@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API Manager Console</title>
+  <link rel="stylesheet" href="/console/app.css">
+</head>
+<body>
+  <main id="app">
+    <section id="login-view" class="auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow">API MANAGER</p>
+        <h1>管理控制台</h1>
+        <p class="muted">使用管理员账号登录，统一管理接口、凭证、用户与角色。</p>
+        <form id="login-form" class="form-stack">
+          <label class="field"><span class="field-label">邮箱</span><input id="email" type="email" required autocomplete="email" placeholder="admin@example.com"></label>
+          <label class="field"><span class="field-label">密码</span><input id="password" type="password" required autocomplete="current-password" placeholder="至少 8 位"><span class="field-hint">使用已初始化的管理员账号。</span></label>
+          <button type="submit">登录</button>
+        </form>
+        <details id="bootstrap-panel" class="bootstrap" hidden><summary>首次部署：初始化超级管理员</summary>
+          <form id="bootstrap-form" class="form-stack">
+            <label class="field"><span class="field-label">管理员 Token</span><input id="bootstrap-token" type="password" placeholder="ADMIN_TOKEN"><span class="field-hint">仅用于首次初始化，不会显示或保存。</span></label>
+            <label class="field"><span class="field-label">邮箱</span><input id="bootstrap-email" type="email" required></label>
+            <label class="field"><span class="field-label">密码</span><input id="bootstrap-password" type="password" minlength="8" required></label>
+            <button type="submit" class="secondary">初始化</button>
+          </form>
+        </details>
+        <p id="auth-message" class="message"></p>
+      </div>
+    </section>
+
+    <section id="console-view" class="console hidden">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"></span><strong>API Manager</strong></div>
+        <nav id="nav">
+          <button data-page="overview" class="active">总览</button>
+          <button data-page="apis" data-permission="api.read">接口管理</button>
+          <button data-page="credentials" data-permission="credential.read">调用凭证</button>
+          <button data-page="users" data-permission="user.read">用户管理</button>
+          <button data-page="roles" data-permission="user.read">角色与权限</button>
+          <button data-page="plugins" data-permission="plugin.read">插件</button>
+          <button data-page="audit" data-permission="audit.read">审计日志</button>
+        </nav>
+        <div class="account"><span id="current-user"></span><button id="logout" class="link">退出登录</button></div>
+      </aside>
+      <section class="content">
+        <header><div><p class="eyebrow">CONTROL PLANE</p><h1 id="page-title">总览</h1></div><button id="refresh" class="secondary">刷新</button></header>
+        <p id="message" class="message"></p>
+        <div id="page"></div>
+      </section>
+    </section>
+  </main>
+  <template id="empty"><div class="empty">暂无数据</div></template>
+  <script src="/console/app.js"></script>
+</body>
+</html>

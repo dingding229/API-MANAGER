@@ -1,0 +1,15 @@
+# Mount a real HTTPS webhook URL at /etc/alertmanager/secrets/alerts_webhook_url.
+# Never deploy the development no-op receiver to production.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: operations
+  group_by: [alertname, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: operations
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/alerts_webhook_url
+        send_resolved: true
