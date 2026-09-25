@@ -141,17 +141,13 @@ docker compose down
 docker compose down -v
 ```
 
-默认仅在本机监听以下端口：
+默认只向宿主机发布 API Manager：
 
-| 服务 | 地址 |
-| --- | --- |
-| API Manager | `http://127.0.0.1:8080` |
-| Grafana | `http://127.0.0.1:3000` |
-| Prometheus | `http://127.0.0.1:9090` |
-| Alertmanager | `http://127.0.0.1:9093` |
-| Loki | `http://127.0.0.1:3100` |
-| Tempo | `http://127.0.0.1:3200` |
-| Alloy | `http://127.0.0.1:12345` |
+```text
+http://127.0.0.1:8080
+```
+
+Grafana、Prometheus、Alertmanager、Loki、Tempo、Alloy、PostgreSQL 和 Redis 仅在 Compose 内部网络监听，不向宿主机发布端口。Grafana 仍可访问内部数据源；如需从外部访问监控界面，应通过部署方管理的反向代理按需开放，而不是直接发布各组件端口。
 
 ## 生产 Docker Compose 部署
 

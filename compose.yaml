@@ -74,8 +74,6 @@ services:
     volumes:
       - ./configs/loki:/etc/loki:ro
       - loki_data:/loki
-    ports:
-      - "127.0.0.1:3100:3100"
     restart: unless-stopped
 
   alloy:
@@ -84,8 +82,6 @@ services:
     volumes:
       - ./configs/alloy:/etc/alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - "127.0.0.1:12345:12345"
     depends_on:
       - loki
     restart: unless-stopped
@@ -96,10 +92,6 @@ services:
     volumes:
       - ./configs/tempo:/etc/tempo:ro
       - tempo_data:/var/tempo
-    ports:
-      - "127.0.0.1:3200:3200"
-      - "127.0.0.1:4317:4317"
-      - "127.0.0.1:4318:4318"
     restart: unless-stopped
 
   prometheus:
@@ -108,8 +100,6 @@ services:
     volumes:
       - ./configs/prometheus:/etc/prometheus:ro
       - prometheus_data:/prometheus
-    ports:
-      - "127.0.0.1:9090:9090"
     restart: unless-stopped
 
   alertmanager:
@@ -118,8 +108,6 @@ services:
     volumes:
       - ./configs/alertmanager:/etc/alertmanager:ro
       - alertmanager_data:/alertmanager
-    ports:
-      - "127.0.0.1:9093:9093"
     restart: unless-stopped
 
   grafana:
@@ -131,8 +119,6 @@ services:
       - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
-    ports:
-      - "127.0.0.1:3000:3000"
     depends_on:
       - loki
       - prometheus
