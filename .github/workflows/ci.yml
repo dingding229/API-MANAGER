@@ -110,9 +110,12 @@ jobs:
           push: false
           platforms: linux/amd64
           tags: api-manager:scan
-      - name: Free BuildKit cache before inspecting the loaded image
+      - name: Free runner toolchains and Docker build cache before image scan
         run: |
-          docker buildx prune --all --force
+          # The loaded image is large; Trivy also needs temporary space to export layers.
+          # The upstream binaries are built inside Docker, so these host toolchains are unused.
+          sudo rm -rf /opt/hostedtoolcache /usr/local/swift /usr/local/share/powershell
+          docker builder prune --all --force
           df -h /
       - name: Scan built image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
