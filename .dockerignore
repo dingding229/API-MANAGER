@@ -13,3 +13,5 @@ coverage.out
 plugins
 
 integrations
+
+**/*_test.go

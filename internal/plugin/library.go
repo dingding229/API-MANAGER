@@ -57,7 +57,7 @@ func (l *Library) readPackage(name, version string) ([]byte, []byte, Manifest, e
 	if err := l.verifyPackageDirectory(dir); err != nil {
 		return nil, nil, Manifest{}, err
 	}
-	manifestBytes, err := readLibraryFile(filepath.Join(dir, "manifest.yaml"), l.manager.maxUpload)
+	manifestBytes, err := readLibraryFile(dir, "manifest.yaml", l.manager.MaxManifestBytes())
 	if err != nil {
 		return nil, nil, Manifest{}, err
 	}
@@ -68,7 +68,7 @@ func (l *Library) readPackage(name, version string) ([]byte, []byte, Manifest, e
 	if manifest.Name != name || manifest.Version != version {
 		return nil, nil, Manifest{}, fmt.Errorf("%w: library manifest identity mismatch", ErrInvalidLibraryPackage)
 	}
-	wasmBytes, err := readLibraryFile(filepath.Join(dir, manifest.Entrypoint), l.manager.maxUpload)
+	wasmBytes, err := readLibraryFile(dir, manifest.Entrypoint, l.manager.MaxUploadBytes())
 	if err != nil {
 		return nil, nil, Manifest{}, err
 	}
@@ -84,8 +84,7 @@ func (l *Library) readPackage(name, version string) ([]byte, []byte, Manifest, e
 // verifyPackageChecksum uses a small sidecar written at publication time.
 // Older packages without the sidecar remain readable for backwards compatibility.
 func (l *Library) verifyPackageChecksum(dir string, manifest Manifest, wasmBytes []byte) error {
-	path := filepath.Join(dir, manifest.Entrypoint+".sha256")
-	data, err := readLibraryFile(path, 128)
+	data, err := readLibraryFile(dir, manifest.Entrypoint+".sha256", 128)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -251,26 +250,28 @@ func (l *Library) verifyPackageDirectory(dir string) error {
 	return nil
 }
 
-func readLibraryFile(path string, max int64) ([]byte, error) {
-	if max <= 0 {
-		return nil, errors.New("invalid library file limit")
+func readLibraryFile(directory, name string, max int64) ([]byte, error) {
+	if max <= 0 || filepath.Base(name) != name {
+		return nil, errors.New("invalid library file request")
 	}
-	info, err := os.Lstat(path)
+	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("library package file is not a regular file")
-	}
-	if info.Size() > max {
-		return nil, errors.New("library package file is too large")
-	}
-	f, err := os.Open(path)
+	defer root.Close()
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > max {
+		return nil, errors.New("library package file is invalid or too large")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, max+1))
 	if err != nil {
 		return nil, err
 	}

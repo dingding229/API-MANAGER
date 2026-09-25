@@ -3,7 +3,7 @@ replicaCount: 1 # in-process plugin registry; scale only after distributed reloa
 
 image:
   repository: dingding229/api-manager
-  tag: "1.0.0"
+  tag: "0.2.0"
   digest: "" # required with productionMode; immutable sha256 digest
   pullPolicy: IfNotPresent
 
@@ -41,11 +41,18 @@ env:
   OTEL_ENABLED: "false"
   OTEL_SERVICE_NAME: api-manager
   OBSERVABILITY_DIR: /data/observability
+  OBSERVABILITY_STACK_ENABLED: "false"
   OBSERVABILITY_MAX_LOGS: "10000"
   OBSERVABILITY_MAX_TRACES: "5000"
   OBSERVABILITY_FILE_MAX_BYTES: "67108864"
 
 existingSecret: "" # use a pre-created Secret instead of chart-managed values
+
+# Route-level JWT/HMAC secrets stay in the API_AUTH_ namespace. In production,
+# add these keys to existingSecret; the chart exposes only *_FILE paths.
+authSecretFiles: []
+# - API_AUTH_JWT_HS256_SECRET
+# - API_AUTH_PARTNER_HMAC
 
 secrets:
   ADMIN_TOKEN: ""
@@ -54,11 +61,12 @@ secrets:
   CREDENTIAL_ENCRYPTION_KEY: ""
   POSTGRES_DSN: ""
   METRICS_TOKEN: ""
+  GRAFANA_ADMIN_PASSWORD: ""
 
 persistence:
   enabled: true
   accessModes: [ReadWriteOnce]
-  size: 1Gi
+  size: 10Gi
   storageClass: ""
 
 serviceMonitor:

@@ -39,14 +39,15 @@ import (
 )
 
 type Gateway struct {
-	credentials upstream.Credentials
-	store       store.Store
-	plugins     *plugin.Registry
-	limiter     ratelimit.Limiter
-	logger      *slog.Logger
-	requests    atomic.Uint64
-	metrics     *observability.Metrics
-	breaker     *resilience.CircuitBreaker
+	credentials    upstream.Credentials
+	store          store.Store
+	plugins        *plugin.Registry
+	limiter        ratelimit.Limiter
+	logger         *slog.Logger
+	requests       atomic.Uint64
+	metrics        *observability.Metrics
+	breaker        *resilience.CircuitBreaker
+	productionMode bool
 }
 
 func New(s store.Store, plugins *plugin.Registry, limiter ratelimit.Limiter, logger *slog.Logger) *Gateway {
@@ -64,6 +65,9 @@ func (g *Gateway) SetUpstreamCredentials(c upstream.Credentials) {
 		g.credentials[name] = credential
 	}
 }
+
+// SetProductionMode must be called only before serving requests.
+func (g *Gateway) SetProductionMode(enabled bool) { g.productionMode = enabled }
 
 func (g *Gateway) RequestCount() uint64 { return g.requests.Load() }
 
@@ -273,6 +277,7 @@ type responseValidator struct {
 	schema      json.RawMessage
 	status      int
 	wroteHeader bool
+	passthrough bool
 	body        bytes.Buffer
 	overflow    bool
 }
@@ -283,21 +288,37 @@ func newResponseValidator(parent *captureWriter, document json.RawMessage) *resp
 
 func (w *responseValidator) Header() http.Header { return w.parent.Header() }
 func (w *responseValidator) WriteHeader(status int) {
-	if !w.wroteHeader {
-		w.status, w.wroteHeader = status, true
+	if w.wroteHeader {
+		return
+	}
+	w.status, w.wroteHeader = status, true
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		w.passthrough = true
+		w.parent.WriteHeader(status)
 	}
 }
 func (w *responseValidator) Write(body []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	if w.body.Len()+len(body) > maxSchemaBodyBytes {
+	if w.passthrough {
+		return w.parent.Write(body)
+	}
+	remaining := maxSchemaBodyBytes - w.body.Len()
+	if remaining < len(body) {
 		w.overflow = true
+		if remaining > 0 {
+			_, _ = w.body.Write(body[:remaining])
+		}
+		return len(body), nil
 	}
 	return w.body.Write(body)
 }
 func (w *responseValidator) Flush() { /* response validation intentionally buffers the response */ }
 func (w *responseValidator) Commit() error {
+	if w.passthrough {
+		return nil
+	}
 	if !w.wroteHeader {
 		w.status = http.StatusOK
 	}
@@ -358,6 +379,12 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, api model.API) {
 		writeJSONError(w, http.StatusBadGateway, "invalid upstream URL")
 		return
 	}
+	if g.productionMode && target.Scheme != "https" {
+		span.SetStatus(codes.Error, "insecure upstream URL")
+		g.breaker.Failure(api.ID, api.CircuitThreshold, api.CircuitResetSecs)
+		writeJSONError(w, http.StatusBadGateway, "production upstreams require HTTPS")
+		return
+	}
 	if api.UpstreamTimeoutMS > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(api.UpstreamTimeoutMS)*time.Millisecond)
@@ -399,13 +426,11 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, api model.API) {
 			decoded, _ := url.PathUnescape(escaped)
 			pr.Out.URL.Path, pr.Out.URL.RawPath = decoded, escaped
 		}
-		// Rewrite runs after hop-by-hop headers are removed. Do not forward client
-		// admin credentials, cookies or spoofed forwarding headers to the backend.
+		// Rewrite runs after hop-by-hop headers are removed. Gateway credentials
+		// authenticate the client only and must never cross the trust boundary.
 		pr.SetXForwarded()
-		pr.Out.Header.Del("X-Admin-Token")
+		stripGatewayCredentials(pr.Out.Header, api)
 		if api.UpstreamAuthRef != "" {
-			pr.Out.Header.Del("Authorization")
-			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Set("X-API-Key", key)
 		}
 		pr.Out.Header.Set("X-Request-ID", httpx.RequestIDFromContext(r.Context()))
@@ -439,6 +464,21 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, api model.API) {
 		writeJSONError(writer, http.StatusBadGateway, "upstream request failed")
 	}
 	proxy.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func stripGatewayCredentials(header http.Header, api model.API) {
+	names := []string{"Authorization", "Cookie", "X-API-Key", "X-Admin-Token", "X-Timestamp", "X-Nonce", "X-Signature"}
+	if strings.EqualFold(api.AuthMode, "hmac") {
+		if name := strings.TrimSpace(api.AuthConfig["timestamp_header"]); name != "" {
+			names = append(names, name)
+		}
+		if name := strings.TrimSpace(api.AuthConfig["signature_header"]); name != "" {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
+		header.Del(name)
+	}
 }
 
 func (g *Gateway) logRequest(r *http.Request, api model.API, w *captureWriter, started time.Time) {

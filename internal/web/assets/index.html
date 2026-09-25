@@ -15,14 +15,14 @@
         <p class="muted">使用管理员账号登录，统一管理接口、凭证、用户与角色。</p>
         <form id="login-form" class="form-stack">
           <label class="field"><span class="field-label">邮箱</span><input id="email" type="email" required autocomplete="email" placeholder="admin@example.com"></label>
-          <label class="field"><span class="field-label">密码</span><input id="password" type="password" required autocomplete="current-password" placeholder="至少 8 位"><span class="field-hint">使用已初始化的管理员账号。</span></label>
+          <label class="field"><span class="field-label">密码</span><input id="password" type="password" required autocomplete="current-password" minlength="12" maxlength="72" placeholder="12–72 字节"><span class="field-hint">使用已初始化的管理员账号。</span></label>
           <button type="submit">登录</button>
         </form>
         <details id="bootstrap-panel" class="bootstrap" hidden><summary>首次部署：初始化超级管理员</summary>
           <form id="bootstrap-form" class="form-stack">
             <label class="field"><span class="field-label">管理员 Token</span><input id="bootstrap-token" type="password" placeholder="ADMIN_TOKEN"><span class="field-hint">仅用于首次初始化，不会显示或保存。</span></label>
             <label class="field"><span class="field-label">邮箱</span><input id="bootstrap-email" type="email" required></label>
-            <label class="field"><span class="field-label">密码</span><input id="bootstrap-password" type="password" minlength="8" required></label>
+            <label class="field"><span class="field-label">密码</span><input id="bootstrap-password" type="password" minlength="12" maxlength="72" required></label>
             <button type="submit" class="secondary">初始化</button>
           </form>
         </details>

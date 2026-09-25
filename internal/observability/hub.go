@@ -511,6 +511,7 @@ func normalizedLimit(value, fallback, maximum int) int {
 func journalFiles(path string) []string { return []string{path + ".2", path + ".1", path} }
 
 func scanJSONLines(path string, visit func([]byte)) error {
+	// #nosec G304 -- path is an internal journal path joined to the operator-configured observability directory.
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -535,7 +536,8 @@ type rollingJournal struct {
 }
 
 func newRollingJournal(path string, maxBytes int64) (*rollingJournal, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	// #nosec G304 -- path is an internal journal path joined to the operator-configured observability directory.
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open embedded observability journal: %w", err)
 	}
@@ -576,7 +578,7 @@ func (j *rollingJournal) rotate() error {
 			return err
 		}
 	}
-	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

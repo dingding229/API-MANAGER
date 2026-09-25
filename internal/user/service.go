@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -15,6 +16,13 @@ import (
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
+
+const passwordHashCost = 12
+
+var dummyPasswordHash = func() []byte {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("api-manager-dummy-password"), passwordHashCost)
+	return hash
+}()
 
 type Store interface {
 	CreateUser(model.User) error
@@ -72,8 +80,9 @@ func (s *Service) Create(email, password, role string) (model.User, error) {
 
 func (s *Service) CreateWithRoles(email, password string, roles []string) (model.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if !strings.Contains(email, "@") || len(password) < 8 {
-		return model.User{}, errors.New("valid email and password with at least 8 characters are required")
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email || len(email) > 254 || len(password) < 12 || len(password) > 72 {
+		return model.User{}, errors.New("valid email and password with 12 to 72 bytes are required")
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
@@ -84,7 +93,7 @@ func (s *Service) CreateWithRoles(email, password string, roles []string) (model
 			return model.User{}, fmt.Errorf("unknown role %q", role)
 		}
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), passwordHashCost)
 	if err != nil {
 		return model.User{}, fmt.Errorf("hash password: %w", err)
 	}
@@ -100,8 +109,13 @@ func (s *Service) Authenticate(email, password string) (model.User, string, erro
 	if !s.Enabled() {
 		return model.User{}, "", errors.New("user authentication is disabled")
 	}
-	user, err := s.store.GetUserByEmail(strings.ToLower(strings.TrimSpace(email)))
-	if err != nil || user.Status != "active" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+	user, lookupErr := s.store.GetUserByEmail(strings.ToLower(strings.TrimSpace(email)))
+	hash := []byte(user.PasswordHash)
+	if lookupErr != nil || len(hash) == 0 {
+		hash = dummyPasswordHash
+	}
+	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(password))
+	if lookupErr != nil || user.Status != "active" || passwordErr != nil {
 		return model.User{}, "", ErrInvalidCredentials
 	}
 	now := time.Now()

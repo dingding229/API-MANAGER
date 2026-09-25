@@ -12,8 +12,9 @@ import stat
 from urllib.parse import urlsplit, parse_qs
 
 IMAGE = re.compile(r"^[^\s@]+@sha256:[0-9a-f]{64}$")
+SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
 FILES = ("admin_token", "user_jwt_secret", "credential_encryption_key",
-         "metrics_token", "postgres_dsn", "redis_password")
+         "metrics_token", "grafana_admin_password", "postgres_dsn", "redis_password")
 
 
 def validate(environ, project_root):
@@ -51,9 +52,10 @@ def validate(environ, project_root):
         if not values[name] or "\x00" in values[name]:
             errors.append(f"{name} must contain a non-empty text value")
 
-    app_secrets = [values.get(n, "") for n in FILES[:4]]
-    if any(len(s) < 32 for s in app_secrets) or len(set(app_secrets)) != 4:
-        errors.append("application and metrics secrets must be distinct and at least 32 characters")
+    secret_names = ("admin_token", "user_jwt_secret", "credential_encryption_key", "metrics_token", "grafana_admin_password")
+    app_secrets = [values.get(n, "") for n in secret_names]
+    if any(len(s) < 32 for s in app_secrets) or len(set(app_secrets)) != len(app_secrets):
+        errors.append("application, metrics, and Grafana secrets must be distinct and at least 32 characters")
     redis_password = values.get("redis_password", "")
     if not redis_password or redis_password in app_secrets:
         errors.append("Redis password must be non-empty and distinct from application secrets")
@@ -77,6 +79,11 @@ def validate(environ, project_root):
             raise ValueError
     except ValueError:
         errors.append("PROD_REDIS_ADDR must be a non-loopback host:port for Redis TLS")
+    if environ.get("PROD_OBSERVABILITY_STACK_ENABLED", "").lower() in ("1", "true", "yes"):
+        match = SIZE.fullmatch(environ.get("PROD_API_MEMORY_LIMIT", ""))
+        multipliers = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
+        if not match or int(match.group(1)) * multipliers[match.group(2).lower()] < 2 << 30:
+            errors.append("the full observability stack requires PROD_API_MEMORY_LIMIT of at least 2g")
     return errors
 
 

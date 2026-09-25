@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,8 +27,11 @@ import (
 	apiSchema "api-manager/internal/schema"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
+	"golang.org/x/net/http/httpguts"
 	"gopkg.in/yaml.v3"
 )
+
+var authSecretEnvironment = regexp.MustCompile(`^API_AUTH_[A-Z0-9_]{1,64}$`)
 
 type UserManager interface {
 	ValidateToken(string) (model.User, error)
@@ -52,6 +56,7 @@ type Admin struct {
 	credentialEncryptionKey string
 	observabilityHub        *observability.Hub
 	metrics                 *observability.Metrics
+	productionMode          bool
 }
 
 func NewAdmin(s store.Store, plugins *plugin.Registry, adminToken string, logger *slog.Logger) *Admin {
@@ -66,6 +71,7 @@ func NewAdminWithUserAuthAndPluginManager(s store.Store, plugins *plugin.Registr
 	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userAuth: userAuth, pluginManager: pluginManager, logger: logger, auditor: audit.New(s, logger)}
 }
 func (a *Admin) SetAdminTokenAPIEnabled(enabled bool) { a.adminTokenAPIEnabled = enabled }
+func (a *Admin) SetProductionMode(enabled bool)       { a.productionMode = enabled }
 
 func (a *Admin) SetCredentialEncryptionKey(secret string) {
 	if strings.TrimSpace(secret) != "" {
@@ -277,7 +283,7 @@ func (a *Admin) createAPI(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if err := validateAPIRequest(request); err != nil {
+	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -311,7 +317,7 @@ func (a *Admin) updateAPI(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if err := validateAPIRequest(request); err != nil {
+	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -624,7 +630,9 @@ func (a *Admin) uploadPlugin(w http.ResponseWriter, r *http.Request) {
 	// ParseMultipartForm's argument only limits memory buffering, not total body size.
 	// Bound the whole multipart request (file payload plus headers/form overhead).
 	r.Body = http.MaxBytesReader(w, r.Body, a.pluginManager.MaxUploadBytes()+(64<<10))
-	if err := r.ParseMultipartForm(a.pluginManager.MaxUploadBytes()); err != nil {
+	// Keep multipart metadata in memory, but spool large plugin files to /tmp.
+	// #nosec G120 -- the whole body is capped above and file parts spill to bounded /tmp storage.
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart plugin upload"})
 		return
 	}
@@ -643,7 +651,7 @@ func (a *Admin) uploadPlugin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer wasmFile.Close()
-	manifestBytes, err := io.ReadAll(io.LimitReader(manifestFile, a.pluginManager.MaxUploadBytes()+1))
+	manifestBytes, err := io.ReadAll(io.LimitReader(manifestFile, a.pluginManager.MaxManifestBytes()+1))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read manifest failed"})
 		return
@@ -1072,7 +1080,7 @@ func (a *Admin) importOpenAPI(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			validationRequest := model.CreateAPIRequest{Name: api.Name, Method: api.Method, Path: api.Path, AuthMode: api.AuthMode, AuthConfig: api.AuthConfig, UpstreamURL: api.UpstreamURL, ResponseStatus: api.ResponseStatus, RequestSchema: api.RequestSchema, ResponseSchema: api.ResponseSchema}
-			if err := validateAPIRequest(validationRequest); err != nil {
+			if err := validateAPIRequest(validationRequest, a.productionMode); err != nil {
 				errorsList = append(errorsList, map[string]string{"path": path, "method": method, "error": err.Error()})
 				continue
 			}
@@ -1358,7 +1366,7 @@ func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, update
 	return model.API{ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: strings.ToLower(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
-func validateAPIRequest(request model.CreateAPIRequest) error {
+func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) error {
 	if err := upstream.ValidatePath(request.Path, request.UpstreamPath); err != nil {
 		return err
 	}
@@ -1377,11 +1385,37 @@ func validateAPIRequest(request model.CreateAPIRequest) error {
 	if request.AuthMode != "" && request.AuthMode != "none" && request.AuthMode != "api_key" && request.AuthMode != "jwt" && request.AuthMode != "hmac" {
 		return errors.New("auth_mode must be none, api_key, jwt, or hmac")
 	}
-	if request.AuthMode == "jwt" && (strings.TrimSpace(request.AuthConfig["issuer"]) == "" || strings.TrimSpace(request.AuthConfig["audience"]) == "") {
-		return errors.New("jwt auth requires issuer and audience")
+	if request.AuthMode == "jwt" {
+		if strings.TrimSpace(request.AuthConfig["issuer"]) == "" || strings.TrimSpace(request.AuthConfig["audience"]) == "" {
+			return errors.New("jwt auth requires issuer and audience")
+		}
+		secretEnv := request.AuthConfig["secret_env"]
+		if secretEnv == "" {
+			// #nosec G101 -- this is an environment variable name, not a credential value.
+			secretEnv = "API_AUTH_JWT_HS256_SECRET"
+		}
+		if !authSecretEnvironment.MatchString(secretEnv) {
+			return errors.New("jwt secret_env must use the API_AUTH_ namespace")
+		}
 	}
-	if request.AuthMode == "hmac" && strings.TrimSpace(request.AuthConfig["secret_env"]) == "" {
-		return errors.New("hmac auth requires secret_env")
+	if request.AuthMode == "hmac" {
+		if !authSecretEnvironment.MatchString(strings.TrimSpace(request.AuthConfig["secret_env"])) {
+			return errors.New("hmac auth requires an API_AUTH_ secret_env")
+		}
+		timestampHeader := strings.TrimSpace(request.AuthConfig["timestamp_header"])
+		if timestampHeader == "" {
+			timestampHeader = "X-Timestamp"
+		}
+		signatureHeader := strings.TrimSpace(request.AuthConfig["signature_header"])
+		if signatureHeader == "" {
+			signatureHeader = "X-Signature"
+		}
+		if !httpguts.ValidHeaderFieldName(timestampHeader) || !httpguts.ValidHeaderFieldName(signatureHeader) {
+			return errors.New("hmac timestamp_header and signature_header must be valid HTTP header names")
+		}
+		if strings.EqualFold(timestampHeader, signatureHeader) || strings.EqualFold(timestampHeader, "X-Nonce") || strings.EqualFold(signatureHeader, "X-Nonce") {
+			return errors.New("hmac timestamp_header, signature_header, and X-Nonce must be distinct")
+		}
 	}
 	if request.ResponseStatus != 0 && (request.ResponseStatus < 100 || request.ResponseStatus > 599) {
 		return errors.New("response_status must be between 100 and 599")
@@ -1393,6 +1427,9 @@ func validateAPIRequest(request model.CreateAPIRequest) error {
 		parsed, err := url.ParseRequestURI(request.UpstreamURL)
 		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return errors.New("upstream_url must be a valid http or https URL")
+		}
+		if productionMode && parsed.Scheme != "https" {
+			return errors.New("production upstream_url must use https")
 		}
 	}
 	if err := apiSchema.ValidateSchema(request.RequestSchema); err != nil {

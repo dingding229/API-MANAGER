@@ -1,0 +1,85 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func setValidTestEnvironment(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"ADMIN_TOKEN", "ADMIN_TOKEN_FILE", "USER_JWT_SECRET", "USER_JWT_SECRET_FILE",
+		"CREDENTIAL_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY_FILE", "POSTGRES_DSN", "POSTGRES_DSN_FILE",
+		"REDIS_PASSWORD", "REDIS_PASSWORD_FILE", "API_UPSTREAM_CREDENTIALS", "API_UPSTREAM_CREDENTIALS_FILE",
+		"METRICS_TOKEN", "METRICS_TOKEN_FILE", "GRAFANA_ADMIN_PASSWORD", "GRAFANA_ADMIN_PASSWORD_FILE",
+		"PRODUCTION_MODE", "USE_REDIS", "REDIS_TLS_ENABLED", "OBSERVABILITY_STACK_ENABLED",
+		"PLUGIN_DATABASE_WRITES_ENABLED", "OTEL_ENABLED", "OTEL_EXPORTER_OTLP_INSECURE",
+		"SHUTDOWN_TIMEOUT", "USER_JWT_TTL", "MAX_BODY_BYTES", "PLUGIN_MAX_BYTES",
+		"OBSERVABILITY_FILE_MAX_BYTES", "REDIS_DB", "OBSERVABILITY_MAX_LOGS", "OBSERVABILITY_MAX_TRACES",
+		"REDIS_ADDR",
+	} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("ADMIN_TOKEN", strings.Repeat("a", 32))
+	t.Setenv("USER_JWT_SECRET", strings.Repeat("b", 32))
+	t.Setenv("CREDENTIAL_ENCRYPTION_KEY", strings.Repeat("c", 32))
+}
+
+func TestLoadRejectsMalformedTypedEnvironment(t *testing.T) {
+	cases := []struct{ name, value string }{
+		{"PRODUCTION_MODE", "sometimes"},
+		{"PLUGIN_DATABASE_WRITES_ENABLED", "sometimes"},
+		{"MAX_BODY_BYTES", "one-megabyte"},
+		{"REDIS_DB", "zero"},
+		{"SHUTDOWN_TIMEOUT", "soon"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setValidTestEnvironment(t)
+			t.Setenv(tc.name, tc.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted malformed %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnsafeResourceLimits(t *testing.T) {
+	setValidTestEnvironment(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxBodyBytes = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate accepted an unsafe body limit")
+	}
+}
+
+func TestSecretReadsKubernetesStyleRelativeSymlinks(t *testing.T) {
+	root := t.TempDir()
+	version := filepath.Join(root, "..2026_09_25_00_00_00")
+	if err := os.Mkdir(version, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(version, "ADMIN_TOKEN"), []byte(strings.Repeat("k", 32)+"\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Base(version), filepath.Join(root, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..data/ADMIN_TOKEN", filepath.Join(root, "ADMIN_TOKEN")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ADMIN_TOKEN", "")
+	t.Setenv("ADMIN_TOKEN_FILE", filepath.Join(root, "ADMIN_TOKEN"))
+	value, err := secret("ADMIN_TOKEN")
+	if err != nil {
+		t.Fatalf("read projected secret: %v", err)
+	}
+	if value != strings.Repeat("k", 32) {
+		t.Fatal("projected secret value did not match")
+	}
+}

@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -171,7 +173,12 @@ func ParseManifest(data []byte) (Manifest, error) {
 // The handle result packs the response pointer in its high 32 bits and response
 // length in its low 32 bits. The response is JSON matching wasmResponse.
 func (r *Registry) LoadWASMDirectory(ctx context.Context, directory string) error {
-	manifestBytes, err := os.ReadFile(filepath.Join(directory, "manifest.yaml"))
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return fmt.Errorf("open plugin directory: %w", err)
+	}
+	defer root.Close()
+	manifestBytes, err := fs.ReadFile(root.FS(), "manifest.yaml")
 	if err != nil {
 		return fmt.Errorf("read plugin manifest: %w", err)
 	}
@@ -179,7 +186,7 @@ func (r *Registry) LoadWASMDirectory(ctx context.Context, directory string) erro
 	if err != nil {
 		return err
 	}
-	wasmBytes, err := os.ReadFile(filepath.Join(directory, manifest.Entrypoint))
+	wasmBytes, err := fs.ReadFile(root.FS(), manifest.Entrypoint)
 	if err != nil {
 		return fmt.Errorf("read wasm module: %w", err)
 	}
@@ -194,8 +201,12 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 	}
 	runtimeConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
 	if manifest.Limits.MemoryMB > 0 {
-		pages := uint32((manifest.Limits.MemoryMB*1024*1024 + 65535) / 65536)
-		runtimeConfig = runtimeConfig.WithMemoryLimitPages(pages)
+		// #nosec G115 -- ParseManifest bounds MemoryMB to 1..256 before this conversion.
+		pages64 := uint64((manifest.Limits.MemoryMB*1024*1024 + 65535) / 65536)
+		if pages64 > math.MaxUint32 {
+			return errors.New("plugin memory limit exceeds runtime maximum")
+		}
+		runtimeConfig = runtimeConfig.WithMemoryLimitPages(uint32(pages64))
 	}
 	runtime := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
 	// WASI provides clocks/random and stdio to Go reactor modules, without
@@ -206,7 +217,7 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 	}
 	compiled, err := runtime.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		runtime.Close(ctx)
+		_ = runtime.Close(ctx)
 		return fmt.Errorf("compile wasm module: %w", err)
 	}
 	if err := validateWASMABI(compiled); err != nil {
@@ -238,46 +249,6 @@ func validateWASMABI(compiled wazero.CompiledModule) error {
 		allocParams[0] != api.ValueTypeI32 || allocResults[0] != api.ValueTypeI32 ||
 		handleParams[0] != api.ValueTypeI32 || handleParams[1] != api.ValueTypeI32 || handleResults[0] != api.ValueTypeI64 {
 		return errors.New("wasm plugin exports do not match the required ABI")
-	}
-	return nil
-}
-
-func (r *Registry) LoadWASMPlugins(ctx context.Context, root string) error {
-	if root == "" {
-		return nil
-	}
-	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	var failures []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || entry.Name() != "manifest.yaml" {
-			return nil
-		}
-		manifestBytes, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		var manifest Manifest
-		if err := yaml.Unmarshal(manifestBytes, &manifest); err != nil {
-			return err
-		}
-		if manifest.Runtime != "wasm" {
-			return nil
-		}
-		if err := r.LoadWASMDirectory(ctx, filepath.Dir(path)); err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", filepath.Dir(path), err))
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if len(failures) > 0 {
-		return errors.New(strings.Join(failures, "; "))
 	}
 	return nil
 }
@@ -316,6 +287,10 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 	if err != nil || len(allocation) != 1 {
 		return fmt.Errorf("wasm alloc failed: %w", err)
 	}
+	if allocation[0] > math.MaxUint32 {
+		return errors.New("wasm alloc returned an invalid pointer")
+	}
+	// #nosec G115 -- the explicit MaxUint32 check above makes this conversion safe.
 	requestPtr := uint32(allocation[0])
 	if !memory.Write(requestPtr, payload) {
 		return errors.New("wasm memory write failed")
@@ -324,7 +299,11 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 	if err != nil || len(result) != 1 {
 		return fmt.Errorf("wasm handle failed: %w", err)
 	}
-	responsePtr, responseLen := uint32(result[0]>>32), uint32(result[0])
+	responsePtr64, responseLen64 := result[0]>>32, result[0]&math.MaxUint32
+	if responsePtr64 > math.MaxUint32 || responseLen64 > 2<<20 {
+		return errors.New("wasm response pointer or length is invalid")
+	}
+	responsePtr, responseLen := uint32(responsePtr64), uint32(responseLen64)
 	if responseLen > 2<<20 {
 		return errors.New("wasm response exceeds 2 MiB")
 	}

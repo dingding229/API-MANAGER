@@ -33,9 +33,6 @@ for path in tests docs migrations integrations plugins/examples cmd/rotate-crede
   [ ! -e "$path" ] || fail "$path is not part of the release repository"
 done
 
-test_files=$(find . -path './.git' -prune -o -type f \( -name '*_test.go' -o -name '*.test.cjs' -o -name 'test_*.py' \) -print)
-[ -z "$test_files" ] || fail "test sources are not allowed:\n$test_files"
-
 wasm_files=$(find . -path './.git' -prune -o -type f -name '*.wasm' -print)
 [ -z "$wasm_files" ] || fail "bundled WASM modules are not allowed:\n$wasm_files"
 

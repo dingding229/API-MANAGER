@@ -3,8 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -47,13 +49,6 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	for _, name := range []string{"PRODUCTION_MODE", "USE_REDIS", "REDIS_TLS_ENABLED", "OBSERVABILITY_STACK_ENABLED"} {
-		if value := os.Getenv(name); value != "" {
-			if _, err := strconv.ParseBool(value); err != nil {
-				return Config{}, fmt.Errorf("invalid boolean for %s: %w", name, err)
-			}
-		}
-	}
 	secrets := make(map[string]string)
 	for _, name := range []string{"ADMIN_TOKEN", "USER_JWT_SECRET", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
 		value, err := secret(name)
@@ -62,40 +57,103 @@ func Load() (Config, error) {
 		}
 		secrets[name] = value
 	}
+
+	redisAddr := env("REDIS_ADDR", "redis:6379")
+	productionMode, err := envBool("PRODUCTION_MODE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	redisTLS, err := envBool("REDIS_TLS_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	useRedis, err := envBool("USE_REDIS", os.Getenv("REDIS_ADDR") != "")
+	if err != nil {
+		return Config{}, err
+	}
+	pluginDatabaseWrites, err := envBool("PLUGIN_DATABASE_WRITES_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	otelEnabled, err := envBool("OTEL_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	otlpInsecure, err := envBool("OTEL_EXPORTER_OTLP_INSECURE", true)
+	if err != nil {
+		return Config{}, err
+	}
+	stackEnabled, err := envBool("OBSERVABILITY_STACK_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	shutdownTimeout, err := envDuration("SHUTDOWN_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	userJWTTTL, err := envDuration("USER_JWT_TTL", 12*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	maxBodyBytes, err := envInt64("MAX_BODY_BYTES", 1<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	pluginMaxBytes, err := envInt64("PLUGIN_MAX_BYTES", 20<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	observabilityFileBytes, err := envInt64("OBSERVABILITY_FILE_MAX_BYTES", 16<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	redisDB, err := envInt("REDIS_DB", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	observabilityMaxLogs, err := envInt("OBSERVABILITY_MAX_LOGS", 5000)
+	if err != nil {
+		return Config{}, err
+	}
+	observabilityMaxTraces, err := envInt("OBSERVABILITY_MAX_TRACES", 2000)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
 		AdminToken:                secrets["ADMIN_TOKEN"],
-		ProductionMode:            envBool("PRODUCTION_MODE", false),
+		ProductionMode:            productionMode,
 		MetricsToken:              secrets["METRICS_TOKEN"],
-		ShutdownTimeout:           envDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		MaxBodyBytes:              envInt64("MAX_BODY_BYTES", 1<<20),
+		ShutdownTimeout:           shutdownTimeout,
+		MaxBodyBytes:              maxBodyBytes,
 		LogLevel:                  env("LOG_LEVEL", "info"),
 		PostgresDSN:               secrets["POSTGRES_DSN"],
-		RedisAddr:                 env("REDIS_ADDR", "redis:6379"),
+		RedisAddr:                 redisAddr,
 		RedisPassword:             secrets["REDIS_PASSWORD"],
 		RedisUsername:             os.Getenv("REDIS_USERNAME"),
-		RedisTLS:                  envBool("REDIS_TLS_ENABLED", false),
-		RedisDB:                   envInt("REDIS_DB", 0),
-		UseRedis:                  envBool("USE_REDIS", os.Getenv("REDIS_ADDR") != ""),
+		RedisTLS:                  redisTLS,
+		RedisDB:                   redisDB,
+		UseRedis:                  useRedis,
 		UserJWTSecret:             secrets["USER_JWT_SECRET"],
-		UserJWTTTL:                envDuration("USER_JWT_TTL", 12*time.Hour),
+		UserJWTTTL:                userJWTTTL,
 		PluginDir:                 env("PLUGIN_DIR", "plugins"),
-		PluginMaxBytes:            envInt64("PLUGIN_MAX_BYTES", 20<<20),
-		PluginDatabaseWrites:      envBool("PLUGIN_DATABASE_WRITES_ENABLED", false),
+		PluginMaxBytes:            pluginMaxBytes,
+		PluginDatabaseWrites:      pluginDatabaseWrites,
 		PluginLibraryDir:          env("PLUGIN_LIBRARY_DIR", "plugin-library"),
 		CredentialEncryptionKey:   secrets["CREDENTIAL_ENCRYPTION_KEY"],
 		CORSOrigins:               env("CORS_ORIGINS", ""),
-		OTELEnabled:               envBool("OTEL_ENABLED", false),
+		OTELEnabled:               otelEnabled,
 		OTELServiceName:           env("OTEL_SERVICE_NAME", "api-manager"),
 		OTLPEndpoint:              env("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-		OTLPInsecure:              envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
+		OTLPInsecure:              otlpInsecure,
 		ObservabilityDir:          env("OBSERVABILITY_DIR", "data/observability"),
-		ObservabilityStackEnabled: envBool("OBSERVABILITY_STACK_ENABLED", false),
+		ObservabilityStackEnabled: stackEnabled,
 		GrafanaAdminPassword:      secrets["GRAFANA_ADMIN_PASSWORD"],
-		ObservabilityMaxLogs:      envInt("OBSERVABILITY_MAX_LOGS", 5000),
-		ObservabilityMaxTraces:    envInt("OBSERVABILITY_MAX_TRACES", 2000),
-		ObservabilityFileBytes:    envInt64("OBSERVABILITY_FILE_MAX_BYTES", 16<<20),
+		ObservabilityMaxLogs:      observabilityMaxLogs,
+		ObservabilityMaxTraces:    observabilityMaxTraces,
+		ObservabilityFileBytes:    observabilityFileBytes,
 	}, nil
 }
 
@@ -109,16 +167,29 @@ func secret(name string) (string, error) {
 	if file == "" {
 		return value, nil
 	}
-	info, err := os.Stat(file)
+	if !filepath.IsAbs(file) || filepath.Base(file) == "." {
+		return "", fmt.Errorf("%s_FILE must be an absolute file path", name)
+	}
+	root, err := os.OpenRoot(filepath.Dir(file))
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE: %w", name, err)
+	}
+	defer root.Close()
+	secretFile, err := root.Open(filepath.Base(file))
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE: %w", name, err)
+	}
+	defer secretFile.Close()
+	info, err := secretFile.Stat()
 	if err != nil {
 		return "", fmt.Errorf("read %s_FILE: %w", name, err)
 	}
 	if !info.Mode().IsRegular() || info.Size() > 64<<10 {
 		return "", fmt.Errorf("%s_FILE must be a regular file of at most 64 KiB", name)
 	}
-	contents, err := os.ReadFile(file)
-	if err != nil {
-		return "", fmt.Errorf("read %s_FILE: %w", name, err)
+	contents, err := io.ReadAll(io.LimitReader(secretFile, (64<<10)+1))
+	if err != nil || len(contents) > 64<<10 {
+		return "", fmt.Errorf("read %s_FILE: invalid or oversized secret", name)
 	}
 	result := strings.TrimRight(string(contents), "\r\n")
 	if result == "" || strings.ContainsRune(result, 0) {
@@ -163,8 +234,26 @@ func (c Config) Validate() error {
 			return errors.New("production requires a distinct METRICS_TOKEN of at least 32 characters")
 		}
 	}
-	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.UserJWTSecret || c.GrafanaAdminPassword == c.CredentialEncryptionKey) {
+	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.UserJWTSecret || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
 		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
+	}
+	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 5*time.Minute {
+		return errors.New("SHUTDOWN_TIMEOUT must be between 1 second and 5 minutes")
+	}
+	if c.MaxBodyBytes < 1024 || c.MaxBodyBytes > 100<<20 {
+		return errors.New("MAX_BODY_BYTES must be between 1 KiB and 100 MiB")
+	}
+	if c.PluginMaxBytes < 1<<20 || c.PluginMaxBytes > 100<<20 {
+		return errors.New("PLUGIN_MAX_BYTES must be between 1 MiB and 100 MiB")
+	}
+	if c.RedisDB < 0 || c.RedisDB > 1024 {
+		return errors.New("REDIS_DB must be between 0 and 1024")
+	}
+	if c.LogLevel != "debug" && c.LogLevel != "info" && c.LogLevel != "warn" && c.LogLevel != "error" {
+		return errors.New("LOG_LEVEL must be debug, info, warn, or error")
+	}
+	if strings.TrimSpace(c.OTELServiceName) == "" {
+		return errors.New("OTEL_SERVICE_NAME must not be empty")
 	}
 	if c.UserJWTTTL <= 0 || c.UserJWTTTL > 24*time.Hour {
 		return errors.New("USER_JWT_TTL must be between 1 second and 24 hours")
@@ -186,47 +275,50 @@ func env(key, fallback string) string {
 	}
 	return fallback
 }
-func envDuration(key string, fallback time.Duration) time.Duration {
+func envDuration(key string, fallback time.Duration) (time.Duration, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid duration for %s: %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }
-func envInt64(key string, fallback int64) int64 {
+
+func envInt64(key string, fallback int64) (int64, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid integer for %s: %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }
-func envInt(key string, fallback int) int {
+
+func envInt(key string, fallback int) (int, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return fallback
+		return 0, fmt.Errorf("invalid integer for %s: %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }
-func envBool(key string, fallback bool) bool {
+
+func envBool(key string, fallback bool) (bool, error) {
 	value := os.Getenv(key)
 	if value == "" {
-		return fallback
+		return fallback, nil
 	}
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
-		return fallback
+		return false, fmt.Errorf("invalid boolean for %s: %w", key, err)
 	}
-	return parsed
+	return parsed, nil
 }

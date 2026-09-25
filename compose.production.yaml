@@ -40,8 +40,7 @@ services:
       PLUGIN_DATABASE_WRITES_ENABLED: "false"
       OBSERVABILITY_DIR: /data/observability
       OBSERVABILITY_STACK_ENABLED: ${PROD_OBSERVABILITY_STACK_ENABLED:-false}
-      GRAFANA_ADMIN_PASSWORD: ${PROD_GRAFANA_ADMIN_PASSWORD:-}
-      GRAFANA_ADMIN_PASSWORD_FILE: ${PROD_GRAFANA_ADMIN_PASSWORD_FILE:-}
+      GRAFANA_ADMIN_PASSWORD_FILE: /run/secrets/grafana_admin_password
       OBSERVABILITY_MAX_LOGS: ${PROD_OBSERVABILITY_MAX_LOGS:-10000}
       OBSERVABILITY_MAX_TRACES: ${PROD_OBSERVABILITY_MAX_TRACES:-5000}
       OBSERVABILITY_FILE_MAX_BYTES: ${PROD_OBSERVABILITY_FILE_MAX_BYTES:-67108864}
@@ -55,6 +54,7 @@ services:
       - postgres_dsn
       - redis_password
       - metrics_token
+      - grafana_admin_password
     volumes:
       - plugin_data:/data/plugins
       - plugin_library:/data/plugin-library
@@ -84,6 +84,8 @@ secrets:
     file: ${PROD_SECRETS_DIR:?Set a private absolute directory}/redis_password
   metrics_token:
     file: ${PROD_SECRETS_DIR:?Set a private absolute directory}/metrics_token
+  grafana_admin_password:
+    file: ${PROD_SECRETS_DIR:?Set a private absolute directory}/grafana_admin_password
 
 volumes:
   plugin_data:

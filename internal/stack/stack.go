@@ -59,6 +59,9 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 	if options.BinaryDir == "" {
 		options.BinaryDir = "/usr/local/bin"
 	}
+	if !safePath.MatchString(options.BinaryDir) || strings.Contains(options.BinaryDir, "..") {
+		return nil, errors.New("observability binary directory must be an absolute safe path")
+	}
 	for _, name := range []string{"loki", "tempo", "alertmanager", "prometheus", "alloy", "grafana"} {
 		if _, err := os.Stat(filepath.Join(options.BinaryDir, name)); err != nil {
 			return nil, fmt.Errorf("%s not installed in image: %w", name, err)
@@ -107,8 +110,6 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 		{"alloy", []string{"run", filepath.Join(configDir, "alloy.alloy"), "--storage.path=" + filepath.Join(options.Directory, "alloy"), "--server.http.listen-addr=127.0.0.1:12345"}, nil},
 		{"grafana", []string{"server", "--homepath=/usr/share/grafana", "--config=/etc/grafana/grafana.ini"}, []string{
 			"GF_PATHS_HOME=/usr/share/grafana", "GF_PATHS_CONFIG=/etc/grafana/grafana.ini", "GF_PATHS_DATA=" + filepath.Join(options.Directory, "grafana"),
-			filepath.Join(options.Directory, "grafana", "plugins"),
-			filepath.Join(options.Directory, "grafana", "log"),
 			"GF_PATHS_LOGS=" + filepath.Join(options.Directory, "grafana", "log"), "GF_PATHS_PLUGINS=" + filepath.Join(options.Directory, "grafana", "plugins"),
 			"GF_PATHS_PROVISIONING=" + filepath.Join(configDir, "grafana", "provisioning"),
 			"GF_SERVER_HTTP_ADDR=0.0.0.0", "GF_SERVER_HTTP_PORT=3000", "GF_SECURITY_ADMIN_PASSWORD=" + options.GrafanaPassword,
@@ -116,6 +117,7 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 		}},
 	}
 	for _, item := range services {
+		// #nosec G204 -- executable names are from the fixed service table and BinaryDir is validated above.
 		cmd := exec.Command(filepath.Join(options.BinaryDir, item.name), item.args...)
 		cmd.Env = append(os.Environ(), item.env...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

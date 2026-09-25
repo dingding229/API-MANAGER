@@ -58,3 +58,23 @@ func CORS(origins string, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// LimitRequestBody applies the normal request limit to every route while
+// allowing the authenticated plugin upload endpoint its separately bounded size.
+func LimitRequestBody(maxBodyBytes, maxPluginUploadBytes int64, next http.Handler) http.Handler {
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = 1 << 20
+	}
+	if maxPluginUploadBytes < maxBodyBytes {
+		maxPluginUploadBytes = maxBodyBytes
+	}
+	normal := http.MaxBytesHandler(next, maxBodyBytes)
+	pluginUpload := http.MaxBytesHandler(next, maxPluginUploadBytes)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/admin/v1/plugins" {
+			pluginUpload.ServeHTTP(w, r)
+			return
+		}
+		normal.ServeHTTP(w, r)
+	})
+}

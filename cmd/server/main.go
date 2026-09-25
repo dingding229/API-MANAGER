@@ -40,6 +40,7 @@ func main() {
 		if err != nil || port == "" || strings.ContainsAny(port, "/ ") {
 			os.Exit(1)
 		}
+		// #nosec G704 -- the URL is fixed to loopback and the port came from SplitHostPort.
 		response, err := client.Get("http://127.0.0.1:" + port + "/health/live")
 		if err != nil {
 			os.Exit(1)
@@ -119,6 +120,7 @@ func main() {
 	}
 	admin := api.NewAdminWithUserAuthAndPluginManager(activeStore, plugins, cfg.AdminToken, userService, pluginManager, logger)
 	admin.SetCredentialEncryptionKey(cfg.CredentialEncryptionKey)
+	admin.SetProductionMode(cfg.ProductionMode)
 	if cfg.ProductionMode {
 		admin.SetAdminTokenAPIEnabled(false) // Bootstrap still uses the token once, separately.
 	}
@@ -127,6 +129,7 @@ func main() {
 	authHandler := user.NewHTTP(userService, cfg.AdminToken)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
+	gatewayHandler.SetProductionMode(cfg.ProductionMode)
 
 	ready := func(ctx context.Context) error {
 		if health, ok := activeStore.(store.HealthStore); ok {
@@ -162,7 +165,7 @@ func main() {
 	})
 	mux.Handle("/metrics", httpx.ProtectMetrics(metrics, cfg.MetricsToken))
 
-	handler := http.MaxBytesHandler(mux, max(cfg.MaxBodyBytes, cfg.PluginMaxBytes))
+	handler := httpx.LimitRequestBody(cfg.MaxBodyBytes, cfg.PluginMaxBytes+(64<<10), mux)
 	handler = httpx.ThrottleAdmin(limiter, handler)
 	handler = loggingMiddleware(logger, handler)
 	handler = metrics.Middleware(handler)
@@ -179,7 +182,7 @@ func main() {
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	serverErr := make(chan error, 1)

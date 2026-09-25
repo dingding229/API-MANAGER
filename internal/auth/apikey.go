@@ -11,8 +11,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"api-manager/internal/model"
@@ -20,8 +23,10 @@ import (
 )
 
 var (
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrForbidden         = errors.New("forbidden")
+	authSecretEnv        = regexp.MustCompile(`^API_AUTH_[A-Z0-9_]{1,64}$`)
+	authSecretFileValues sync.Map
 )
 
 func ExtractAPIKey(value string) string {
@@ -91,10 +96,13 @@ func StatusCode(err error) int {
 }
 
 func validateJWT(api model.API, r *http.Request) error {
-	secretEnv := configValue(api.AuthConfig, "secret_env", "JWT_HS256_SECRET")
-	secret := os.Getenv(secretEnv)
-	if secret == "" {
-		return fmt.Errorf("jwt secret is not configured")
+	secretEnv := configValue(api.AuthConfig, "secret_env", "API_AUTH_JWT_HS256_SECRET")
+	if !authSecretEnv.MatchString(secretEnv) {
+		return fmt.Errorf("jwt secret_env must use the API_AUTH_ namespace")
+	}
+	secret, err := authSecret(secretEnv)
+	if err != nil {
+		return fmt.Errorf("jwt secret is not configured: %w", err)
 	}
 	tokenString := ExtractAPIKey(r.Header.Get("Authorization"))
 	if tokenString == "" {
@@ -136,12 +144,12 @@ func validateJWT(api model.API, r *http.Request) error {
 
 func validateHMAC(api model.API, r *http.Request) error {
 	secretEnv := configValue(api.AuthConfig, "secret_env", "")
-	if secretEnv == "" {
-		return fmt.Errorf("hmac secret_env is not configured")
+	if !authSecretEnv.MatchString(secretEnv) {
+		return fmt.Errorf("hmac secret_env must use the API_AUTH_ namespace")
 	}
-	secret := os.Getenv(secretEnv)
-	if secret == "" {
-		return fmt.Errorf("hmac secret is not configured")
+	secret, err := authSecret(secretEnv)
+	if err != nil {
+		return fmt.Errorf("hmac secret is not configured: %w", err)
 	}
 	timestampHeader := configValue(api.AuthConfig, "timestamp_header", "X-Timestamp")
 	signatureHeader := configValue(api.AuthConfig, "signature_header", "X-Signature")
@@ -172,6 +180,62 @@ func validateHMAC(api model.API, r *http.Request) error {
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+func authSecret(name string) (string, error) {
+	if !authSecretEnv.MatchString(name) {
+		return "", errors.New("invalid auth secret name")
+	}
+	value := os.Getenv(name)
+	path := os.Getenv(name + "_FILE")
+	if value != "" && path != "" {
+		return "", errors.New("secret has multiple sources")
+	}
+	if value != "" {
+		return validateAuthSecretValue(value)
+	}
+	if path == "" {
+		return "", errors.New("secret source is empty")
+	}
+	if !filepath.IsAbs(path) || filepath.Base(path) == "." {
+		return "", errors.New("secret file path must be absolute")
+	}
+	cacheKey := name + "\x00" + path
+	if cached, ok := authSecretFileValues.Load(cacheKey); ok {
+		return cached.(string), nil
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return "", errors.New("secret file is unavailable")
+	}
+	defer root.Close()
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return "", errors.New("secret file is unavailable")
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64<<10 {
+		return "", errors.New("secret file is invalid")
+	}
+	contents, err := io.ReadAll(io.LimitReader(file, (64<<10)+1))
+	if err != nil || len(contents) > 64<<10 {
+		return "", errors.New("secret file is invalid")
+	}
+	value = strings.TrimRight(string(contents), "\r\n")
+	value, err = validateAuthSecretValue(value)
+	if err != nil {
+		return "", errors.New("secret file is invalid")
+	}
+	actual, _ := authSecretFileValues.LoadOrStore(cacheKey, value)
+	return actual.(string), nil
+}
+
+func validateAuthSecretValue(value string) (string, error) {
+	if len(value) < 32 || len(value) > 64<<10 || strings.ContainsRune(value, 0) {
+		return "", errors.New("secret must contain 32 to 65536 bytes of text")
+	}
+	return value, nil
 }
 
 func configValue(values map[string]string, key, fallback string) string {

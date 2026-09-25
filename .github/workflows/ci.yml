@@ -25,23 +25,62 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Enforce release source boundaries
         run: ./scripts/check-release-boundaries.sh
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          chart_version=$(awk '$1 == "version:" { print $2; exit }' deploy/helm/api-manager/Chart.yaml)
+          app_version=$(awk '$1 == "appVersion:" { gsub(/"/, "", $2); print $2; exit }' deploy/helm/api-manager/Chart.yaml)
+          [ "$version" = "$chart_version" ] && [ "$version" = "$app_version" ] || {
+            echo "tag v${version} does not match Helm chart version ${chart_version}/${app_version}" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo 'release tags must point to a commit on origin/main' >&2
+            exit 1
+          }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.6'
+          go-version: '1.26.7'
           cache: true
-      - name: Static analysis
-        run: go vet ./...
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Static and vulnerability analysis
+        run: |
+          go vet ./...
+          go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 -quiet -exclude-generated ./...
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
       - name: Build server
         run: CGO_ENABLED=0 go build -trimpath -o /tmp/api-manager ./cmd/server
       - name: Validate Dockerfile
         run: docker build --check .
       - name: Validate production scripts and Compose
+        shell: bash
         run: |
+          set -euo pipefail
           python3 -m py_compile scripts/init-production-secrets.py scripts/backup-production.py scripts/preflight-production.py scripts/verify-production.py
+          secret_dir=$(mktemp -d)
+          trap 'rm -rf "$secret_dir"' EXIT
+          chmod 0700 "$secret_dir"
+          printf '%s\n' ci-admin-token-at-least-thirty-two-characters > "$secret_dir/admin_token"
+          printf '%s\n' ci-user-jwt-secret-at-least-thirty-two-characters > "$secret_dir/user_jwt_secret"
+          printf '%s\n' ci-credential-key-at-least-thirty-two-characters > "$secret_dir/credential_encryption_key"
+          printf '%s\n' ci-metrics-token-at-least-thirty-two-characters > "$secret_dir/metrics_token"
+          printf '%s\n' ci-grafana-password-at-least-thirty-two-characters > "$secret_dir/grafana_admin_password"
+          printf '%s\n' 'postgres://ci:password@postgres.example:5432/api?sslmode=verify-full' > "$secret_dir/postgres_dsn"
+          printf '%s\n' ci-redis-password-at-least-thirty-two-characters > "$secret_dir/redis_password"
+          chmod 0444 "$secret_dir"/*
           API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-          PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
+          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
+          python3 scripts/preflight-production.py
+          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
           docker compose --env-file /dev/null -f compose.production.yaml config -q
       - name: Validate bundled Grafana dashboard
         run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
@@ -75,7 +114,15 @@ jobs:
             --set productionMode=true --set serviceMonitor.enabled=true \
             --set existingSecret=ci-placeholder \
             --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            --set env.REDIS_TLS_ENABLED=true >/dev/null
+            --set env.REDIS_TLS_ENABLED=true \
+            --set 'authSecretFiles[0]=API_AUTH_JWT_HS256_SECRET' > /tmp/api-manager-production.yaml
+      - name: Scan rendered Kubernetes manifests
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: /tmp/api-manager-production.yaml
+          severity: HIGH,CRITICAL
+          exit-code: '1'
       - name: Scan repository for vulnerabilities, secrets, and misconfiguration
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -144,6 +191,7 @@ jobs:
           fi
 
   publish-amd64:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: scan
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -169,6 +217,7 @@ jobs:
           sbom: true
 
   publish-arm64:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: scan
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -195,6 +244,7 @@ jobs:
           sbom: true
 
   publish-manifest:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [publish-amd64, publish-arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -209,7 +259,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

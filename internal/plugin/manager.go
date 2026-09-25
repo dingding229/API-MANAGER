@@ -20,6 +20,7 @@ import (
 )
 
 const defaultMaxUploadBytes int64 = 20 << 20
+const maxManifestBytes int64 = 256 << 10
 
 // ErrInvalidPackage identifies caller-correctable plugin package validation failures.
 var ErrInvalidPackage = errors.New("invalid plugin package")
@@ -58,8 +59,9 @@ func NewManagerWithOptions(store PluginStore, registry *Registry, root string, m
 	return &Manager{store: store, registry: registry, root: root, maxUpload: maxUploadBytes, logger: logger, databaseWritesEnabled: options.DatabaseWritesEnabled}
 }
 
-func (m *Manager) MaxUploadBytes() int64 { return m.maxUpload }
-func (m *Manager) List() []model.Plugin  { return m.store.ListPlugins() }
+func (m *Manager) MaxUploadBytes() int64   { return m.maxUpload }
+func (m *Manager) MaxManifestBytes() int64 { return maxManifestBytes }
+func (m *Manager) List() []model.Plugin    { return m.store.ListPlugins() }
 
 func (m *Manager) Upload(ctx context.Context, manifestBytes, wasmBytes []byte) (model.Plugin, error) {
 	return m.upload(ctx, manifestBytes, wasmBytes)
@@ -68,6 +70,9 @@ func (m *Manager) Upload(ctx context.Context, manifestBytes, wasmBytes []byte) (
 func (m *Manager) upload(ctx context.Context, manifestBytes, wasmBytes []byte) (model.Plugin, error) {
 	if len(manifestBytes) == 0 || len(wasmBytes) == 0 {
 		return model.Plugin{}, fmt.Errorf("%w: manifest.yaml and wasm module are required", ErrInvalidPackage)
+	}
+	if int64(len(manifestBytes)) > maxManifestBytes {
+		return model.Plugin{}, fmt.Errorf("%w: plugin manifest exceeds %d byte limit", ErrInvalidPackage, maxManifestBytes)
 	}
 	if int64(len(manifestBytes)+len(wasmBytes)) > m.maxUpload {
 		return model.Plugin{}, fmt.Errorf("%w: plugin upload exceeds %d byte limit", ErrInvalidPackage, m.maxUpload)
@@ -248,7 +253,7 @@ func (m *Manager) verifiedFiles(item model.Plugin) ([]byte, []byte, error) {
 	if err := m.verifyStorageDirectory(item.StoragePath); err != nil {
 		return nil, nil, err
 	}
-	manifestBytes, err := readManagedPluginFile(filepath.Join(item.StoragePath, "manifest.yaml"), m.maxUpload)
+	manifestBytes, err := readManagedPluginFile(item.StoragePath, "manifest.yaml", maxManifestBytes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -266,7 +271,7 @@ func (m *Manager) verifiedFiles(item model.Plugin) ([]byte, []byte, error) {
 	if !jsonEqual(encoded, item.Manifest) {
 		return nil, nil, errors.New("plugin manifest differs from stored record")
 	}
-	wasmBytes, err := readManagedPluginFile(filepath.Join(item.StoragePath, manifest.Entrypoint), m.maxUpload)
+	wasmBytes, err := readManagedPluginFile(item.StoragePath, manifest.Entrypoint, m.maxUpload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -302,26 +307,28 @@ func (m *Manager) verifyStorageDirectory(path string) error {
 	return nil
 }
 
-func readManagedPluginFile(path string, max int64) ([]byte, error) {
-	if max <= 0 {
-		return nil, errors.New("invalid plugin file limit")
+func readManagedPluginFile(directory, name string, max int64) ([]byte, error) {
+	if max <= 0 || filepath.Base(name) != name {
+		return nil, errors.New("invalid plugin file request")
 	}
-	info, err := os.Lstat(path)
+	root, err := os.OpenRoot(directory)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("plugin package file is not a regular file")
-	}
-	if info.Size() > max {
-		return nil, errors.New("plugin package file is too large")
-	}
-	f, err := os.Open(path)
+	defer root.Close()
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > max {
+		return nil, errors.New("plugin package file is invalid or too large")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, max+1))
 	if err != nil {
 		return nil, err
 	}
