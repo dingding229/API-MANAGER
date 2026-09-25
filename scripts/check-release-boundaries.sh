@@ -18,6 +18,7 @@ for path in $(git ls-files); do
     compose.yaml|compose.production.yaml|compose.production.private-ca.yaml|\
     .github/dependabot.yml|.github/workflows/ci.yml|\
     cmd/server/*|internal/*|configs/*|deploy/helm/api-manager/*|\
+    security/trivy.yaml|security/tempo-vex.json|\
     scripts/check-release-boundaries.sh|scripts/init-production-secrets.py|\
     scripts/preflight-production.py|scripts/verify-production.py|scripts/backup-production.py)
       ;;
