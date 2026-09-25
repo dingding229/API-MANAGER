@@ -193,6 +193,8 @@ PostgreSQL 和 Redis 仅在 Compose 内部网络监听。对外 HTTPS、域名�
 
 镜像从六个官方固定版本镜像复制真实可执行程序和 Grafana Web 资源；配置模板用 `go:embed` 编译进 API Manager，启用时写入容器临时目录，数据写入持久卷，并启动子进程。日志由 Alloy 读取应用 JSONL 文件送往 Loki，Tempo 接收 OTLP Span，Prometheus 抓取 `/metrics` 并向 Alertmanager 发送规则告警，Grafana 预置三个数据源与仪表板。**这不是把六个服务重写成一个 Go 二进制**；它们仍然是独立进程，只是随同一 Docker 镜像发布和运行。
 
+当前固定版本（均使用官方多平台镜像的 SHA-256 摘要，适用于 `linux/amd64` 和 `linux/arm64`）：Loki 3.7.8、Alloy 1.19.2、Tempo 2.10.8、Prometheus 3.15.0、Alertmanager 0.34.1、Grafana 12.4.11。升级后仍须通过仓库的镜像漏洞扫描；上游残留高危漏洞未处理前，CI 不会发布到 Docker Hub。
+
 ```bash
 docker build -t api-manager:bundled .
 export GRAFANA_ADMIN_PASSWORD="$(openssl rand -hex 32)"
