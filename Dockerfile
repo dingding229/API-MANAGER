@@ -25,6 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
     go build -buildvcs=false -trimpath -ldflags='-s -w' -o /out/alertmanager ./cmd/alertmanager
 
 FROM patched-base AS patched-tempo
+COPY --from=patched-alertmanager /out/alertmanager /tmp/build-order/alertmanager
 RUN curl -fsSL --retry 3 https://codeload.github.com/grafana/tempo/tar.gz/f0f3ed59197bfe9f54f3b0f8015ccca112f9e544 -o /tmp/source.tar.gz \
     && echo 'c354a7495843161a41ad75d96dd4e8f17aabc9a5f439060cf974a57b4ef2ff85  /tmp/source.tar.gz' | sha256sum -c - \
     && mkdir -p /src && tar -xzf /tmp/source.tar.gz --strip-components=1 -C /src
@@ -34,6 +35,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
     go build -buildvcs=false -trimpath -ldflags='-s -w' -o /out/tempo ./cmd/tempo
 
 FROM patched-base AS alloy-source
+COPY --from=patched-tempo /out/tempo /tmp/build-order/tempo
 RUN curl -fsSL --retry 3 https://codeload.github.com/grafana/alloy/tar.gz/becfd489a7bb459c0496893b555fb87a003296b1 -o /tmp/source.tar.gz \
     && echo '69efdb87a91bb538323f5ccb6bcd86240cee3a78ee97632bd1005c434344c7f1  /tmp/source.tar.gz' | sha256sum -c - \
     && mkdir -p /src && tar -xzf /tmp/source.tar.gz --strip-components=1 -C /src
@@ -51,6 +53,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
     go build -buildvcs=false -trimpath -tags='netgo embedalloyui' -ldflags='-s -w' -o /out/alloy .
 
 FROM patched-base AS patched-grafana
+COPY --from=patched-alloy /out/alloy /tmp/build-order/alloy
 RUN curl -fsSL --retry 3 https://codeload.github.com/grafana/grafana/tar.gz/05757e789657299d00314f8f96d49d1aca569f33 -o /tmp/source.tar.gz \
     && echo '07622e9c2b67eded2a9c2ad52d8d8e26cb6f17e594152046f447302aed975ef1  /tmp/source.tar.gz' | sha256sum -c - \
     && mkdir -p /src && tar -xzf /tmp/source.tar.gz --strip-components=1 -C /src
