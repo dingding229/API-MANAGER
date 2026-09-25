@@ -39,7 +39,7 @@ COPY --from=patched-tempo /out/tempo /tmp/build-order/tempo
 RUN curl -fsSL --retry 3 https://codeload.github.com/grafana/alloy/tar.gz/becfd489a7bb459c0496893b555fb87a003296b1 -o /tmp/source.tar.gz \
     && echo '69efdb87a91bb538323f5ccb6bcd86240cee3a78ee97632bd1005c434344c7f1  /tmp/source.tar.gz' | sha256sum -c - \
     && mkdir -p /src && tar -xzf /tmp/source.tar.gz --strip-components=1 -C /src
-FROM --platform=$BUILDPLATFORM grafana/alloy-build-image:v0.1.35@sha256:9fa2a341b53503ce42cf9900c401d689a68ea67cdec6a20f53d72e3665fb8dc6 AS alloy-ui
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS alloy-ui
 COPY --from=alloy-source /src/internal/web/ui /ui
 WORKDIR /ui
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund && npm run build
