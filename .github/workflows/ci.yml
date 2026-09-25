@@ -90,7 +90,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
-  publish:
+  scan:
     if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-24.04
@@ -100,7 +100,7 @@ jobs:
         with:
           persist-credentials: false
       # Large Go dependency graphs need disk headroom on GitHub-hosted runners.
-      # BuildKit's local cache is shared by the scan and publish builds in this job.
+      # Scan the loaded image after clearing BuildKit cache to avoid a second disk exhaustion.
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
@@ -114,6 +114,10 @@ jobs:
           push: false
           platforms: linux/amd64
           tags: api-manager:scan
+      - name: Free BuildKit cache before inspecting the loaded image
+        run: |
+          docker buildx prune --all --force
+          df -h /
       - name: Scan built image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -123,29 +127,86 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
-      - name: Verify image has no bundled plugin packages
+      - name: Verify bundled executables and release boundary
         run: |
+          set -euo pipefail
           container_id=$(docker create api-manager:scan)
           trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
-          docker export "$container_id" > /tmp/api-manager-image.tar
+          docker export "$container_id" | tar -tf - > /tmp/api-manager-files.txt
           for component in loki tempo prometheus alertmanager alloy grafana; do
-            tar -tf /tmp/api-manager-image.tar | grep -Fx "usr/local/bin/$component" >/dev/null || {
+            grep -Fx "usr/local/bin/$component" /tmp/api-manager-files.txt >/dev/null || {
               echo "Bundled observability executable missing: $component" >&2
               exit 1
             }
           done
-          if tar -tf /tmp/api-manager-image.tar | grep -E '(^|/)data/plugins/.+|\.wasm$'; then
+          if grep -E '(^|/)data/plugins/.+|\.wasm$' /tmp/api-manager-files.txt; then
             echo 'The release image contains a bundled plugin package.' >&2
             exit 1
           fi
-      - name: Log in to private Docker Hub repository
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+
+  publish-amd64:
+    needs: scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free runner disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Generate image metadata
+      - name: Push private amd64 image from verified source
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-amd64
+          provenance: mode=max
+          sbom: true
+
+  publish-arm64:
+    needs: scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Free runner disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push private arm64 image from verified source
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-arm64
+          provenance: mode=max
+          sbom: true
+
+  publish-manifest:
+    needs: [publish-amd64, publish-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
@@ -153,19 +214,20 @@ jobs:
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - name: Build and push private multi-platform image
-        id: push
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: mode=max
-          sbom: true
-      - name: Publish summary
+      - name: Publish multi-platform manifest
+        shell: bash
+        env:
+          PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          echo '### Private Docker image published' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Repository: `${{ env.IMAGE_NAME }}`' >> "$GITHUB_STEP_SUMMARY"
-          echo '- Digest: `${{ steps.push.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=(-t "$tag")
+          done <<< "$PUBLISH_TAGS"
+          [ "${#args[@]}" -gt 0 ]
+          docker buildx imagetools create "${args[@]}" \
+            "${IMAGE_NAME}:staged-${GITHUB_SHA}-amd64" \
+            "${IMAGE_NAME}:staged-${GITHUB_SHA}-arm64"
+          docker buildx imagetools inspect "${args[1]}"
+          echo '### Private multi-platform Docker image published' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "${PUBLISH_TAGS}" >> "$GITHUB_STEP_SUMMARY"
