@@ -1,0 +1,23 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/dingding229/API-MANAGER/security/tempo-vex-2026-09-25",
+  "author": "API Manager maintainers",
+  "timestamp": "2026-09-25T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {"name": "CVE-2026-21728"},
+      "products": [{"@id": "pkg:golang/github.com/grafana/tempo@v1.5.1-0.20260813170847-f0f3ed59197b"}],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "This Go pseudo-version is the source commit of upstream Tempo v2.10.8. The vulnerable code was fixed in Tempo v2.10.2; Trivy compares the v1 module pseudo-version against the v2 application release version. This statement applies only to the pinned v2.10.8 source commit."
+    },
+    {
+      "vulnerability": {"name": "CVE-2026-28377"},
+      "products": [{"@id": "pkg:golang/github.com/grafana/tempo@v1.5.1-0.20260813170847-f0f3ed59197b"}],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "This Go pseudo-version is the source commit of upstream Tempo v2.10.8. The vulnerable code was fixed in Tempo v2.10.3; Trivy compares the v1 module pseudo-version against the v2 application release version. This statement applies only to the pinned v2.10.8 source commit."
+    }
+  ]
+}

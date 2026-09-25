@@ -191,9 +191,9 @@ PostgreSQL 和 Redis 仅在 Compose 内部网络监听。对外 HTTPS、域名�
 
 ## 完整六组件观测栈（单镜像可选）
 
-镜像从六个官方固定版本镜像复制真实可执行程序和 Grafana Web 资源；配置模板用 `go:embed` 编译进 API Manager，启用时写入容器临时目录，数据写入持久卷，并启动子进程。日志由 Alloy 读取应用 JSONL 文件送往 Loki，Tempo 接收 OTLP Span，Prometheus 抓取 `/metrics` 并向 Alertmanager 发送规则告警，Grafana 预置三个数据源与仪表板。**这不是把六个服务重写成一个 Go 二进制**；它们仍然是独立进程，只是随同一 Docker 镜像发布和运行。
+镜像使用固定上游版本构建六个服务：Loki、Prometheus 从官方镜像复制；Alloy、Tempo、Alertmanager、Grafana 从校验 SHA-256 的官方源码归档重编译，Grafana Web 资源来自官方镜像；配置模板用 `go:embed` 编译进 API Manager，启用时写入容器临时目录，数据写入持久卷，并启动子进程。日志由 Alloy 读取应用 JSONL 文件送往 Loki，Tempo 接收 OTLP Span，Prometheus 抓取 `/metrics` 并向 Alertmanager 发送规则告警，Grafana 预置三个数据源与仪表板。**这不是把六个服务重写成一个 Go 二进制**；它们仍然是独立进程，只是随同一 Docker 镜像发布和运行。
 
-当前固定版本（均使用官方多平台镜像的 SHA-256 摘要，适用于 `linux/amd64` 和 `linux/arm64`）：Loki 3.7.8、Alloy 1.19.2、Tempo 2.10.8、Prometheus 3.15.0、Alertmanager 0.34.1、Grafana 12.4.11。升级后仍须通过仓库的镜像漏洞扫描；上游残留高危漏洞未处理前，CI 不会发布到 Docker Hub。
+当前固定版本（上游镜像使用官方多平台 SHA-256 摘要、上游源码归档逐一校验 SHA-256，面向 `linux/amd64` 和 `linux/arm64`）：Loki 3.7.8、Alloy 1.19.2、Tempo 2.10.8、Prometheus 3.15.0、Alertmanager 0.34.1、Grafana 12.4.11。对重编译组件升级 Go 1.26.7 及已修复依赖；CI 仍阻断其他 HIGH/CRITICAL 告警。`security/tempo-vex.json` 仅针对 Tempo v2.10.8 源码提交的两条模块伪版本误报（CVE-2026-21728 已于 2.10.2 修复，CVE-2026-28377 已于 2.10.3 修复），更换上游版本时必须重新审核此声明。构建会下载、校验并编译四个上游项目，首次构建时间及缓存空间显著增加。
 
 ```bash
 docker build -t api-manager:bundled .

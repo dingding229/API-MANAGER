@@ -1,0 +1,3 @@
+vulnerability:
+  vex:
+    - security/tempo-vex.json
