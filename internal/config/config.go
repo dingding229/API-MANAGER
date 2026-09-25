@@ -24,7 +24,6 @@ type Config struct {
 	RedisPassword             string
 	RedisUsername             string
 	RedisTLS                  bool
-	RedisTLSCAFile            string
 	RedisDB                   int
 	UseRedis                  bool
 	UserJWTSecret             string
@@ -77,7 +76,6 @@ func Load() (Config, error) {
 		RedisPassword:             secrets["REDIS_PASSWORD"],
 		RedisUsername:             os.Getenv("REDIS_USERNAME"),
 		RedisTLS:                  envBool("REDIS_TLS_ENABLED", false),
-		RedisTLSCAFile:            os.Getenv("REDIS_TLS_CA_FILE"),
 		RedisDB:                   envInt("REDIS_DB", 0),
 		UseRedis:                  envBool("USE_REDIS", os.Getenv("REDIS_ADDR") != ""),
 		UserJWTSecret:             secrets["USER_JWT_SECRET"],

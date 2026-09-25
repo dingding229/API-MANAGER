@@ -77,25 +77,6 @@ def validate(environ, project_root):
             raise ValueError
     except ValueError:
         errors.append("PROD_REDIS_ADDR must be a non-loopback host:port for Redis TLS")
-    ca_dir = environ.get("PROD_CA_CERTS_DIR", "")
-    if ca_dir:
-        ca = Path(ca_dir)
-        if not ca.is_absolute() or ca.is_symlink() or not ca.is_dir():
-            errors.append("PROD_CA_CERTS_DIR must be an absolute real directory")
-        else:
-            if not (ca.stat().st_mode & stat.S_IXOTH):
-                errors.append("PROD_CA_CERTS_DIR must be traversable by the non-root container")
-            for name in ("redis-ca.pem", "postgres-ca.pem"):
-                path = ca / name
-                if path.is_symlink() or not path.is_file() or not (path.stat().st_mode & stat.S_IROTH):
-                    errors.append(f"{name} must be a readable regular CA certificate")
-                    continue
-                if path.stat().st_size > 65536:
-                    errors.append(f"{name} is too large")
-                    continue
-                content = path.read_bytes()
-                if b"-----BEGIN CERTIFICATE-----" not in content or b"PRIVATE KEY" in content:
-                    errors.append(f"{name} must contain only public CA certificates")
     return errors
 
 

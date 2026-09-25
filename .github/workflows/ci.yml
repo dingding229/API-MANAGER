@@ -43,10 +43,6 @@ jobs:
           API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
           PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
           docker compose --env-file /dev/null -f compose.production.yaml config -q
-          PROD_CA_CERTS_DIR=/tmp/ci-certs \
-          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-          PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
-          docker compose --env-file /dev/null -f compose.production.yaml -f compose.production.private-ca.yaml config -q
       - name: Validate bundled Grafana dashboard
         run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
       - name: Validate development Compose

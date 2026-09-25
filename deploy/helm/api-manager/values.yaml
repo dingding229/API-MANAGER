@@ -47,11 +47,6 @@ env:
 
 existingSecret: "" # use a pre-created Secret instead of chart-managed values
 
-# Optional Secret containing redis-ca.pem and/or postgres-ca.pem (public CAs).
-# Set env.REDIS_TLS_CA_FILE and sslrootcert in the secret PostgreSQL DSN.
-trustedCA:
-  secretName: ""
-
 secrets:
   ADMIN_TOKEN: ""
   USER_JWT_SECRET: ""

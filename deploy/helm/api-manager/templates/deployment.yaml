@@ -64,11 +64,6 @@ spec:
             - name: PLUGIN_DIR
               value: /data/plugins
           volumeMounts:
-            {{- if .Values.trustedCA.secretName }}
-            - name: trusted-ca
-              mountPath: /etc/api-manager/ca
-              readOnly: true
-            {{- end }}
             - name: plugin-library
               mountPath: /data/plugin-library
               {{- if .Values.persistence.enabled }}
@@ -94,11 +89,6 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
-        {{- if .Values.trustedCA.secretName }}
-        - name: trusted-ca
-          secret:
-            secretName: {{ .Values.trustedCA.secretName | quote }}
-        {{- end }}
         - name: plugin-library
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

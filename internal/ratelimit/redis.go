@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -30,10 +28,10 @@ type Redis struct {
 }
 
 func NewRedis(ctx context.Context, address, password string, database int) (*Redis, error) {
-	return NewRedisWithTLS(ctx, address, "", password, database, false, "")
+	return NewRedisWithTLS(ctx, address, "", password, database, false)
 }
 
-func NewRedisWithTLS(ctx context.Context, address, username, password string, database int, enabled bool, caFile string) (*Redis, error) {
+func NewRedisWithTLS(ctx context.Context, address, username, password string, database int, enabled bool) (*Redis, error) {
 	options := &redis.Options{Addr: address, Username: username, Password: password, DB: database, DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second}
 	if enabled {
 		host, _, err := net.SplitHostPort(address)
@@ -41,20 +39,6 @@ func NewRedisWithTLS(ctx context.Context, address, username, password string, da
 			return nil, fmt.Errorf("redis TLS address must include host and port: %w", err)
 		}
 		config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host}
-		if caFile != "" {
-			pool, err := x509.SystemCertPool()
-			if err != nil {
-				return nil, fmt.Errorf("load system CAs: %w", err)
-			}
-			cert, err := os.ReadFile(caFile)
-			if err != nil {
-				return nil, fmt.Errorf("read redis CA: %w", err)
-			}
-			if !pool.AppendCertsFromPEM(cert) {
-				return nil, fmt.Errorf("redis CA file contains no certificates")
-			}
-			config.RootCAs = pool
-		}
 		options.TLSConfig = config
 	}
 	client := redis.NewClient(options)

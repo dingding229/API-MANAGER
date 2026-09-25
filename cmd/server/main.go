@@ -239,7 +239,7 @@ func setupLimiter(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		return memory, func() { _ = memory.Close() }
 	}
 	for attempt := 1; attempt <= 15; attempt++ {
-		redisLimiter, err := ratelimit.NewRedisWithTLS(ctx, cfg.RedisAddr, cfg.RedisUsername, cfg.RedisPassword, cfg.RedisDB, cfg.RedisTLS, cfg.RedisTLSCAFile)
+		redisLimiter, err := ratelimit.NewRedisWithTLS(ctx, cfg.RedisAddr, cfg.RedisUsername, cfg.RedisPassword, cfg.RedisDB, cfg.RedisTLS)
 		if err == nil {
 			return redisLimiter, func() { _ = redisLimiter.Close() }
 		}
