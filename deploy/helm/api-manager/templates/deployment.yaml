@@ -76,6 +76,11 @@ spec:
               {{- end }}
             - name: plugins
               mountPath: /data/plugins
+            - name: observability
+              mountPath: /data/observability
+              {{- if .Values.persistence.enabled }}
+              subPath: observability
+              {{- end }}
           readinessProbe:
             httpGet: { path: /health/ready, port: http }
             initialDelaySeconds: 5
@@ -102,6 +107,13 @@ spec:
           emptyDir: {}
           {{- end }}
         - name: plugins
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "api-manager.fullname" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: observability
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "api-manager.fullname" . }}

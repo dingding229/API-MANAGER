@@ -1,11 +1,10 @@
 apiVersion: 1
-
 providers:
   - name: API Manager
     orgId: 1
     folder: API Manager
     type: file
     disableDeletion: false
-    editable: true
+    editable: false
     options:
-      path: /var/lib/grafana/dashboards
+      path: __CONFIG_DIR__/grafana/dashboards

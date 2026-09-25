@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
 	"api-manager/internal/ratelimit"
+	"api-manager/internal/stack"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
 	"api-manager/internal/user"
@@ -53,11 +55,23 @@ func main() {
 		slog.Error("load configuration failed", "error", err)
 		os.Exit(1)
 	}
-	logger := newLogger(cfg.LogLevel)
+	if cfg.ObservabilityStackEnabled && cfg.OTLPEndpoint == "" {
+		cfg.OTELEnabled = true
+		cfg.OTLPEndpoint = "127.0.0.1:4317"
+		cfg.OTLPInsecure = true // OTLP is bound to loopback in the bundled Tempo process.
+	}
+	bootstrapLogger := newLogger(cfg.LogLevel, nil)
 	if err := cfg.Validate(); err != nil {
-		logger.Error("invalid security configuration", "error", err)
+		bootstrapLogger.Error("invalid security configuration", "error", err)
 		os.Exit(1)
 	}
+	observabilityHub, err := observability.NewHub(observability.HubOptions{Directory: cfg.ObservabilityDir, MaxLogs: cfg.ObservabilityMaxLogs, MaxTraces: cfg.ObservabilityMaxTraces, MaxFileBytes: cfg.ObservabilityFileBytes})
+	if err != nil {
+		bootstrapLogger.Error("initialize embedded observability failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = observabilityHub.Close() }()
+	logger := newLogger(cfg.LogLevel, observabilityHub)
 	upstreamCredentials, err := upstream.Parse(cfg.UpstreamCredentials)
 	if err != nil {
 		logger.Error("invalid upstream configuration", "error", err)
@@ -65,7 +79,21 @@ func main() {
 	}
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	shutdownTracing, err := observability.InitTracing(rootCtx, observability.TraceConfig{Enabled: cfg.OTELEnabled, ServiceName: cfg.OTELServiceName, Endpoint: cfg.OTLPEndpoint, Insecure: cfg.OTLPInsecure})
+	var bundledStack *stack.Stack
+	if cfg.ObservabilityStackEnabled {
+		_, port, splitErr := net.SplitHostPort(cfg.HTTPAddr)
+		if splitErr != nil {
+			logger.Error("full observability stack requires HTTP_ADDR with a numeric port", "error", splitErr)
+			os.Exit(1)
+		}
+		bundledStack, err = stack.Start(rootCtx, stack.Options{Directory: cfg.ObservabilityDir, APIPort: port, MetricsToken: cfg.MetricsToken, GrafanaPassword: cfg.GrafanaAdminPassword})
+		if err != nil {
+			logger.Error("start bundled observability stack failed", "error", err)
+			os.Exit(1)
+		}
+		defer bundledStack.Close()
+	}
+	shutdownTracing, err := observability.InitTracing(rootCtx, observability.TraceConfig{Enabled: cfg.OTELEnabled, ServiceName: cfg.OTELServiceName, Endpoint: cfg.OTLPEndpoint, Insecure: cfg.OTLPInsecure}, observabilityHub)
 	if err != nil {
 		logger.Error("initialize OpenTelemetry failed", "error", err)
 		os.Exit(1)
@@ -95,6 +123,7 @@ func main() {
 		admin.SetAdminTokenAPIEnabled(false) // Bootstrap still uses the token once, separately.
 	}
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
+	admin.SetObservability(observabilityHub, metrics)
 	authHandler := user.NewHTTP(userService, cfg.AdminToken)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
@@ -162,8 +191,15 @@ func main() {
 		}
 	}()
 
+	var stackErrors <-chan error
+	if bundledStack != nil {
+		stackErrors = bundledStack.Errors()
+	}
 	select {
 	case <-rootCtx.Done():
+	case err := <-stackErrors:
+		logger.Error("bundled observability component stopped", "error", err)
+		stop()
 	case err := <-serverErr:
 		logger.Error("server stopped unexpectedly", "error", err)
 	}
@@ -248,7 +284,7 @@ func writeHealth(w http.ResponseWriter, status int, body string) {
 	_, _ = w.Write([]byte(body))
 }
 
-func newLogger(level string) *slog.Logger {
+func newLogger(level string, sink io.Writer) *slog.Logger {
 	var slogLevel slog.Level
 	switch level {
 	case "debug":
@@ -260,7 +296,11 @@ func newLogger(level string) *slog.Logger {
 	default:
 		slogLevel = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel}))
+	output := io.Writer(os.Stdout)
+	if sink != nil {
+		output = io.MultiWriter(os.Stdout, sink)
+	}
+	return slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: slogLevel}))
 }
 
 func loggingMiddleware(logger *slog.Logger, next http.Handler) http.Handler {

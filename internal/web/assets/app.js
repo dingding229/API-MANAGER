@@ -19,6 +19,8 @@ const permissionLabels = {
   'user.read': '查看用户、角色与权限',
   'user.manage': '创建用户与分配角色',
   'audit.read': '查看审计日志',
+  'observability.read': '查看运行指标、日志、链路与告警',
+  'observability.manage': '确认和管理运行告警',
 };
 const roleLabels = {
   super_admin: '超级管理员',
@@ -39,7 +41,7 @@ const roleLabel = (name) => roleLabels[name] || name;
 const roleDescription = (role) => roleDescriptions[role.name] || role.description || '';
 function permissionChecklist(permissions, selected = []) {
   const selectedCodes = new Set(selected);
-  const categories = {api: '接口管理', credential: '调用凭证', plugin: '插件管理', user: '用户管理', audit: '审计日志'};
+  const categories = {api: '接口管理', credential: '调用凭证', plugin: '插件管理', user: '用户管理', audit: '审计日志', observability: '运行观测'};
   const groups = new Map();
   for (const permission of permissions) {
     const category = permission.code.split('.')[0];
@@ -158,10 +160,10 @@ async function hydrateSession() {
 }
 
 function renderPage() {
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', audit:'审计日志'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => button.classList.toggle('active', button.dataset.page === state.page));
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, audit: renderAuditLogs};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
   return renderers[state.page]();
 }
 
@@ -411,6 +413,114 @@ async function renderRoles() {
         } catch (error) { notice(error.message); }
       };
     });
+  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+}
+
+
+function formatMetric(value, digits = 0) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toLocaleString('zh-CN', {maximumFractionDigits: digits, minimumFractionDigits: digits}) : '0';
+}
+
+function formatUptime(seconds) {
+  seconds = Math.max(0, Number(seconds || 0));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分钟`;
+}
+
+function observationChart(points, key, label, color = '#365cff', formatter = (value) => formatMetric(value)) {
+  const values = points.map((point) => Number(point[key] || 0));
+  if (!values.length) return '<div class="chart-empty">暂无时间序列数据</div>';
+  const width = 720, height = 190, padX = 22, padY = 20;
+  const maxValue = Math.max(...values, 1);
+  const coordinates = values.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : padX + index * (width - padX * 2) / (values.length - 1);
+    const y = height - padY - value / maxValue * (height - padY * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last = values[values.length - 1];
+  const peak = Math.max(...values);
+  return `<div class="metric-chart" role="img" aria-label="${esc(label)}，当前 ${esc(formatter(last))}，峰值 ${esc(formatter(peak))}">
+    <div class="metric-chart-head"><span>${esc(label)}</span><strong>${esc(formatter(last))}</strong></div>
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+      <line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" class="chart-axis"></line>
+      <polyline points="${coordinates}" fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+    </svg>
+    <div class="metric-chart-foot"><span>最近 60 分钟</span><span>峰值 ${esc(formatter(peak))}</span></div>
+  </div>`;
+}
+
+function alertCard(alert) {
+  const firing = alert.status === 'firing';
+  const severity = alert.severity === 'critical' ? '严重' : '警告';
+  return `<article class="alert-card ${esc(alert.severity)} ${firing ? 'firing' : 'resolved'}">
+    <div class="alert-indicator" aria-hidden="true"></div>
+    <div class="alert-content"><div class="alert-title-row"><strong>${esc(alert.title)}</strong><span class="badge">${firing ? severity : '已恢复'}</span></div>
+      <p>${esc(alert.message)}</p><div class="alert-meta"><span>${esc(alert.source)}</span><span>${new Date(alert.last_seen).toLocaleString()}</span>${alert.acknowledged ? `<span>已由 ${esc(alert.acknowledged_by || '管理员')} 确认</span>` : ''}</div></div>
+    ${firing && !alert.acknowledged && can('observability.manage') ? `<button class="secondary alert-ack" data-alert-ack="${esc(alert.id)}">确认</button>` : ''}
+  </article>`;
+}
+
+function logRow(item) {
+  const fields = Object.entries(item.fields || {}).filter(([key]) => !['request_id','trace_id'].includes(key)).slice(0, 5).map(([key,value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`).join(' · ');
+  return `<tr><td>${new Date(item.timestamp).toLocaleString()}</td><td><span class="log-level level-${esc(String(item.level || '').toLowerCase())}">${esc(item.level || 'INFO')}</span></td><td><strong>${esc(item.message)}</strong>${fields ? `<div class="small log-fields">${esc(fields)}</div>` : ''}</td><td><code>${esc(item.request_id || '—')}</code></td><td><code>${esc(item.trace_id || '—')}</code></td></tr>`;
+}
+
+function traceRow(item) {
+  const path = item.attributes?.['url.path'] || item.attributes?.['http.route'] || '—';
+  const statusCode = item.attributes?.['http.response.status_code'] || '';
+  const status = item.status === 'error' ? '错误' : '正常';
+  return `<tr><td>${new Date(item.started_at).toLocaleString()}</td><td><strong>${esc(item.name)}</strong><div class="small">${esc(path)}</div></td><td>${formatMetric(item.duration_ms, 1)} ms</td><td><span class="badge trace-${esc(item.status)}">${status}${statusCode ? ` · HTTP ${esc(statusCode)}` : ''}</span></td><td><code>${esc(item.trace_id)}</code></td></tr>`;
+}
+
+async function renderObservability() {
+  const page = $('#page'); page.innerHTML = '<div class="empty">加载内置观测数据…</div>';
+  const filters = state.cache.observabilityFilters || {level:'', search:'', traceStatus:''};
+  try {
+    const logParams = new URLSearchParams({limit:'100'});
+    if (filters.level) logParams.set('level', filters.level);
+    if (filters.search) logParams.set('search', filters.search);
+    const traceParams = new URLSearchParams({limit:'100'});
+    if (filters.search) traceParams.set('search', filters.search);
+    if (filters.traceStatus) traceParams.set('status', filters.traceStatus);
+    const [dashboard, logs, traces] = await Promise.all([
+      api('/admin/v1/observability/summary'),
+      api(`/admin/v1/observability/logs?${logParams}`),
+      api(`/admin/v1/observability/traces?${traceParams}`),
+    ]);
+    const metrics = dashboard.metrics || {};
+    const storage = dashboard.storage || {};
+    const firing = (dashboard.alerts || []).filter((alert) => alert.status === 'firing');
+    const storageError = String(storage.last_write_error || '');
+    const storageLabel = storageError ? '持久化异常' : (storage.persistent ? '持久化已启用' : '仅内存保存');
+    page.innerHTML = `<div class="observability-page">
+      <section class="observability-intro"><div><p class="eyebrow">EMBEDDED OBSERVABILITY</p><h2>内置运行观测</h2><p>指标、日志、链路追踪和告警均由 API Manager 自身采集，无需额外监控容器。</p></div><div class="storage-state ${storage.persistent && !storageError ? 'ok' : 'warning'}"><strong>${storageLabel}</strong><span>日志 ${formatMetric(storage.logs)} / ${formatMetric(storage.max_logs)} · 链路 ${formatMetric(storage.traces)} / ${formatMetric(storage.max_traces)}</span>${storageError ? `<span class="storage-error" title="${esc(storageError)}">${esc(storageError)}</span>` : ''}</div></section>
+      <div class="stats observability-stats">
+        <div class="stat"><span class="small">网关请求</span><div class="number">${formatMetric(metrics.gateway_requests_total)}</div><span class="metric-caption">累计调用</span></div>
+        <div class="stat"><span class="small">错误率</span><div class="number ${Number(metrics.gateway_error_rate) >= .05 ? 'metric-danger' : ''}">${formatMetric(Number(metrics.gateway_error_rate || 0) * 100, 1)}%</div><span class="metric-caption">HTTP 4xx / 5xx</span></div>
+        <div class="stat"><span class="small">平均延迟</span><div class="number">${formatMetric(metrics.average_latency_ms, 1)}<small> ms</small></div><span class="metric-caption">网关请求</span></div>
+        <div class="stat"><span class="small">P95 延迟</span><div class="number">${formatMetric(metrics.p95_latency_ms)}<small> ms</small></div><span class="metric-caption">95% 请求以内</span></div>
+        <div class="stat"><span class="small">活动告警</span><div class="number ${firing.length ? 'metric-danger' : ''}">${firing.length}</div><span class="metric-caption">${firing.filter(x=>x.severity==='critical').length} 个严重</span></div>
+        <div class="stat"><span class="small">运行时间</span><div class="number uptime">${esc(formatUptime(metrics.uptime_seconds))}</div><span class="metric-caption">当前进程</span></div>
+      </div>
+      <div class="observability-charts">
+        <div class="card">${observationChart(metrics.series || [], 'requests', '每分钟网关请求', '#365cff')}</div>
+        <div class="card">${observationChart(metrics.series || [], 'average_latency_ms', '每分钟平均延迟', '#d97706', value => `${formatMetric(value,1)} ms`)}</div>
+      </div>
+      <section class="card observation-section"><div class="section-heading"><div><h2>运行告警</h2><p>根据最近 5 分钟的错误率、延迟、限流、上游和插件失败自动计算。</p></div><span class="badge">${firing.length} 个活动告警</span></div><div class="alert-list">${(dashboard.alerts || []).length ? dashboard.alerts.map(alertCard).join('') : '<div class="empty">当前没有告警</div>'}</div></section>
+      <section class="card observation-section"><div class="section-heading"><div><h2>应用日志</h2><p>内置结构化日志索引，敏感字段会自动脱敏。</p></div><span class="badge">匹配 ${formatMetric(logs.total)} 条</span></div>
+        <form id="observation-filter" class="observation-filter"><label><span>级别</span><select name="level"><option value="">全部</option><option value="ERROR" ${filters.level==='ERROR'?'selected':''}>错误</option><option value="WARN" ${filters.level==='WARN'?'selected':''}>警告</option><option value="INFO" ${filters.level==='INFO'?'selected':''}>信息</option><option value="DEBUG" ${filters.level==='DEBUG'?'selected':''}>调试</option></select></label><label class="filter-search"><span>搜索日志和链路</span><input name="search" value="${esc(filters.search)}" placeholder="消息、路径、Request ID 或 Trace ID"></label><label><span>链路状态</span><select name="trace_status"><option value="">全部</option><option value="error" ${filters.traceStatus==='error'?'selected':''}>错误</option><option value="ok" ${filters.traceStatus==='ok'?'selected':''}>正常</option></select></label><button type="submit">筛选</button><button type="button" class="secondary" id="clear-observation-filter">清除</button></form>
+        <div class="table-wrap observation-table"><table><thead><tr><th>时间</th><th>级别</th><th>消息</th><th>Request ID</th><th>Trace ID</th></tr></thead><tbody>${logs.items?.length ? logs.items.map(logRow).join('') : '<tr><td colspan="5">暂无匹配日志</td></tr>'}</tbody></table></div></section>
+      <section class="card observation-section"><div class="section-heading"><div><h2>请求链路</h2><p>内置 OpenTelemetry Span 存储，可按 Trace ID 关联请求。</p></div><span class="badge">匹配 ${formatMetric(traces.total)} 条</span></div><div class="table-wrap observation-table"><table><thead><tr><th>开始时间</th><th>操作</th><th>耗时</th><th>状态</th><th>Trace ID</th></tr></thead><tbody>${traces.items?.length ? traces.items.map(traceRow).join('') : '<tr><td colspan="5">暂无链路数据，请调用已发布接口后刷新</td></tr>'}</tbody></table></div></section>
+    </div>`;
+    $('#observation-filter').onsubmit = (event) => {
+      event.preventDefault(); const form = new FormData(event.currentTarget);
+      state.cache.observabilityFilters = {level:String(form.get('level')||''), search:String(form.get('search')||'').trim(), traceStatus:String(form.get('trace_status')||'')}; renderObservability();
+    };
+    $('#clear-observation-filter').onclick = () => { state.cache.observabilityFilters = {level:'',search:'',traceStatus:''}; renderObservability(); };
+    $$('[data-alert-ack]').forEach((button) => button.onclick = async () => { try { await api(`/admin/v1/observability/alerts/${encodeURIComponent(button.dataset.alertAck)}/ack`, {method:'POST'}); notice('告警已确认', true); renderObservability(); } catch (error) { notice(error.message); } });
   } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 

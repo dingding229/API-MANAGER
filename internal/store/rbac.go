@@ -15,14 +15,16 @@ var defaultPermissions = []model.Permission{
 	{Code: "user.read", Description: "查看用户、角色与权限"},
 	{Code: "user.manage", Description: "创建用户与分配角色"},
 	{Code: "audit.read", Description: "查看审计日志"},
+	{Code: "observability.read", Description: "查看内置指标、日志、链路与告警"},
+	{Code: "observability.manage", Description: "确认和管理内置告警"},
 }
 
 var defaultRoles = []model.Role{
 	{Name: "super_admin", Description: "完整管理权限", Permissions: []string{"*"}},
-	{Name: "tenant_admin", Description: "平台管理权限（当前仅支持单租户）", Permissions: []string{"api.read", "api.write", "api.publish", "api.delete", "credential.read", "credential.reveal", "credential.write", "plugin.read", "plugin.manage", "user.read", "user.manage", "audit.read"}},
-	{Name: "operator", Description: "接口运维权限", Permissions: []string{"api.read", "api.write", "api.publish", "credential.read", "credential.write", "plugin.read", "audit.read"}},
-	{Name: "api_developer", Description: "接口开发权限", Permissions: []string{"api.read", "api.write", "credential.read", "plugin.read"}},
-	{Name: "viewer", Description: "只读权限", Permissions: []string{"api.read", "credential.read", "plugin.read"}},
+	{Name: "tenant_admin", Description: "平台管理权限（当前仅支持单租户）", Permissions: []string{"api.read", "api.write", "api.publish", "api.delete", "credential.read", "credential.reveal", "credential.write", "plugin.read", "plugin.manage", "user.read", "user.manage", "audit.read", "observability.read", "observability.manage"}},
+	{Name: "operator", Description: "接口运维权限", Permissions: []string{"api.read", "api.write", "api.publish", "credential.read", "credential.write", "plugin.read", "audit.read", "observability.read", "observability.manage"}},
+	{Name: "api_developer", Description: "接口开发权限", Permissions: []string{"api.read", "api.write", "credential.read", "plugin.read", "observability.read"}},
+	{Name: "viewer", Description: "只读权限", Permissions: []string{"api.read", "credential.read", "plugin.read", "observability.read"}},
 }
 
 func DefaultPermissions() []model.Permission {

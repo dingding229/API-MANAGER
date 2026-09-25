@@ -21,6 +21,7 @@ import (
 	"api-manager/internal/audit"
 	"api-manager/internal/auth"
 	"api-manager/internal/model"
+	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
 	apiSchema "api-manager/internal/schema"
 	"api-manager/internal/store"
@@ -49,6 +50,8 @@ type Admin struct {
 	pluginManager           *plugin.Manager
 	pluginLibrary           *plugin.Library
 	credentialEncryptionKey string
+	observabilityHub        *observability.Hub
+	metrics                 *observability.Metrics
 }
 
 func NewAdmin(s store.Store, plugins *plugin.Registry, adminToken string, logger *slog.Logger) *Admin {
@@ -70,6 +73,9 @@ func (a *Admin) SetCredentialEncryptionKey(secret string) {
 	}
 }
 func (a *Admin) SetPluginLibrary(library *plugin.Library) { a.pluginLibrary = library }
+func (a *Admin) SetObservability(hub *observability.Hub, metrics *observability.Metrics) {
+	a.observabilityHub, a.metrics = hub, metrics
+}
 
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	actor, authorized := a.requestActor(r)
@@ -86,6 +92,14 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/summary":
+		a.observabilitySummary(w)
+	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/logs":
+		a.observabilityLogs(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/traces":
+		a.observabilityTraces(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/admin/v1/observability/alerts/") && strings.HasSuffix(r.URL.Path, "/ack"):
+		a.acknowledgeObservabilityAlert(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/audit-logs":
 		a.listAuditLogs(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/apis":
@@ -190,6 +204,10 @@ func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/admin/v1/observability/alerts/") && strings.HasSuffix(path, "/ack") && r.Method == http.MethodPost:
+		return "observability.manage"
+	case strings.HasPrefix(path, "/admin/v1/observability/") && r.Method == http.MethodGet:
+		return "observability.read"
 	case path == "/admin/v1/audit-logs" && r.Method == http.MethodGet:
 		return "audit.read"
 	case path == "/admin/v1/apis" && r.Method == http.MethodGet, strings.HasPrefix(path, "/admin/v1/apis/") && r.Method == http.MethodGet, path == "/admin/v1/openapi.json":

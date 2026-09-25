@@ -1,19 +1,20 @@
 auth_enabled: false
-
 server:
+  http_listen_address: 127.0.0.1
   http_listen_port: 3100
-
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9096
 common:
-  path_prefix: /loki
+  instance_addr: 127.0.0.1
+  path_prefix: __DATA_DIR__/loki
   storage:
     filesystem:
-      chunks_directory: /loki/chunks
-      rules_directory: /loki/rules
+      chunks_directory: __DATA_DIR__/loki/chunks
+      rules_directory: __DATA_DIR__/loki/rules
   replication_factor: 1
   ring:
     kvstore:
       store: inmemory
-
 schema_config:
   configs:
     - from: 2024-01-01
@@ -23,6 +24,5 @@ schema_config:
       index:
         prefix: index_
         period: 24h
-
 limits_config:
   allow_structured_metadata: true

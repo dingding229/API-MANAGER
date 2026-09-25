@@ -1,14 +1,15 @@
 auth_enabled: false
 server:
+  http_listen_address: 127.0.0.1
   http_listen_port: 3200
 distributor:
   receivers:
     otlp:
       protocols:
         grpc:
-          endpoint: 0.0.0.0:4317
+          endpoint: 127.0.0.1:4317
         http:
-          endpoint: 0.0.0.0:4318
+          endpoint: 127.0.0.1:4318
 ingester:
   max_block_duration: 5m
 compactor:
@@ -18,6 +19,6 @@ storage:
   trace:
     backend: local
     local:
-      path: /var/tempo/traces
+      path: __DATA_DIR__/tempo/traces
     wal:
-      path: /var/tempo/wal
+      path: __DATA_DIR__/tempo/wal

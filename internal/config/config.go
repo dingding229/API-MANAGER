@@ -11,38 +11,44 @@ import (
 )
 
 type Config struct {
-	UpstreamCredentials     string
-	HTTPAddr                string
-	AdminToken              string
-	ProductionMode          bool
-	MetricsToken            string
-	ShutdownTimeout         time.Duration
-	MaxBodyBytes            int64
-	LogLevel                string
-	PostgresDSN             string
-	RedisAddr               string
-	RedisPassword           string
-	RedisUsername           string
-	RedisTLS                bool
-	RedisTLSCAFile          string
-	RedisDB                 int
-	UseRedis                bool
-	UserJWTSecret           string
-	UserJWTTTL              time.Duration
-	PluginDir               string
-	PluginMaxBytes          int64
-	PluginDatabaseWrites    bool
-	PluginLibraryDir        string
-	CredentialEncryptionKey string
-	CORSOrigins             string
-	OTELEnabled             bool
-	OTELServiceName         string
-	OTLPEndpoint            string
-	OTLPInsecure            bool
+	UpstreamCredentials       string
+	HTTPAddr                  string
+	AdminToken                string
+	ProductionMode            bool
+	MetricsToken              string
+	ShutdownTimeout           time.Duration
+	MaxBodyBytes              int64
+	LogLevel                  string
+	PostgresDSN               string
+	RedisAddr                 string
+	RedisPassword             string
+	RedisUsername             string
+	RedisTLS                  bool
+	RedisTLSCAFile            string
+	RedisDB                   int
+	UseRedis                  bool
+	UserJWTSecret             string
+	UserJWTTTL                time.Duration
+	PluginDir                 string
+	PluginMaxBytes            int64
+	PluginDatabaseWrites      bool
+	PluginLibraryDir          string
+	CredentialEncryptionKey   string
+	CORSOrigins               string
+	OTELEnabled               bool
+	OTELServiceName           string
+	OTLPEndpoint              string
+	OTLPInsecure              bool
+	ObservabilityDir          string
+	ObservabilityStackEnabled bool
+	GrafanaAdminPassword      string
+	ObservabilityMaxLogs      int
+	ObservabilityMaxTraces    int
+	ObservabilityFileBytes    int64
 }
 
 func Load() (Config, error) {
-	for _, name := range []string{"PRODUCTION_MODE", "USE_REDIS", "REDIS_TLS_ENABLED"} {
+	for _, name := range []string{"PRODUCTION_MODE", "USE_REDIS", "REDIS_TLS_ENABLED", "OBSERVABILITY_STACK_ENABLED"} {
 		if value := os.Getenv(name); value != "" {
 			if _, err := strconv.ParseBool(value); err != nil {
 				return Config{}, fmt.Errorf("invalid boolean for %s: %w", name, err)
@@ -50,7 +56,7 @@ func Load() (Config, error) {
 		}
 	}
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_TOKEN", "USER_JWT_SECRET", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN"} {
+	for _, name := range []string{"ADMIN_TOKEN", "USER_JWT_SECRET", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -58,34 +64,40 @@ func Load() (Config, error) {
 		secrets[name] = value
 	}
 	return Config{
-		UpstreamCredentials:     secrets["API_UPSTREAM_CREDENTIALS"],
-		HTTPAddr:                env("HTTP_ADDR", ":8080"),
-		AdminToken:              secrets["ADMIN_TOKEN"],
-		ProductionMode:          envBool("PRODUCTION_MODE", false),
-		MetricsToken:            secrets["METRICS_TOKEN"],
-		ShutdownTimeout:         envDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		MaxBodyBytes:            envInt64("MAX_BODY_BYTES", 1<<20),
-		LogLevel:                env("LOG_LEVEL", "info"),
-		PostgresDSN:             secrets["POSTGRES_DSN"],
-		RedisAddr:               env("REDIS_ADDR", "redis:6379"),
-		RedisPassword:           secrets["REDIS_PASSWORD"],
-		RedisUsername:           os.Getenv("REDIS_USERNAME"),
-		RedisTLS:                envBool("REDIS_TLS_ENABLED", false),
-		RedisTLSCAFile:          os.Getenv("REDIS_TLS_CA_FILE"),
-		RedisDB:                 envInt("REDIS_DB", 0),
-		UseRedis:                envBool("USE_REDIS", os.Getenv("REDIS_ADDR") != ""),
-		UserJWTSecret:           secrets["USER_JWT_SECRET"],
-		UserJWTTTL:              envDuration("USER_JWT_TTL", 12*time.Hour),
-		PluginDir:               env("PLUGIN_DIR", "plugins"),
-		PluginMaxBytes:          envInt64("PLUGIN_MAX_BYTES", 20<<20),
-		PluginDatabaseWrites:    envBool("PLUGIN_DATABASE_WRITES_ENABLED", false),
-		PluginLibraryDir:        env("PLUGIN_LIBRARY_DIR", "plugin-library"),
-		CredentialEncryptionKey: secrets["CREDENTIAL_ENCRYPTION_KEY"],
-		CORSOrigins:             env("CORS_ORIGINS", ""),
-		OTELEnabled:             envBool("OTEL_ENABLED", false),
-		OTELServiceName:         env("OTEL_SERVICE_NAME", "api-manager"),
-		OTLPEndpoint:            env("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-		OTLPInsecure:            envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
+		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
+		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
+		AdminToken:                secrets["ADMIN_TOKEN"],
+		ProductionMode:            envBool("PRODUCTION_MODE", false),
+		MetricsToken:              secrets["METRICS_TOKEN"],
+		ShutdownTimeout:           envDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
+		MaxBodyBytes:              envInt64("MAX_BODY_BYTES", 1<<20),
+		LogLevel:                  env("LOG_LEVEL", "info"),
+		PostgresDSN:               secrets["POSTGRES_DSN"],
+		RedisAddr:                 env("REDIS_ADDR", "redis:6379"),
+		RedisPassword:             secrets["REDIS_PASSWORD"],
+		RedisUsername:             os.Getenv("REDIS_USERNAME"),
+		RedisTLS:                  envBool("REDIS_TLS_ENABLED", false),
+		RedisTLSCAFile:            os.Getenv("REDIS_TLS_CA_FILE"),
+		RedisDB:                   envInt("REDIS_DB", 0),
+		UseRedis:                  envBool("USE_REDIS", os.Getenv("REDIS_ADDR") != ""),
+		UserJWTSecret:             secrets["USER_JWT_SECRET"],
+		UserJWTTTL:                envDuration("USER_JWT_TTL", 12*time.Hour),
+		PluginDir:                 env("PLUGIN_DIR", "plugins"),
+		PluginMaxBytes:            envInt64("PLUGIN_MAX_BYTES", 20<<20),
+		PluginDatabaseWrites:      envBool("PLUGIN_DATABASE_WRITES_ENABLED", false),
+		PluginLibraryDir:          env("PLUGIN_LIBRARY_DIR", "plugin-library"),
+		CredentialEncryptionKey:   secrets["CREDENTIAL_ENCRYPTION_KEY"],
+		CORSOrigins:               env("CORS_ORIGINS", ""),
+		OTELEnabled:               envBool("OTEL_ENABLED", false),
+		OTELServiceName:           env("OTEL_SERVICE_NAME", "api-manager"),
+		OTLPEndpoint:              env("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+		OTLPInsecure:              envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
+		ObservabilityDir:          env("OBSERVABILITY_DIR", "data/observability"),
+		ObservabilityStackEnabled: envBool("OBSERVABILITY_STACK_ENABLED", false),
+		GrafanaAdminPassword:      secrets["GRAFANA_ADMIN_PASSWORD"],
+		ObservabilityMaxLogs:      envInt("OBSERVABILITY_MAX_LOGS", 5000),
+		ObservabilityMaxTraces:    envInt("OBSERVABILITY_MAX_TRACES", 2000),
+		ObservabilityFileBytes:    envInt64("OBSERVABILITY_FILE_MAX_BYTES", 16<<20),
 	}, nil
 }
 
@@ -128,7 +140,7 @@ func (c Config) Validate() error {
 		return errors.New("admin, JWT, and credential encryption secrets must be distinct")
 	}
 	if c.ProductionMode {
-		if c.OTELEnabled && (c.OTLPInsecure || c.OTLPEndpoint == "") {
+		if c.OTELEnabled && (c.OTLPEndpoint == "" || (c.OTLPInsecure && !(c.ObservabilityStackEnabled && c.OTLPEndpoint == "127.0.0.1:4317"))) {
 			return errors.New("production tracing requires a configured OTLP endpoint and TLS")
 		}
 		if c.PostgresDSN == "" || !c.UseRedis || c.RedisAddr == "" {
@@ -153,8 +165,20 @@ func (c Config) Validate() error {
 			return errors.New("production requires a distinct METRICS_TOKEN of at least 32 characters")
 		}
 	}
+	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.UserJWTSecret || c.GrafanaAdminPassword == c.CredentialEncryptionKey) {
+		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
+	}
 	if c.UserJWTTTL <= 0 || c.UserJWTTTL > 24*time.Hour {
 		return errors.New("USER_JWT_TTL must be between 1 second and 24 hours")
+	}
+	if c.ObservabilityMaxLogs < 100 || c.ObservabilityMaxLogs > 100000 {
+		return errors.New("OBSERVABILITY_MAX_LOGS must be between 100 and 100000")
+	}
+	if c.ObservabilityMaxTraces < 100 || c.ObservabilityMaxTraces > 50000 {
+		return errors.New("OBSERVABILITY_MAX_TRACES must be between 100 and 50000")
+	}
+	if c.ObservabilityFileBytes < 1<<20 || c.ObservabilityFileBytes > 1<<30 {
+		return errors.New("OBSERVABILITY_FILE_MAX_BYTES must be between 1 MiB and 1 GiB")
 	}
 	return nil
 }

@@ -1,36 +1,30 @@
 apiVersion: 1
-
 datasources:
   - name: Prometheus
     uid: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://127.0.0.1:9090
     isDefault: true
   - name: Loki
     uid: loki
     type: loki
     access: proxy
-    url: http://loki:3100
+    url: http://127.0.0.1:3100
     jsonData:
       derivedFields:
         - name: TraceID
           matcherRegex: '"trace_id":"([a-f0-9]{32})"'
           url: '$${__value.raw}'
           datasourceUid: tempo
-
   - name: Tempo
+    uid: tempo
     type: tempo
     access: proxy
-    url: http://tempo:3200
+    url: http://127.0.0.1:3200
     jsonData:
       tracesToLogs:
         datasourceUid: loki
         filterByTraceID: true
-        filterBySpanID: false
-        tags: ['trace_id', 'span_id']
-        spanStartTimeShift: '-5m'
-        spanEndTimeShift: '5m'
       tracesToMetrics:
         datasourceUid: Prometheus
-        tags: ['service.name', 'http.request.method']

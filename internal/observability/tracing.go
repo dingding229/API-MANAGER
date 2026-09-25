@@ -27,30 +27,42 @@ type TraceConfig struct {
 	Insecure    bool
 }
 
-func InitTracing(ctx context.Context, cfg TraceConfig) (func(context.Context) error, error) {
+func InitTracing(ctx context.Context, cfg TraceConfig, hub *Hub) (func(context.Context) error, error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	if !cfg.Enabled {
-		return func(context.Context) error { return nil }, nil
-	}
 	if cfg.ServiceName == "" {
 		cfg.ServiceName = "api-manager"
-	}
-	if cfg.Endpoint == "" {
-		return nil, fmt.Errorf("OTLP endpoint is required when tracing is enabled")
-	}
-	options := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.Endpoint)}
-	if cfg.Insecure {
-		options = append(options, otlptracegrpc.WithInsecure())
-	}
-	exporter, err := otlptracegrpc.New(ctx, options...)
-	if err != nil {
-		return nil, fmt.Errorf("create OTLP trace exporter: %w", err)
 	}
 	res, err := resource.New(ctx, resource.WithAttributes(attribute.String("service.name", cfg.ServiceName), attribute.String("service.version", "v1")))
 	if err != nil {
 		return nil, fmt.Errorf("create OTEL resource: %w", err)
 	}
-	provider := tracesdk.NewTracerProvider(tracesdk.WithBatcher(exporter, tracesdk.WithBatchTimeout(2*time.Second)), tracesdk.WithResource(res))
+	options := []tracesdk.TracerProviderOption{tracesdk.WithResource(res)}
+	if hub != nil {
+		options = append(options, tracesdk.WithBatcher(
+			&embeddedSpanExporter{hub: hub},
+			tracesdk.WithBatchTimeout(500*time.Millisecond),
+			tracesdk.WithMaxQueueSize(4096),
+			tracesdk.WithMaxExportBatchSize(256),
+		))
+	}
+	if cfg.Enabled {
+		if cfg.Endpoint == "" {
+			return nil, fmt.Errorf("OTLP endpoint is required when tracing is enabled")
+		}
+		exporterOptions := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.Endpoint)}
+		if cfg.Insecure {
+			exporterOptions = append(exporterOptions, otlptracegrpc.WithInsecure())
+		}
+		exporter, err := otlptracegrpc.New(ctx, exporterOptions...)
+		if err != nil {
+			return nil, fmt.Errorf("create OTLP trace exporter: %w", err)
+		}
+		options = append(options, tracesdk.WithBatcher(exporter, tracesdk.WithBatchTimeout(2*time.Second)))
+	}
+	if hub == nil && !cfg.Enabled {
+		return func(context.Context) error { return nil }, nil
+	}
+	provider := tracesdk.NewTracerProvider(options...)
 	otel.SetTracerProvider(provider)
 	return provider.Shutdown, nil
 }
@@ -62,6 +74,7 @@ func Middleware(next http.Handler) http.Handler {
 		ctx, span := tracer.Start(parent, methodLabel(r.Method)+" "+routeName(r.URL.Path), trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(
 			attribute.String("http.request.method", methodLabel(r.Method)),
 			attribute.String("http.route", routeName(r.URL.Path)),
+			attribute.String("url.path", r.URL.Path),
 			attribute.String("server.address", r.Host),
 		))
 		capture := &traceResponseWriter{ResponseWriter: w}
@@ -70,7 +83,7 @@ func Middleware(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		span.SetAttributes(attribute.Int("http.response.status_code", status), attribute.Int("http.response.body.size", capture.bytes))
+		span.SetAttributes(attribute.Int("http.response.status_code", status), attribute.Int("http.response.body.size", capture.bytes), attribute.String("request.id", capture.Header().Get("X-Request-ID")))
 		if status >= 500 {
 			span.SetStatus(codes.Error, http.StatusText(status))
 		}

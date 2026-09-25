@@ -47,8 +47,8 @@ jobs:
           API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
           PROD_SECRETS_DIR=/tmp/ci-secrets PROD_REDIS_ADDR=redis.example:6380 \
           docker compose --env-file /dev/null -f compose.production.yaml -f compose.production.private-ca.yaml config -q
-      - name: Validate Grafana dashboard JSON
-        run: python3 -m json.tool configs/grafana/dashboards/api-manager.json >/dev/null
+      - name: Validate bundled Grafana dashboard
+        run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
       - name: Validate development Compose
         run: docker compose config >/dev/null
         env:
@@ -123,6 +123,12 @@ jobs:
           container_id=$(docker create api-manager:scan)
           trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
           docker export "$container_id" > /tmp/api-manager-image.tar
+          for component in loki tempo prometheus alertmanager alloy grafana; do
+            tar -tf /tmp/api-manager-image.tar | grep -Fx "usr/local/bin/$component" >/dev/null || {
+              echo "Bundled observability executable missing: $component" >&2
+              exit 1
+            }
+          done
           if tar -tf /tmp/api-manager-image.tar | grep -E '(^|/)data/plugins/.+|\.wasm$'; then
             echo 'The release image contains a bundled plugin package.' >&2
             exit 1

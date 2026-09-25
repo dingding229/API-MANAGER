@@ -1,6 +1,7 @@
-# Production application only. TLS/reverse proxy, PostgreSQL, Redis, metrics and
-# tracing backends are provided by the operator. No database/monitoring ports
-# are published by this stack. Do not use the development .env as a secret store.
+# Production application only. TLS/reverse proxy, PostgreSQL and Redis are
+# provided by the operator. Runtime observability is embedded; optional external
+# metric scraping and OTLP export can still be configured. Do not use the
+# development .env as a secret store.
 name: api-manager-production
 services:
   api-manager:
@@ -13,13 +14,14 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 256
-    mem_limit: 512m
-    cpus: 1.0
+    mem_limit: ${PROD_API_MEMORY_LIMIT:-512m}
+    cpus: ${PROD_API_CPUS:-1.0}
     init: true
     stop_grace_period: 30s
     restart: unless-stopped
     ports:
       - "127.0.0.1:${API_MANAGER_LOCAL_PORT:-8080}:8080"
+      - "127.0.0.1:${PROD_GRAFANA_LOCAL_PORT:-3000}:3000"
     environment:
       HTTP_ADDR: ":8080"
       PRODUCTION_MODE: "true"
@@ -36,6 +38,13 @@ services:
       PLUGIN_DIR: /data/plugins
       PLUGIN_LIBRARY_DIR: /data/plugin-library
       PLUGIN_DATABASE_WRITES_ENABLED: "false"
+      OBSERVABILITY_DIR: /data/observability
+      OBSERVABILITY_STACK_ENABLED: ${PROD_OBSERVABILITY_STACK_ENABLED:-false}
+      GRAFANA_ADMIN_PASSWORD: ${PROD_GRAFANA_ADMIN_PASSWORD:-}
+      GRAFANA_ADMIN_PASSWORD_FILE: ${PROD_GRAFANA_ADMIN_PASSWORD_FILE:-}
+      OBSERVABILITY_MAX_LOGS: ${PROD_OBSERVABILITY_MAX_LOGS:-10000}
+      OBSERVABILITY_MAX_TRACES: ${PROD_OBSERVABILITY_MAX_TRACES:-5000}
+      OBSERVABILITY_FILE_MAX_BYTES: ${PROD_OBSERVABILITY_FILE_MAX_BYTES:-67108864}
       OTEL_ENABLED: ${PROD_OTEL_ENABLED:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${PROD_OTEL_ENDPOINT:-}
       OTEL_EXPORTER_OTLP_INSECURE: ${PROD_OTEL_INSECURE:-false}
@@ -49,6 +58,7 @@ services:
     volumes:
       - plugin_data:/data/plugins
       - plugin_library:/data/plugin-library
+      - observability_data:/data/observability
     healthcheck:
       test: ["CMD", "/api-manager", "--healthcheck"]
       interval: 30s
@@ -80,3 +90,5 @@ volumes:
     name: ${PROD_PLUGIN_DATA_VOLUME:-api-manager-prod-plugin-data}
   plugin_library:
     name: ${PROD_PLUGIN_LIBRARY_VOLUME:-api-manager-prod-plugin-library}
+  observability_data:
+    name: ${PROD_OBSERVABILITY_VOLUME:-api-manager-prod-observability}

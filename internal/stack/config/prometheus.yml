@@ -1,16 +1,14 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-
 rule_files:
-  - /etc/prometheus/alerts.yml
-
+  - __CONFIG_DIR__/alerts.yml
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: ["alertmanager:9093"]
-
+        - targets: ['127.0.0.1:9093']
 scrape_configs:
   - job_name: api-manager
+    __METRICS_AUTH__
     static_configs:
-      - targets: ["api-manager:8080"]
+      - targets: ['127.0.0.1:__API_PORT__']

@@ -31,6 +31,7 @@ type Metrics struct {
 	circuitRejections uint64
 	inflight          int64
 	started           time.Time
+	points            map[int64]*MetricPoint
 }
 
 type histogram struct {
@@ -39,8 +40,48 @@ type histogram struct {
 	count   uint64
 }
 
+type MetricPoint struct {
+	Timestamp        time.Time `json:"timestamp"`
+	Requests         uint64    `json:"requests"`
+	Errors           uint64    `json:"errors"`
+	AverageLatencyMS float64   `json:"average_latency_ms"`
+	MaxLatencyMS     float64   `json:"max_latency_ms"`
+	RateLimitHits    uint64    `json:"rate_limit_hits"`
+	UpstreamFailures uint64    `json:"upstream_failures"`
+	PluginFailures   uint64    `json:"plugin_failures"`
+	durationSumMS    float64
+}
+
+type MetricsSnapshot struct {
+	UptimeSeconds     float64       `json:"uptime_seconds"`
+	HTTPRequestsTotal uint64        `json:"http_requests_total"`
+	GatewayRequests   uint64        `json:"gateway_requests_total"`
+	GatewayErrors     uint64        `json:"gateway_errors_total"`
+	GatewayErrorRate  float64       `json:"gateway_error_rate"`
+	AverageLatencyMS  float64       `json:"average_latency_ms"`
+	P95LatencyMS      float64       `json:"p95_latency_ms"`
+	Inflight          int64         `json:"inflight"`
+	RateLimitHits     uint64        `json:"rate_limit_hits"`
+	AuthFailures      uint64        `json:"auth_failures"`
+	SchemaFailures    uint64        `json:"schema_failures"`
+	UpstreamFailures  uint64        `json:"upstream_failures"`
+	PluginFailures    uint64        `json:"plugin_failures"`
+	UpstreamRetries   uint64        `json:"upstream_retries"`
+	CircuitRejections uint64        `json:"circuit_rejections"`
+	Series            []MetricPoint `json:"series"`
+}
+
+type RecentMetrics struct {
+	Requests         uint64
+	Errors           uint64
+	AverageLatencyMS float64
+	RateLimitHits    uint64
+	UpstreamFailures uint64
+	PluginFailures   uint64
+}
+
 func NewMetrics() *Metrics {
-	return &Metrics{httpRequests: map[string]uint64{}, httpLatency: map[string]*histogram{}, gatewayRequests: map[string]uint64{}, gatewayErrors: map[string]uint64{}, gatewayLatency: map[string]*histogram{}, started: time.Now()}
+	return &Metrics{httpRequests: map[string]uint64{}, httpLatency: map[string]*histogram{}, gatewayRequests: map[string]uint64{}, gatewayErrors: map[string]uint64{}, gatewayLatency: map[string]*histogram{}, started: time.Now(), points: map[int64]*MetricPoint{}}
 }
 
 func (m *Metrics) ObserveHTTP(route, method string, status int, duration time.Duration) {
@@ -89,15 +130,146 @@ func (m *Metrics) ObserveGateway(method string, status int, duration time.Durati
 	}
 	hist.count++
 	hist.sum += seconds
+	point := m.pointLocked(time.Now())
+	point.Requests++
+	if status >= 400 {
+		point.Errors++
+	}
+	durationMS := duration.Seconds() * 1000
+	point.durationSumMS += durationMS
+	if durationMS > point.MaxLatencyMS {
+		point.MaxLatencyMS = durationMS
+	}
 }
 
-func (m *Metrics) IncRateLimit()        { m.mu.Lock(); m.rateLimitHits++; m.mu.Unlock() }
-func (m *Metrics) IncAuthFailure()      { m.mu.Lock(); m.authFailures++; m.mu.Unlock() }
-func (m *Metrics) IncSchemaFailure()    { m.mu.Lock(); m.schemaFailures++; m.mu.Unlock() }
-func (m *Metrics) IncUpstreamFailure()  { m.mu.Lock(); m.upstreamFailures++; m.mu.Unlock() }
-func (m *Metrics) IncPluginFailure()    { m.mu.Lock(); m.pluginFailures++; m.mu.Unlock() }
+func (m *Metrics) IncRateLimit() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rateLimitHits++
+	m.pointLocked(time.Now()).RateLimitHits++
+}
+func (m *Metrics) IncAuthFailure()   { m.mu.Lock(); m.authFailures++; m.mu.Unlock() }
+func (m *Metrics) IncSchemaFailure() { m.mu.Lock(); m.schemaFailures++; m.mu.Unlock() }
+func (m *Metrics) IncUpstreamFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.upstreamFailures++
+	m.pointLocked(time.Now()).UpstreamFailures++
+}
+func (m *Metrics) IncPluginFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pluginFailures++
+	m.pointLocked(time.Now()).PluginFailures++
+}
 func (m *Metrics) IncUpstreamRetry()    { m.mu.Lock(); m.upstreamRetries++; m.mu.Unlock() }
 func (m *Metrics) IncCircuitRejection() { m.mu.Lock(); m.circuitRejections++; m.mu.Unlock() }
+
+func (m *Metrics) pointLocked(now time.Time) *MetricPoint {
+	minute := now.UTC().Truncate(time.Minute)
+	key := minute.Unix()
+	point := m.points[key]
+	if point == nil {
+		point = &MetricPoint{Timestamp: minute}
+		m.points[key] = point
+	}
+	cutoff := minute.Add(-2 * time.Hour).Unix()
+	for timestamp := range m.points {
+		if timestamp < cutoff {
+			delete(m.points, timestamp)
+		}
+	}
+	return point
+}
+
+func (m *Metrics) Snapshot() MetricsSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	snapshot := MetricsSnapshot{
+		UptimeSeconds: time.Since(m.started).Seconds(), Inflight: m.inflight,
+		RateLimitHits: m.rateLimitHits, AuthFailures: m.authFailures,
+		SchemaFailures: m.schemaFailures, UpstreamFailures: m.upstreamFailures,
+		PluginFailures: m.pluginFailures, UpstreamRetries: m.upstreamRetries,
+		CircuitRejections: m.circuitRejections,
+	}
+	for _, count := range m.httpRequests {
+		snapshot.HTTPRequestsTotal += count
+	}
+	for key, count := range m.gatewayRequests {
+		snapshot.GatewayRequests += count
+		parts := strings.Split(key, "\xff")
+		if len(parts) == 2 {
+			status, _ := strconv.Atoi(parts[1])
+			if status >= 400 {
+				snapshot.GatewayErrors += count
+			}
+		}
+	}
+	if snapshot.GatewayRequests > 0 {
+		snapshot.GatewayErrorRate = float64(snapshot.GatewayErrors) / float64(snapshot.GatewayRequests)
+	}
+	var latencyCount uint64
+	var latencySum float64
+	combinedBuckets := make([]uint64, len(latencyBuckets))
+	for _, histogram := range m.gatewayLatency {
+		latencyCount += histogram.count
+		latencySum += histogram.sum
+		for index, count := range histogram.buckets {
+			combinedBuckets[index] += count
+		}
+	}
+	if latencyCount > 0 {
+		snapshot.AverageLatencyMS = latencySum * 1000 / float64(latencyCount)
+		target := uint64(float64(latencyCount)*0.95 + 0.999999)
+		for index, count := range combinedBuckets {
+			if count >= target {
+				snapshot.P95LatencyMS = latencyBuckets[index] * 1000
+				break
+			}
+		}
+		if snapshot.P95LatencyMS == 0 {
+			snapshot.P95LatencyMS = latencyBuckets[len(latencyBuckets)-1] * 1000
+		}
+	}
+	keys := make([]int64, 0, len(m.points))
+	cutoff := time.Now().UTC().Add(-60 * time.Minute).Unix()
+	for key := range m.points {
+		if key >= cutoff {
+			keys = append(keys, key)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for _, key := range keys {
+		point := *m.points[key]
+		if point.Requests > 0 {
+			point.AverageLatencyMS = point.durationSumMS / float64(point.Requests)
+		}
+		point.durationSumMS = 0
+		snapshot.Series = append(snapshot.Series, point)
+	}
+	return snapshot
+}
+
+func (s MetricsSnapshot) Recent(window time.Duration) RecentMetrics {
+	cutoff := time.Now().UTC().Add(-window)
+	result := RecentMetrics{}
+	var duration float64
+	for _, point := range s.Series {
+		if point.Timestamp.Before(cutoff) {
+			continue
+		}
+		result.Requests += point.Requests
+		result.Errors += point.Errors
+		result.RateLimitHits += point.RateLimitHits
+		result.UpstreamFailures += point.UpstreamFailures
+		result.PluginFailures += point.PluginFailures
+		duration += point.AverageLatencyMS * float64(point.Requests)
+	}
+	if result.Requests > 0 {
+		result.AverageLatencyMS = duration / float64(result.Requests)
+	}
+	return result
+}
 
 func (m *Metrics) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
