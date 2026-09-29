@@ -2,7 +2,7 @@
 
 API Manager 是面向私有化部署的 API 网关与管理平台，提供路由发布、上游代理、API 鉴权、限流与配额、WASM 插件、用户与 RBAC、审计日志以及运行观测控制台。
 
-发布镜像：`dingding229/api-manager`，支持 `linux/amd64` 和 `linux/arm64`。生产环境必须使用经过审核的完整镜像摘要，例如 `dingding229/api-manager@sha256:...`，不要直接依赖可变的 `latest` 标签。
+发布镜像：`docker.io/dingding229/api-manager`，支持 `linux/amd64` 和 `linux/arm64`。生产环境必须使用经过审核的完整镜像摘要，例如 `docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46`，不要直接依赖可变的 `latest` 标签。
 
 ## 能力与部署边界
 
@@ -21,7 +21,7 @@ API Manager 是面向私有化部署的 API 网关与管理平台，提供路由
 
 ```bash
 cat > .env <<EOF_ENV
-API_MANAGER_IMAGE=dingding229/api-manager:latest
+API_MANAGER_IMAGE=docker.io/dingding229/api-manager:latest
 ADMIN_TOKEN=$(openssl rand -hex 32)
 USER_JWT_SECRET=$(openssl rand -hex 32)
 CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
@@ -93,7 +93,7 @@ Secret 目录必须为 `0700`，文件必须为普通文件且权限为 `0444`�
 ### 2. 执行生产预检
 
 ```bash
-export API_MANAGER_IMAGE='dingding229/api-manager@sha256:<完整镜像摘要>'
+export API_MANAGER_IMAGE='docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46'
 export PROD_SECRETS_DIR='/absolute/path/api-manager-secrets'
 export PROD_REDIS_ADDR='redis.example.com:6380'
 

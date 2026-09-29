@@ -79,12 +79,19 @@ jobs:
           printf '%s\n' 'postgres://ci:password@postgres.example:5432/api?sslmode=verify-full' > "$secret_dir/postgres_dsn"
           printf '%s\n' ci-redis-password-at-least-thirty-two-characters > "$secret_dir/redis_password"
           chmod 0444 "$secret_dir"/*
-          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
           PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
           python3 scripts/preflight-production.py
-          API_MANAGER_IMAGE=example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
           PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
           docker compose --env-file /dev/null -f compose.production.yaml config -q
+          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
+          docker compose --env-file /dev/null -f compose.production.yaml config --images \
+          | grep -Eq '^docker\.io/dingding229/api-manager@sha256:[0-9a-f]{64}$'
+          if API_MANAGER_IMAGE=ghcr.io/example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
+            python3 scripts/preflight-production.py; then
+            echo 'non-Docker-Hub production image unexpectedly accepted' >&2
+            exit 1
+          fi
       - name: Validate bundled Grafana dashboard
         run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
       - name: Validate development Compose
@@ -119,6 +126,7 @@ jobs:
             --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --set env.REDIS_TLS_ENABLED=true \
             --set 'authSecretFiles[0]=API_AUTH_JWT_HS256_SECRET' > /tmp/api-manager-production.yaml
+          test "$(grep -Ec 'image: "docker\.io/dingding229/api-manager@sha256:[0-9a-f]{64}"' /tmp/api-manager-production.yaml)" -eq 2
       - name: Scan rendered Kubernetes manifests
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

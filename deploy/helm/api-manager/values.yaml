@@ -2,9 +2,10 @@ productionMode: false # set true in a production values file; enables runtime fa
 replicaCount: 1 # in-process plugin registry; scale only after distributed reload is implemented
 
 image:
-  repository: dingding229/api-manager
+  repository: docker.io/dingding229/api-manager
   tag: "0.2.1"
-  digest: "" # required with productionMode; immutable sha256 digest
+  # Docker Hub v0.2.1 multi-architecture image. Keep production deployments immutable.
+  digest: "sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46"
   pullPolicy: IfNotPresent
 
 # Required when pulling the private Docker Hub image.

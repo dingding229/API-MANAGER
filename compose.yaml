@@ -1,6 +1,6 @@
 services:
   api-manager:
-    image: ${API_MANAGER_IMAGE:-dingding229/api-manager:latest}
+    image: ${API_MANAGER_IMAGE:-docker.io/dingding229/api-manager:latest}
     pull_policy: ${API_MANAGER_PULL_POLICY:-always}
     ports:
       - "127.0.0.1:8080:8080"

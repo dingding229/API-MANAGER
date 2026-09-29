@@ -5,7 +5,7 @@
 name: api-manager-production
 services:
   api-manager:
-    image: ${API_MANAGER_IMAGE:?Set an immutable, reviewed image digest}
+    image: ${API_MANAGER_IMAGE:-docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46}
     pull_policy: always
     user: "65532:65532"
     read_only: true
