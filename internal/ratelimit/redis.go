@@ -70,11 +70,3 @@ func (r *Redis) Allow(key string, limit int, windowSize time.Duration, now time.
 	value, err := fixedWindowScript.Run(ctx, r.client, []string{redisKey}, windowSize.Milliseconds(), limit).Int()
 	return err == nil && value == 1
 }
-
-func (r *Redis) UseNonce(key string, ttl time.Duration) bool {
-	sum := sha256.Sum256([]byte(key))
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	ok, err := r.client.SetNX(ctx, "api-manager:nonce:"+hex.EncodeToString(sum[:]), "1", ttl).Result()
-	return err == nil && ok
-}

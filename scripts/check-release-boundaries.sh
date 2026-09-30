@@ -15,7 +15,7 @@ for path in $(git ls-files); do
   [ -e "$path" ] || continue
   case "$path" in
     .dockerignore|.env.example|.gitignore|Dockerfile|Makefile|README.md|go.mod|go.sum|\
-    compose.yaml|compose.production.yaml|\
+    docker-compose.yml|\
     .github/dependabot.yml|.github/workflows/ci.yml|\
     cmd/server/*|internal/*|configs/*|deploy/helm/api-manager/*|\
     security/trivy.yaml|security/tempo-vex.json|\

@@ -1,0 +1,139 @@
+name: api-manager
+services:
+  api-manager:
+    image: ${API_MANAGER_IMAGE:-docker.io/dingding229/api-manager:latest}
+    pull_policy: always
+    init: true
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    pids_limit: 256
+    mem_limit: ${API_MEMORY_LIMIT:-2g}
+    cpus: ${API_CPUS:-2.0}
+    stop_grace_period: 30s
+    ports:
+      - "${API_BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
+      - "${API_BIND_ADDR:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+    environment:
+      HTTP_ADDR: ":8080"
+      PRODUCTION_MODE: "true"
+      ALLOW_INTERNAL_PLAINTEXT: "true"
+      ADMIN_TOKEN_FILE: /run/secrets/admin_token
+      CREDENTIAL_ENCRYPTION_KEY_FILE: /run/secrets/credential_encryption_key
+      METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: api_manager
+      POSTGRES_USER: api_manager
+      POSTGRES_SSLMODE: disable
+      USE_REDIS: "true"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_TLS_ENABLED: "false"
+      PLUGIN_DIR: /data/plugins
+      PLUGIN_LIBRARY_DIR: /data/plugin-library
+      PLUGIN_DATABASE_WRITES_ENABLED: "false"
+      OBSERVABILITY_DIR: /data/observability
+      OBSERVABILITY_STACK_ENABLED: ${OBSERVABILITY_STACK_ENABLED:-false}
+      GRAFANA_ADMIN_PASSWORD_FILE: /run/secrets/grafana_admin_password
+      OTEL_EXPORTER_OTLP_INSECURE: "false"
+    secrets:
+      - admin_token
+      - credential_encryption_key
+      - metrics_token
+      - postgres_password
+      - redis_password
+      - grafana_admin_password
+    volumes:
+      - plugin_data:/data/plugins
+      - plugin_library:/data/plugin-library
+      - observability_data:/data/observability
+    networks: [frontend, backend]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/api-manager", "--healthcheck"]
+      interval: 20s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  postgres:
+    image: docker.io/library/postgres:17-alpine
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    pids_limit: 128
+    environment:
+      POSTGRES_DB: api_manager
+      POSTGRES_USER: api_manager
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    secrets: [postgres_password]
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U api_manager -d api_manager"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    logging: *logging
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    restart: unless-stopped
+    user: redis:redis
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=8m"]
+    mem_limit: 256m
+    pids_limit: 64
+    command:
+      - sh
+      - -ec
+      - |
+        umask 077
+        password="$$(cat /run/secrets/redis_password)"
+        hash="$$(printf '%s' "$$password" | sha256sum | cut -d ' ' -f 1)"
+        printf 'user default on #%s ~* &* +@all\n' "$$hash" > /tmp/users.acl
+        unset password hash
+        exec redis-server --aclfile /tmp/users.acl --appendonly yes --dir /data --protected-mode yes --maxmemory 192mb --maxmemory-policy noeviction
+    secrets: [redis_password]
+    volumes: ["redis_data:/data"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/redis_password)\" redis-cli --no-auth-warning ping | grep -qx PONG"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 10
+    logging: *logging
+
+secrets:
+  admin_token: {file: "${SECRETS_DIR:-./secrets}/admin_token"}
+  credential_encryption_key: {file: "${SECRETS_DIR:-./secrets}/credential_encryption_key"}
+  metrics_token: {file: "${SECRETS_DIR:-./secrets}/metrics_token"}
+  postgres_password: {file: "${SECRETS_DIR:-./secrets}/postgres_password"}
+  redis_password: {file: "${SECRETS_DIR:-./secrets}/redis_password"}
+  grafana_admin_password: {file: "${SECRETS_DIR:-./secrets}/grafana_admin_password"}
+
+networks:
+  frontend: {}
+  backend: {internal: true}
+
+volumes:
+  postgres_data: {name: "${POSTGRES_DATA_VOLUME:-api-manager-postgres-data}"}
+  redis_data: {name: "${REDIS_DATA_VOLUME:-api-manager-redis-data}"}
+  plugin_data: {name: "${PLUGIN_DATA_VOLUME:-api-manager-prod-plugin-data}"}
+  plugin_library: {name: "${PLUGIN_LIBRARY_VOLUME:-api-manager-prod-plugin-library}"}
+  observability_data: {name: "${OBSERVABILITY_DATA_VOLUME:-api-manager-prod-observability}"}

@@ -72,51 +72,24 @@ jobs:
           set -euo pipefail
           python3 -m py_compile scripts/init-production-secrets.py scripts/backup-production.py scripts/preflight-production.py scripts/verify-production.py scripts/test-production.py
           python3 scripts/test-production.py
-          secret_dir=$(mktemp -d)
-          trap 'rm -rf "$secret_dir"' EXIT
-          chmod 0700 "$secret_dir"
-          printf '%s\n' ci-admin-token-at-least-thirty-two-characters > "$secret_dir/admin_token"
-          printf '%s\n' ci-user-jwt-secret-at-least-thirty-two-characters > "$secret_dir/user_jwt_secret"
-          printf '%s\n' ci-credential-key-at-least-thirty-two-characters > "$secret_dir/credential_encryption_key"
-          printf '%s\n' ci-metrics-token-at-least-thirty-two-characters > "$secret_dir/metrics_token"
-          printf '%s\n' ci-grafana-password-at-least-thirty-two-characters > "$secret_dir/grafana_admin_password"
-          printf '%s\n' 'postgres://ci:password@postgres.example:5432/api?sslmode=verify-full' > "$secret_dir/postgres_dsn"
-          printf '%s\n' ci-redis-password-at-least-thirty-two-characters > "$secret_dir/redis_password"
-          chmod 0444 "$secret_dir"/*
-          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
-          python3 scripts/preflight-production.py
-          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
-          docker compose --env-file /dev/null -f compose.production.yaml config -q
-          PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
-          docker compose --env-file /dev/null -f compose.production.yaml config --images \
-          | grep -Eq '^docker\.io/dingding229/api-manager:latest$'
-          if API_MANAGER_IMAGE=ghcr.io/example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
-            PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
-            python3 scripts/preflight-production.py; then
-            echo 'non-Docker-Hub production image unexpectedly accepted' >&2
-            exit 1
-          fi
+          secret_dir="$(mktemp -d)/secrets"
+          trap 'rm -rf "$(dirname "$secret_dir")"' EXIT
+          python3 scripts/init-production-secrets.py --dir "$secret_dir"
+          SECRETS_DIR="$secret_dir" python3 scripts/preflight-production.py
+          SECRETS_DIR="$secret_dir" docker compose --env-file /dev/null -f docker-compose.yml config -q
+          SECRETS_DIR="$secret_dir" docker compose --env-file /dev/null -f docker-compose.yml config --images \
+            | grep -Fx 'docker.io/dingding229/api-manager:latest'
       - name: Validate bundled Grafana dashboard
         run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
-      - name: Validate development Compose
-        run: docker compose config >/dev/null
-        env:
-          ADMIN_TOKEN: ci-only-admin-token-at-least-thirty-two-characters
-          USER_JWT_SECRET: ci-only-jwt-secret-at-least-thirty-two-characters
-          CREDENTIAL_ENCRYPTION_KEY: ci-only-credential-key-at-least-thirty-two-characters
-          POSTGRES_PASSWORD: ci-only-database-password
-          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Lint Helm chart
         run: |
           helm lint deploy/helm/api-manager \
             --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
-            --set secrets.USER_JWT_SECRET=ci-only-jwt-secret-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci
           helm template api-manager deploy/helm/api-manager \
             --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
-            --set secrets.USER_JWT_SECRET=ci-only-jwt-secret-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci >/dev/null
           helm lint deploy/helm/api-manager \
@@ -129,7 +102,7 @@ jobs:
             --set existingSecret=ci-placeholder \
             --set image.tag=latest --set image.pullPolicy=Always \
             --set env.REDIS_TLS_ENABLED=true \
-            --set 'authSecretFiles[0]=API_AUTH_JWT_HS256_SECRET' > /tmp/api-manager-production.yaml
+            > /tmp/api-manager-production.yaml
           test "$(grep -Ec 'image: "docker\.io/dingding229/api-manager:latest"' /tmp/api-manager-production.yaml)" -eq 2
       - name: Scan rendered Kubernetes manifests
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -204,6 +177,68 @@ jobs:
             echo 'The release image contains a bundled plugin package.' >&2
             exit 1
           fi
+
+
+      - name: Test single Compose deployment and KEY-only authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SECRETS_DIR="$(mktemp -d)/secrets"
+          export API_MANAGER_IMAGE=docker.io/dingding229/api-manager:ci-scan
+          export POSTGRES_DATA_VOLUME="api-manager-ci-${GITHUB_RUN_ID}-postgres"
+          export REDIS_DATA_VOLUME="api-manager-ci-${GITHUB_RUN_ID}-redis"
+          export PLUGIN_DATA_VOLUME="api-manager-ci-${GITHUB_RUN_ID}-plugins"
+          export PLUGIN_LIBRARY_VOLUME="api-manager-ci-${GITHUB_RUN_ID}-library"
+          export OBSERVABILITY_DATA_VOLUME="api-manager-ci-${GITHUB_RUN_ID}-observability"
+          cleanup() {
+            docker compose --env-file /dev/null -f docker-compose.yml down -v >/dev/null 2>&1 || true
+            rm -rf "$(dirname "$SECRETS_DIR")"
+          }
+          trap cleanup EXIT
+          python3 scripts/init-production-secrets.py --dir "$SECRETS_DIR"
+          docker tag api-manager:scan "$API_MANAGER_IMAGE"
+          docker compose --env-file /dev/null -f docker-compose.yml pull postgres redis
+          docker compose --env-file /dev/null -f docker-compose.yml up -d --pull never --wait --wait-timeout 180
+          python3 scripts/verify-production.py --url http://127.0.0.1:8080 --secret-dir "$SECRETS_DIR"
+          python3 - <<'PYTEST'
+          import json, os, pathlib
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError
+          root=pathlib.Path(os.environ['SECRETS_DIR'])
+          admin=(root/'admin_token').read_text().strip()
+          metrics=(root/'metrics_token').read_text().strip()
+          def call(method,path,key=None,data=None):
+              headers={'Content-Type':'application/json'}
+              if key: headers['X-API-Key']=key
+              payload=None if data is None else json.dumps(data).encode()
+              try:
+                  with urlopen(Request('http://127.0.0.1:8080'+path,data=payload,headers=headers,method=method),timeout=5) as response:
+                      body=response.read()
+                      return response.status,(json.loads(body) if body else {})
+              except HTTPError as error:
+                  error.close(); return error.code,{}
+          for path in ('/auth/v1/login','/auth/v1/bootstrap'):
+              assert call('POST',path,admin,{})[0]==404
+          for mode in ('none','jwt','hmac'):
+              assert call('POST','/admin/v1/apis',admin,{'name':'rejected','method':'GET','path':'/api/rejected','auth_mode':mode})[0]==400
+          status,route=call('POST','/admin/v1/apis',admin,{'name':'integration','method':'GET','path':'/api/integration','response_body':'{"ok":true}'})
+          assert status==201 and route['auth_mode']=='api_key'
+          assert call('POST','/admin/v1/apis/'+route['id']+'/publish',admin)[0]==200
+          assert call('GET','/api/integration')[0]==401
+          assert call('GET','/api/integration',admin)[0]==401
+          status,credential=call('POST','/admin/v1/credentials',admin,{'name':'integration'})
+          assert status==201
+          key=credential['api_key']
+          assert call('GET','/api/integration',key)[0]==200
+          assert call('GET','/admin/v1/apis',key)[0]==401
+          assert call('GET','/metrics',key)[0]==401
+          status,audits=call('GET','/admin/v1/audit-logs',admin)
+          assert status==200 and audits['items'], 'KEY operations must persist audit records'
+          assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',admin)[0]==200
+          assert call('GET','/api/integration',key)[0]==401
+          assert call('DELETE','/admin/v1/apis/'+route['id'],admin)[0]==204
+          print('PASS: databases ready, KEY scopes/revocation/audits validated; no credentials displayed')
+          PYTEST
 
   publish-amd64:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'

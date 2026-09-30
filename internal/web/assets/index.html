@@ -12,21 +12,12 @@
       <div class="auth-card">
         <p class="eyebrow">API MANAGER</p>
         <h1>管理控制台</h1>
-        <p class="muted">使用管理员账号登录，统一管理接口、凭证、用户与角色。</p>
+        <p class="muted">使用管理员 KEY 登录，无需账号密码或首次初始化。</p>
         <form id="login-form" class="form-stack">
-          <label class="field"><span class="field-label">邮箱</span><input id="email" type="email" required autocomplete="email" placeholder="admin@example.com"></label>
-          <label class="field"><span class="field-label">密码</span><input id="password" type="password" required autocomplete="current-password" minlength="12" maxlength="72" placeholder="12–72 字节"><span class="field-hint">使用已初始化的管理员账号。</span></label>
+          <label class="field" for="admin-key"><span class="field-label">管理员 KEY</span><input id="admin-key" type="password" required autocomplete="current-password" minlength="32" placeholder="管理员 KEY" aria-describedby="key-hint"><span id="key-hint" class="field-hint">使用 secrets/admin_token 中的 KEY。KEY 仅保存在当前浏览器会话中。</span></label>
           <button type="submit">登录</button>
         </form>
-        <details id="bootstrap-panel" class="bootstrap" hidden><summary>首次部署：初始化超级管理员</summary>
-          <form id="bootstrap-form" class="form-stack">
-            <label class="field"><span class="field-label">管理员 Token</span><input id="bootstrap-token" type="password" placeholder="ADMIN_TOKEN"><span class="field-hint">仅用于首次初始化，不会显示或保存。</span></label>
-            <label class="field"><span class="field-label">邮箱</span><input id="bootstrap-email" type="email" required></label>
-            <label class="field"><span class="field-label">密码</span><input id="bootstrap-password" type="password" minlength="12" maxlength="72" required></label>
-            <button type="submit" class="secondary">初始化</button>
-          </form>
-        </details>
-        <p id="auth-message" class="message"></p>
+        <p id="auth-message" class="message" role="status" aria-live="polite"></p>
       </div>
     </section>
 
@@ -37,8 +28,6 @@
           <button data-page="overview" class="active">总览</button>
           <button data-page="apis" data-permission="api.read">接口管理</button>
           <button data-page="credentials" data-permission="credential.read">调用凭证</button>
-          <button data-page="users" data-permission="user.read">用户管理</button>
-          <button data-page="roles" data-permission="user.read">角色与权限</button>
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>

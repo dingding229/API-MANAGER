@@ -11,18 +11,12 @@ import (
 	"api-manager/internal/audit"
 	"api-manager/internal/ids"
 	"api-manager/internal/model"
-	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
 const passwordHashCost = 12
-
-var dummyPasswordHash = func() []byte {
-	hash, _ := bcrypt.GenerateFromPassword([]byte("api-manager-dummy-password"), passwordHashCost)
-	return hash
-}()
 
 type Store interface {
 	CreateUser(model.User) error
@@ -42,21 +36,11 @@ type Store interface {
 	GetUserPermissions(string) []string
 }
 
-type Service struct {
-	store  Store
-	secret []byte
-	ttl    time.Duration
-}
+type Service struct{ store Store }
 
-func NewService(store Store, secret string, ttl time.Duration) *Service {
-	if ttl <= 0 {
-		ttl = 12 * time.Hour
-	}
-	return &Service{store: store, secret: []byte(secret), ttl: ttl}
-}
+func NewService(store Store) *Service { return &Service{store: store} }
 
 func (s *Service) EnsureDefaults() error { return s.store.EnsureRBAC() }
-func (s *Service) Enabled() bool         { return len(s.secret) > 0 }
 func (s *Service) Count() int            { return s.store.CountUsers() }
 
 func (s *Service) CountChecked() (int, error) {
@@ -103,62 +87,6 @@ func (s *Service) CreateWithRoles(email, password string, roles []string) (model
 		return model.User{}, err
 	}
 	return newUser, nil
-}
-
-func (s *Service) Authenticate(email, password string) (model.User, string, error) {
-	if !s.Enabled() {
-		return model.User{}, "", errors.New("user authentication is disabled")
-	}
-	user, lookupErr := s.store.GetUserByEmail(strings.ToLower(strings.TrimSpace(email)))
-	hash := []byte(user.PasswordHash)
-	if lookupErr != nil || len(hash) == 0 {
-		hash = dummyPasswordHash
-	}
-	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(password))
-	if lookupErr != nil || user.Status != "active" || passwordErr != nil {
-		return model.User{}, "", ErrInvalidCredentials
-	}
-	now := time.Now()
-	claims := jwt.MapClaims{"sub": user.ID, "email": user.Email, "roles": user.Roles, "iat": now.Unix(), "exp": now.Add(s.ttl).Unix()}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(s.secret)
-	if err != nil {
-		return model.User{}, "", fmt.Errorf("sign login token: %w", err)
-	}
-	return user, signed, nil
-}
-
-func (s *Service) ValidateToken(tokenString string) (model.User, error) {
-	if !s.Enabled() {
-		return model.User{}, ErrInvalidCredentials
-	}
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.secret, nil
-	}, jwt.WithExpirationRequired(), jwt.WithIssuedAt())
-	if err != nil || !token.Valid {
-		return model.User{}, ErrInvalidCredentials
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return model.User{}, ErrInvalidCredentials
-	}
-	email, _ := claims["email"].(string)
-	issued, err := claims.GetIssuedAt()
-	if err != nil || issued == nil {
-		return model.User{}, ErrInvalidCredentials
-	}
-	expires, err := claims.GetExpirationTime()
-	if err != nil || expires == nil || expires.Time.Sub(issued.Time) > 24*time.Hour || expires.Time.Before(issued.Time) {
-		return model.User{}, ErrInvalidCredentials
-	}
-	user, err := s.store.GetUserByEmail(email)
-	if err != nil || user.Status != "active" || claims["sub"] != user.ID {
-		return model.User{}, ErrInvalidCredentials
-	}
-	return user, nil
 }
 
 func (s *Service) Can(userID, permission string) bool {

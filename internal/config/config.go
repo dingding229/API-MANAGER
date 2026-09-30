@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ type Config struct {
 	HTTPAddr                  string
 	AdminToken                string
 	ProductionMode            bool
+	AllowInternalPlaintext    bool
 	MetricsToken              string
 	ShutdownTimeout           time.Duration
 	MaxBodyBytes              int64
@@ -28,8 +30,6 @@ type Config struct {
 	RedisTLS                  bool
 	RedisDB                   int
 	UseRedis                  bool
-	UserJWTSecret             string
-	UserJWTTTL                time.Duration
 	PluginDir                 string
 	PluginMaxBytes            int64
 	PluginDatabaseWrites      bool
@@ -50,7 +50,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_TOKEN", "USER_JWT_SECRET", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
+	for _, name := range []string{"ADMIN_TOKEN", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -91,10 +91,6 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	userJWTTTL, err := envDuration("USER_JWT_TTL", 12*time.Hour)
-	if err != nil {
-		return Config{}, err
-	}
 	maxBodyBytes, err := envInt64("MAX_BODY_BYTES", 1<<20)
 	if err != nil {
 		return Config{}, err
@@ -120,24 +116,39 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	allowInternalPlaintext, err := envBool("ALLOW_INTERNAL_PLAINTEXT", false)
+	if err != nil {
+		return Config{}, err
+	}
+	postgresDSN := secrets["POSTGRES_DSN"]
+	if postgresDSN == "" && secrets["POSTGRES_PASSWORD"] != "" {
+		port, err := envInt("POSTGRES_PORT", 5432)
+		if err != nil || port < 1 || port > 65535 {
+			return Config{}, errors.New("POSTGRES_PORT must be 1..65535")
+		}
+		u := url.URL{Scheme: "postgres", Host: net.JoinHostPort(env("POSTGRES_HOST", "postgres"), strconv.Itoa(port)), Path: "/" + env("POSTGRES_DB", "api_manager"), User: url.UserPassword(env("POSTGRES_USER", "api_manager"), secrets["POSTGRES_PASSWORD"])}
+		query := url.Values{"sslmode": {env("POSTGRES_SSLMODE", "verify-full")}}
+		u.RawQuery = query.Encode()
+		postgresDSN = u.String()
+	}
+
 	return Config{
 		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
 		AdminToken:                secrets["ADMIN_TOKEN"],
 		ProductionMode:            productionMode,
+		AllowInternalPlaintext:    allowInternalPlaintext,
 		MetricsToken:              secrets["METRICS_TOKEN"],
 		ShutdownTimeout:           shutdownTimeout,
 		MaxBodyBytes:              maxBodyBytes,
 		LogLevel:                  env("LOG_LEVEL", "info"),
-		PostgresDSN:               secrets["POSTGRES_DSN"],
+		PostgresDSN:               postgresDSN,
 		RedisAddr:                 redisAddr,
 		RedisPassword:             secrets["REDIS_PASSWORD"],
 		RedisUsername:             os.Getenv("REDIS_USERNAME"),
 		RedisTLS:                  redisTLS,
 		RedisDB:                   redisDB,
 		UseRedis:                  useRedis,
-		UserJWTSecret:             secrets["USER_JWT_SECRET"],
-		UserJWTTTL:                userJWTTTL,
 		PluginDir:                 env("PLUGIN_DIR", "plugins"),
 		PluginMaxBytes:            pluginMaxBytes,
 		PluginDatabaseWrites:      pluginDatabaseWrites,
@@ -199,14 +210,14 @@ func secret(name string) (string, error) {
 }
 
 func (c Config) Validate() error {
-	forbidden := map[string]bool{"change-me-in-production": true, "change-this-user-jwt-secret": true, "change-me": true, "replace-with-a-long-random-secret": true, "replace-with-a-long-random-jwt-secret": true}
-	for _, item := range []struct{ name, value string }{{"ADMIN_TOKEN", c.AdminToken}, {"USER_JWT_SECRET", c.UserJWTSecret}, {"CREDENTIAL_ENCRYPTION_KEY", c.CredentialEncryptionKey}} {
+	forbidden := map[string]bool{"change-me-in-production": true, "change-me": true, "replace-with-a-long-random-secret": true}
+	for _, item := range []struct{ name, value string }{{"ADMIN_TOKEN", c.AdminToken}, {"CREDENTIAL_ENCRYPTION_KEY", c.CredentialEncryptionKey}} {
 		if len(strings.TrimSpace(item.value)) < 32 || forbidden[item.value] || strings.HasPrefix(item.value, "generate-") || strings.HasPrefix(item.value, "replace-") {
 			return errors.New(item.name + " must be a distinct random secret of at least 32 characters")
 		}
 	}
-	if c.AdminToken == c.UserJWTSecret || c.AdminToken == c.CredentialEncryptionKey || c.UserJWTSecret == c.CredentialEncryptionKey {
-		return errors.New("admin, JWT, and credential encryption secrets must be distinct")
+	if c.AdminToken == c.CredentialEncryptionKey {
+		return errors.New("admin KEY and credential encryption secrets must be distinct")
 	}
 	if c.ProductionMode {
 		if c.OTELEnabled && (c.OTLPEndpoint == "" || (c.OTLPInsecure && !(c.ObservabilityStackEnabled && c.OTLPEndpoint == "127.0.0.1:4317"))) {
@@ -216,13 +227,25 @@ func (c Config) Validate() error {
 			return errors.New("production requires PostgreSQL and Redis; in-memory fallback is forbidden")
 		}
 		postgresURL, err := url.Parse(c.PostgresDSN)
-		if err != nil || (postgresURL.Scheme != "postgres" && postgresURL.Scheme != "postgresql") || postgresURL.Hostname() == "" || postgresURL.Query().Get("sslmode") != "verify-full" {
-			return errors.New("production POSTGRES_DSN must be a PostgreSQL URL with sslmode=verify-full")
+		if err != nil || (postgresURL.Scheme != "postgres" && postgresURL.Scheme != "postgresql") || postgresURL.Hostname() == "" {
+			return errors.New("production requires a valid PostgreSQL URL")
 		}
-		if !c.RedisTLS || c.RedisPassword == "" {
-			return errors.New("production requires Redis TLS and a non-empty Redis password")
+		if len(postgresURL.Query()["sslmode"]) != 1 {
+			return errors.New("POSTGRES_DSN must have exactly one sslmode")
 		}
-		if c.RedisPassword == c.AdminToken || c.RedisPassword == c.UserJWTSecret || c.RedisPassword == c.CredentialEncryptionKey {
+		password, hasPassword := "", false
+		if postgresURL.User != nil {
+			password, hasPassword = postgresURL.User.Password()
+		}
+		internalPostgres := c.AllowInternalPlaintext && postgresURL.Host == "postgres:5432" && postgresURL.Query().Get("sslmode") == "disable" && hasPassword && len(password) >= 32
+		if postgresURL.Query().Get("sslmode") != "verify-full" && !internalPostgres {
+			return errors.New("external PostgreSQL requires sslmode=verify-full; plaintext is only allowed for the private Compose postgres service")
+		}
+		internalRedis := c.AllowInternalPlaintext && c.RedisAddr == "redis:6379"
+		if (!c.RedisTLS && !internalRedis) || len(c.RedisPassword) < 32 {
+			return errors.New("Redis requires a 32-byte password and TLS unless it is the private Compose redis service")
+		}
+		if c.RedisPassword == c.AdminToken || c.RedisPassword == c.CredentialEncryptionKey {
 			return errors.New("Redis password must be distinct from application secrets")
 		}
 		for _, origin := range strings.Split(c.CORSOrigins, ",") {
@@ -230,11 +253,11 @@ func (c Config) Validate() error {
 				return errors.New("production CORS_ORIGINS cannot include a wildcard")
 			}
 		}
-		if len(c.MetricsToken) < 32 || c.MetricsToken == c.RedisPassword || c.MetricsToken == c.AdminToken || c.MetricsToken == c.UserJWTSecret || c.MetricsToken == c.CredentialEncryptionKey {
+		if len(c.MetricsToken) < 32 || c.MetricsToken == c.RedisPassword || c.MetricsToken == c.AdminToken || c.MetricsToken == c.CredentialEncryptionKey {
 			return errors.New("production requires a distinct METRICS_TOKEN of at least 32 characters")
 		}
 	}
-	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.UserJWTSecret || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
+	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
 		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
 	}
 	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 5*time.Minute {
@@ -254,9 +277,6 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.OTELServiceName) == "" {
 		return errors.New("OTEL_SERVICE_NAME must not be empty")
-	}
-	if c.UserJWTTTL <= 0 || c.UserJWTTTL > 24*time.Hour {
-		return errors.New("USER_JWT_TTL must be between 1 second and 24 hours")
 	}
 	if c.ObservabilityMaxLogs < 100 || c.ObservabilityMaxLogs > 100000 {
 		return errors.New("OBSERVABILITY_MAX_LOGS must be between 100 and 100000")

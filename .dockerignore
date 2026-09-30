@@ -15,3 +15,7 @@ plugins
 integrations
 
 **/*_test.go
+
+# Local mounted credentials are never source/build artifacts.
+secrets/
+.env.*

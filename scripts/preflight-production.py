@@ -1,103 +1,80 @@
 #!/usr/bin/env python3
-"""Validate production Compose inputs without connecting or displaying secrets.
-
-Run before `docker compose -f compose.production.yaml up`. This validates local
-inputs only; it does not replace TLS handshakes, restore tests, or a staging run.
-"""
+"""Validate the single Compose deployment without displaying credentials."""
 import argparse
+import json
+import subprocess
 import os
 from pathlib import Path
 import re
 import stat
-from urllib.parse import urlsplit, parse_qs
 
 DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
 IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
-FILES = ("admin_token", "user_jwt_secret", "credential_encryption_key",
-         "metrics_token", "grafana_admin_password", "postgres_dsn", "redis_password")
+FILES = ("admin_token", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
 
 
 def validate(environ, project_root):
     errors = []
-    image = (environ.get("API_MANAGER_IMAGE") or DEFAULT_IMAGE)
-    if not IMAGE.fullmatch(image):
-        errors.append("API_MANAGER_IMAGE must use a Docker Hub tag such as docker.io/dingding229/api-manager:latest")
-    directory = environ.get("PROD_SECRETS_DIR", "")
-    if not directory or not Path(directory).is_absolute():
-        return errors + ["PROD_SECRETS_DIR must be an absolute private path"]
-    folder = Path(directory)
+    if not IMAGE.fullmatch(environ.get("API_MANAGER_IMAGE") or DEFAULT_IMAGE):
+        errors.append("API_MANAGER_IMAGE must use a docker.io/dingding229/api-manager tag")
+    folder = Path(environ.get("SECRETS_DIR") or project_root / "secrets")
+    if not folder.is_absolute():
+        folder = project_root / folder
     if folder.is_symlink() or not folder.is_dir():
-        return errors + ["PROD_SECRETS_DIR must be a real directory, not a symlink"]
-    if folder.resolve() == project_root or project_root in folder.resolve().parents:
-        errors.append("production secrets must be outside the repository")
+        return errors + ["Secret directory is missing; run python3 scripts/init-production-secrets.py"]
     if stat.S_IMODE(folder.stat().st_mode) != 0o700:
-        errors.append("PROD_SECRETS_DIR must have mode 0700")
-
-    values = {}
+        errors.append("Secret directory must have mode 0700")
+    values = []
     for name in FILES:
         path = folder / name
         if path.is_symlink() or not path.is_file():
-            errors.append(f"{name} must be a regular file, not a symlink")
+            errors.append(f"{name} must be a regular file")
             continue
         if stat.S_IMODE(path.stat().st_mode) != 0o444:
-            errors.append(f"{name} must have mode 0444 for non-root Compose bind mounts")
+            errors.append(f"{name} must have mode 0444 for non-root file mounts")
         if path.stat().st_size > 65536:
             errors.append(f"{name} is too large")
             continue
         try:
-            values[name] = path.read_text(encoding="utf-8").rstrip("\r\n")
-        except (UnicodeError, OSError):
+            value = path.read_text().rstrip("\r\n")
+        except (OSError, UnicodeError):
             errors.append(f"{name} is not readable text")
             continue
-        if not values[name] or "\x00" in values[name]:
-            errors.append(f"{name} must contain a non-empty text value")
-
-    secret_names = ("admin_token", "user_jwt_secret", "credential_encryption_key", "metrics_token", "grafana_admin_password")
-    app_secrets = [values.get(n, "") for n in secret_names]
-    if any(len(s) < 32 for s in app_secrets) or len(set(app_secrets)) != len(app_secrets):
-        errors.append("application, metrics, and Grafana secrets must be distinct and at least 32 characters")
-    redis_password = values.get("redis_password", "")
-    if not redis_password or redis_password in app_secrets:
-        errors.append("Redis password must be non-empty and distinct from application secrets")
-    try:
-        dsn = urlsplit(values.get("postgres_dsn", ""))
-        sslmodes = parse_qs(dsn.query).get("sslmode", [])
-        if dsn.scheme not in ("postgres", "postgresql") or not dsn.hostname or sslmodes != ["verify-full"]:
-            raise ValueError
-        if dsn.hostname in ("localhost", "127.0.0.1", "::1"):
-            raise ValueError
-        # Accessing .port also validates that an explicitly supplied port is well-formed.
-        _ = dsn.port
-    except ValueError:
-        errors.append("postgres_dsn must use a non-loopback PostgreSQL URL with sslmode=verify-full")
-    address = environ.get("PROD_REDIS_ADDR", "")
-    try:
-        host, port = address.rsplit(":", 1)
-        if host.startswith("[") and host.endswith("]"):
-            host = host[1:-1]
-        if not host or host in ("localhost", "127.0.0.1", "::1") or not (1 <= int(port) <= 65535):
-            raise ValueError
-    except ValueError:
-        errors.append("PROD_REDIS_ADDR must be a non-loopback host:port for Redis TLS")
-    if environ.get("PROD_OBSERVABILITY_STACK_ENABLED", "").lower() in ("1", "true", "yes"):
-        match = SIZE.fullmatch(environ.get("PROD_API_MEMORY_LIMIT", ""))
+        if len(value.encode()) < 32 or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
+            errors.append(f"{name} must contain a single-line 32+ byte secret")
+        values.append(value)
+    if len(set(values)) != len(values):
+        errors.append("All six credentials must be distinct")
+    if environ.get("OBSERVABILITY_STACK_ENABLED", "false").lower() in ("1", "true", "yes"):
+        match = SIZE.fullmatch(environ.get("API_MEMORY_LIMIT") or "2g")
         multipliers = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
         if not match or int(match.group(1)) * multipliers[(match.group(2) or "").lower()] < 2 << 30:
-            errors.append("the full observability stack requires PROD_API_MEMORY_LIMIT of at least 2g")
+            errors.append("The observability stack requires API_MEMORY_LIMIT of at least 2g")
     return errors
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     project_root = Path(__file__).resolve().parents[1]
-    errors = validate(os.environ, project_root)
-    if errors:
-        for error in errors:
-            print("FAIL: " + error)
+    try:
+        result = subprocess.run(["docker", "compose", "--project-directory", str(project_root), "-f", str(project_root / "docker-compose.yml"), "config", "--format", "json"], check=True, capture_output=True, text=True)
+        config = json.loads(result.stdout)
+        service = config["services"]["api-manager"]
+        effective = dict(os.environ)
+        effective["API_MANAGER_IMAGE"] = service["image"]
+        effective["SECRETS_DIR"] = str(Path(config["secrets"]["admin_token"]["file"]).parent)
+        effective["OBSERVABILITY_STACK_ENABLED"] = str(service["environment"]["OBSERVABILITY_STACK_ENABLED"])
+        effective["API_MEMORY_LIMIT"] = str(service["mem_limit"])
+        errors = validate(effective, project_root)
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
+        print("FAIL: cannot resolve docker-compose.yml; check Docker Compose and configuration")
         raise SystemExit(1)
-    print("PASS: local production inputs validated (no network or secret values displayed)")
+    for error in errors:
+        print("FAIL: " + error)
+    if not errors:
+        print("PASS: Compose inputs checked; no credentials displayed")
+    raise SystemExit(1 if errors else 0)
 
 
 if __name__ == "__main__":

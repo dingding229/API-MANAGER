@@ -113,20 +113,17 @@ func main() {
 	if err := pluginManager.LoadEnabled(rootCtx); err != nil {
 		logger.Error("some managed WASM plugins failed to load", "error", err)
 	}
-	userService := user.NewService(activeStore, cfg.UserJWTSecret, cfg.UserJWTTTL)
+	userService := user.NewService(activeStore)
 	if err := userService.EnsureDefaults(); err != nil {
 		logger.Error("initialize RBAC defaults failed", "error", err)
 		os.Exit(1)
 	}
-	admin := api.NewAdminWithUserAuthAndPluginManager(activeStore, plugins, cfg.AdminToken, userService, pluginManager, logger)
+	admin := api.NewAdminWithUserManagementAndPluginManager(activeStore, plugins, cfg.AdminToken, userService, pluginManager, logger)
 	admin.SetCredentialEncryptionKey(cfg.CredentialEncryptionKey)
 	admin.SetProductionMode(cfg.ProductionMode)
-	if cfg.ProductionMode {
-		admin.SetAdminTokenAPIEnabled(false) // Bootstrap still uses the token once, separately.
-	}
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)
-	authHandler := user.NewHTTP(userService, cfg.AdminToken)
+	authHandler := user.NewHTTP(cfg.AdminToken)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
 	gatewayHandler.SetProductionMode(cfg.ProductionMode)

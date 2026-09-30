@@ -5,10 +5,6 @@
 {{- if gt (int .Values.replicaCount) 1 }}{{ fail "replicaCount > 1 requires a distributed plugin reload mechanism; use one replica" }}{{- end }}
 {{- if and .Values.productionMode (not .Values.existingSecret) }}{{ fail "productionMode requires existingSecret; do not store production secrets in Helm values" }}{{- end }}
 {{- if and .Values.productionMode (not .Values.persistence.enabled) }}{{ fail "productionMode requires persistence.enabled=true for runtime data" }}{{- end }}
-{{- if and (gt (len .Values.authSecretFiles) 0) (not .Values.existingSecret) }}{{ fail "authSecretFiles requires existingSecret" }}{{- end }}
-{{- range $name := .Values.authSecretFiles }}
-{{- if not (regexMatch "^API_AUTH_[A-Z0-9_]{1,64}$" ($name | toString)) }}{{ fail "authSecretFiles entries must use the API_AUTH_ namespace" }}{{- end }}
-{{- end }}
 {{- if and .Values.productionMode (ne (toString (index .Values.env "REDIS_TLS_ENABLED")) "true") }}{{ fail "productionMode requires env.REDIS_TLS_ENABLED=true" }}{{- end }}
 {{- if and .Values.ingress.enabled (not .Values.productionMode) }}{{ fail "ingress.enabled requires productionMode=true" }}{{- end }}
 apiVersion: apps/v1
@@ -70,8 +66,6 @@ spec:
               value: {{ .Values.productionMode | quote }}
             - name: ADMIN_TOKEN_FILE
               value: /run/secrets/ADMIN_TOKEN
-            - name: USER_JWT_SECRET_FILE
-              value: /run/secrets/USER_JWT_SECRET
             - name: POSTGRES_DSN_FILE
               value: /run/secrets/POSTGRES_DSN
             - name: CREDENTIAL_ENCRYPTION_KEY_FILE
@@ -79,10 +73,6 @@ spec:
             {{- if $stackEnabled }}
             - name: GRAFANA_ADMIN_PASSWORD_FILE
               value: /run/secrets/GRAFANA_ADMIN_PASSWORD
-            {{- end }}
-            {{- range $name := .Values.authSecretFiles }}
-            - name: {{ printf "%s_FILE" $name }}
-              value: {{ printf "/run/secrets/%s" $name | quote }}
             {{- end }}
             {{- if .Values.productionMode }}
             - name: REDIS_PASSWORD_FILE

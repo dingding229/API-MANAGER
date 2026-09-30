@@ -97,16 +97,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.EqualFold(api.AuthMode, "hmac") {
-		// The same nonce cannot be used twice, even with a new body/signature.
-		nonce := r.Header.Get("X-Nonce")
-		nonceStore, ok := g.limiter.(ratelimit.NonceStore)
-		if !ok || !nonceStore.UseNonce("hmac:"+api.ID+":"+nonce, 10*time.Minute) {
-			writeJSONError(capture, http.StatusUnauthorized, "replayed HMAC request")
-			g.logRequest(r, api, capture, started)
-			return
-		}
-	}
 	if err := validateRequestParameters(api, r); err != nil {
 		if g.metrics != nil {
 			g.metrics.IncSchemaFailure()
@@ -469,14 +459,6 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, api model.API) {
 
 func stripGatewayCredentials(header http.Header, api model.API) {
 	names := []string{"Authorization", "Cookie", "X-API-Key", "X-Admin-Token", "X-Timestamp", "X-Nonce", "X-Signature"}
-	if strings.EqualFold(api.AuthMode, "hmac") {
-		if name := strings.TrimSpace(api.AuthConfig["timestamp_header"]); name != "" {
-			names = append(names, name)
-		}
-		if name := strings.TrimSpace(api.AuthConfig["signature_header"]); name != "" {
-			names = append(names, name)
-		}
-	}
 	for _, name := range names {
 		header.Del(name)
 	}

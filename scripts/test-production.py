@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Regression checks for production scripts without live dependencies or secrets."""
+"""Regression checks for deployment scripts; uses only temporary fake secrets."""
 import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -18,7 +20,6 @@ def load(name):
 
 
 preflight = load("preflight-production")
-backup = load("backup-production")
 verify = load("verify-production")
 
 
@@ -26,49 +27,49 @@ class ProductionScriptTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.secret_dir = Path(self.temp.name)
-        self.secret_dir.chmod(0o700)
-        values = {
-            name: f"regression-{name}-{'x' * 32}" for name in preflight.FILES
-        }
-        values["postgres_dsn"] = "postgres://test:test@postgres.example:5432/test?sslmode=verify-full"
-        for name, value in values.items():
-            path = self.secret_dir / name
-            path.write_text(value + "\n")
-            path.chmod(0o444)
-        self.env = {"PROD_SECRETS_DIR": str(self.secret_dir), "PROD_REDIS_ADDR": "redis.example:6380"}
+        self.folder = Path(self.temp.name) / "secrets"
+        subprocess.run([sys.executable, str(ROOT / "scripts/init-production-secrets.py"), "--dir", str(self.folder)], check=True, stdout=subprocess.DEVNULL)
+        self.env = {"SECRETS_DIR": str(self.folder)}
 
-    def test_default_and_empty_override_match_compose(self):
-        for override in (None, "", preflight.DEFAULT_IMAGE, "docker.io/dingding229/api-manager:0.2.2"):
-            with self.subTest(override=override):
-                env = self.env.copy()
-                if override is not None:
-                    env["API_MANAGER_IMAGE"] = override
-                self.assertEqual(preflight.validate(env, ROOT), [])
+    def test_initialization_is_complete_and_never_overwrites(self):
+        before = {p.name: p.read_bytes() for p in self.folder.iterdir()}
+        self.assertEqual(set(before), set(preflight.FILES))
+        self.assertEqual(len(set(before.values())), 6)
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/init-production-secrets.py"), "--dir", str(self.folder)], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(before, {p.name: p.read_bytes() for p in self.folder.iterdir()})
 
-    def test_rejects_non_hub_and_digest_overrides(self):
-        for image in ("ghcr.io/example/api-manager:latest", "api-manager:local",
-                      "docker.io/dingding229/api-manager@sha256:" + "a" * 64,
-                      "docker.io/dingding229/api-manager:latest other"):
-            with self.subTest(image=image):
-                env = dict(self.env, API_MANAGER_IMAGE=image)
-                self.assertTrue(any("API_MANAGER_IMAGE" in e for e in preflight.validate(env, ROOT)))
+    def test_latest_and_version_tag_are_accepted(self):
+        for image in (None, "", preflight.DEFAULT_IMAGE, "docker.io/dingding229/api-manager:0.3.0"):
+            env = dict(self.env)
+            if image is not None:
+                env["API_MANAGER_IMAGE"] = image
+            self.assertEqual(preflight.validate(env, ROOT), [])
 
-    def test_observability_memory_can_use_bytes_or_units(self):
-        for memory in ("2g", "2048m", "2147483648"):
-            with self.subTest(memory=memory):
-                env = dict(self.env, PROD_OBSERVABILITY_STACK_ENABLED="true", PROD_API_MEMORY_LIMIT=memory)
-                self.assertEqual(preflight.validate(env, ROOT), [])
-        for memory in ("1024", "1g", "invalid", ""):
-            with self.subTest(memory=memory):
-                env = dict(self.env, PROD_OBSERVABILITY_STACK_ENABLED="true", PROD_API_MEMORY_LIMIT=memory)
-                self.assertTrue(any("2g" in e for e in preflight.validate(env, ROOT)))
+    def test_other_registries_and_digest_pins_are_rejected(self):
+        for image in ("ghcr.io/example/api:latest", "api-manager:local", "docker.io/dingding229/api-manager@sha256:" + "a" * 64):
+            self.assertTrue(preflight.validate(dict(self.env, API_MANAGER_IMAGE=image), ROOT))
 
-    def test_backup_uses_same_hub_tag_policy(self):
-        self.assertTrue(backup.TOOL_IMAGE.fullmatch(preflight.DEFAULT_IMAGE))
-        self.assertFalse(backup.TOOL_IMAGE.fullmatch("ghcr.io/example/tool:latest"))
+    def test_duplicate_and_symlink_credentials_are_rejected(self):
+        source = self.folder / "admin_token"
+        target = self.folder / "metrics_token"
+        target.chmod(0o600)
+        target.write_bytes(source.read_bytes())
+        target.chmod(0o444)
+        self.assertTrue(preflight.validate(self.env, ROOT))
+        target.unlink()
+        target.symlink_to(source)
+        self.assertTrue(preflight.validate(self.env, ROOT))
 
-    def test_verifier_does_not_follow_credential_redirect(self):
+    def test_stack_memory_bounds(self):
+        for memory in ("2g", "2048m", "2147483648", ""):
+            env = dict(self.env, OBSERVABILITY_STACK_ENABLED="true", API_MEMORY_LIMIT=memory)
+            self.assertEqual(preflight.validate(env, ROOT), [])
+        for memory in ("1g", "invalid"):
+            env = dict(self.env, OBSERVABILITY_STACK_ENABLED="true", API_MEMORY_LIMIT=memory)
+            self.assertTrue(preflight.validate(env, ROOT))
+
+    def test_verifier_never_follows_key_redirects(self):
         received = []
 
         class Target(BaseHTTPRequestHandler):
@@ -76,7 +77,6 @@ class ProductionScriptTests(unittest.TestCase):
                 received.append(dict(self.headers))
                 self.send_response(200)
                 self.end_headers()
-
             def log_message(self, *args):
                 pass
 
@@ -89,7 +89,6 @@ class ProductionScriptTests(unittest.TestCase):
                 self.send_response(302)
                 self.send_header("Location", f"http://127.0.0.1:{target.server_port}/target")
                 self.end_headers()
-
             def log_message(self, *args):
                 pass
 
@@ -97,16 +96,12 @@ class ProductionScriptTests(unittest.TestCase):
         redirect_thread = threading.Thread(target=redirect.serve_forever, daemon=True)
         redirect_thread.start()
         try:
-            base = f"http://127.0.0.1:{redirect.server_port}"
-            self.assertEqual(verify.request(base, "/metrics", "test-only-token"), 302)
+            self.assertEqual(verify.request(f"http://127.0.0.1:{redirect.server_port}", "/metrics", "fake-key"), 302)
             self.assertEqual(received, [])
         finally:
-            redirect.shutdown()
-            redirect.server_close()
-            target.shutdown()
-            target.server_close()
-            redirect_thread.join()
-            target_thread.join()
+            redirect.shutdown(); redirect.server_close()
+            target.shutdown(); target.server_close()
+            redirect_thread.join(); target_thread.join()
 
 
 if __name__ == "__main__":

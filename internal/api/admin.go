@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,14 +25,10 @@ import (
 	apiSchema "api-manager/internal/schema"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
-	"golang.org/x/net/http/httpguts"
 	"gopkg.in/yaml.v3"
 )
 
-var authSecretEnvironment = regexp.MustCompile(`^API_AUTH_[A-Z0-9_]{1,64}$`)
-
 type UserManager interface {
-	ValidateToken(string) (model.User, error)
 	Create(string, string, string) (model.User, error)
 	CreateWithRoles(string, string, []string) (model.User, error)
 	Can(string, string) bool
@@ -48,7 +42,7 @@ type Admin struct {
 	plugins                 *plugin.Registry
 	adminToken              string
 	adminTokenAPIEnabled    bool
-	userAuth                UserManager
+	userManager             UserManager
 	logger                  *slog.Logger
 	auditor                 *audit.Service
 	pluginManager           *plugin.Manager
@@ -63,12 +57,12 @@ func NewAdmin(s store.Store, plugins *plugin.Registry, adminToken string, logger
 	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, logger: logger, auditor: audit.New(s, logger)}
 }
 
-func NewAdminWithUserAuth(s store.Store, plugins *plugin.Registry, adminToken string, userAuth UserManager, logger *slog.Logger) *Admin {
-	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userAuth: userAuth, logger: logger, auditor: audit.New(s, logger)}
+func NewAdminWithUserManagement(s store.Store, plugins *plugin.Registry, adminToken string, userManager UserManager, logger *slog.Logger) *Admin {
+	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userManager: userManager, logger: logger, auditor: audit.New(s, logger)}
 }
 
-func NewAdminWithUserAuthAndPluginManager(s store.Store, plugins *plugin.Registry, adminToken string, userAuth UserManager, pluginManager *plugin.Manager, logger *slog.Logger) *Admin {
-	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userAuth: userAuth, pluginManager: pluginManager, logger: logger, auditor: audit.New(s, logger)}
+func NewAdminWithUserManagementAndPluginManager(s store.Store, plugins *plugin.Registry, adminToken string, userManager UserManager, pluginManager *plugin.Manager, logger *slog.Logger) *Admin {
+	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userManager: userManager, pluginManager: pluginManager, logger: logger, auditor: audit.New(s, logger)}
 }
 func (a *Admin) SetAdminTokenAPIEnabled(enabled bool) { a.adminTokenAPIEnabled = enabled }
 func (a *Admin) SetProductionMode(enabled bool)       { a.productionMode = enabled }
@@ -178,33 +172,15 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type auditActorContextKey struct{}
 
 func (a *Admin) requestActor(r *http.Request) (audit.Actor, bool) {
-	provided := r.Header.Get("X-Admin-Token")
-	if a.adminTokenAPIEnabled && provided != "" && subtle.ConstantTimeCompare([]byte(provided), []byte(a.adminToken)) == 1 {
-		return audit.Actor{Type: "admin_token"}, true
+	if a.adminTokenAPIEnabled && auth.MatchesKey(a.adminToken, auth.RequestKey(r)) {
+		return audit.Actor{Type: "api_key"}, true
 	}
-	if a.userAuth == nil {
-		return audit.Actor{}, false
-	}
-	user, err := a.userAuth.ValidateToken(auth.ExtractAPIKey(r.Header.Get("Authorization")))
-	if err != nil {
-		return audit.Actor{}, false
-	}
-	return audit.Actor{ID: user.ID, Type: "user", Email: user.Email}, true
+	return audit.Actor{}, false
 }
 
 func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 	actor, ok := r.Context().Value(auditActorContextKey{}).(audit.Actor)
-	if !ok {
-		var authorized bool
-		actor, authorized = a.requestActor(r)
-		if !authorized {
-			return false
-		}
-	}
-	if actor.Type == "admin_token" {
-		return true
-	}
-	return actor.Type == "user" && a.userAuth != nil && a.userAuth.Can(actor.ID, permission)
+	return ok && actor.Type == "api_key"
 }
 
 func requiredPermission(r *http.Request) string {
@@ -440,6 +416,10 @@ func (a *Admin) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api := release.Snapshot
+	if err := validateStoredAPI(api, a.productionMode); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "release is incompatible with current KEY/security requirements"})
+		return
+	}
 	api.ID = parts[0]
 	if err := a.checkRouteConflict(api.ID, api.Method, api.Path); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -797,7 +777,7 @@ func (a *Admin) lastSuperAdmin(id string) bool {
 func (a *Admin) listUsers(w http.ResponseWriter) { writeJSON(w, http.StatusOK, a.store.ListUsers()) }
 
 func (a *Admin) createUser(w http.ResponseWriter, r *http.Request) {
-	if a.userAuth == nil {
+	if a.userManager == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "user authentication is disabled"})
 		return
 	}
@@ -816,7 +796,7 @@ func (a *Admin) createUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only super_admin can grant privileged roles"})
 		return
 	}
-	user, err := a.userAuth.CreateWithRoles(request.Email, request.Password, roles)
+	user, err := a.userManager.CreateWithRoles(request.Email, request.Password, roles)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "user already exists"})
@@ -843,7 +823,7 @@ func (a *Admin) assignUserRoles(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only super_admin can manage privileged roles or their own roles"})
 		return
 	}
-	if err := a.userAuth.AssignRoles(id, request.Roles); err != nil {
+	if err := a.userManager.AssignRoles(id, request.Roles); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -870,7 +850,7 @@ func (a *Admin) updateUserStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "cannot disable the last super_admin"})
 		return
 	}
-	if err := a.userAuth.SetStatus(id, request.Status); err != nil {
+	if err := a.userManager.SetStatus(id, request.Status); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -883,10 +863,10 @@ func (a *Admin) updateUserStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (a *Admin) listRoles(w http.ResponseWriter) { writeJSON(w, http.StatusOK, a.userAuthRoles()) }
+func (a *Admin) listRoles(w http.ResponseWriter) { writeJSON(w, http.StatusOK, a.userManagerRoles()) }
 
-func (a *Admin) userAuthRoles() []model.Role {
-	if provider, ok := a.userAuth.(interface{ ListRoles() []model.Role }); ok {
+func (a *Admin) userManagerRoles() []model.Role {
+	if provider, ok := a.userManager.(interface{ ListRoles() []model.Role }); ok {
 		return provider.ListRoles()
 	}
 	return a.store.ListRoles()
@@ -905,7 +885,7 @@ func (a *Admin) createRole(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	role, err := a.userAuth.CreateRole(request.Name, request.Description, request.Permissions)
+	role, err := a.userManager.CreateRole(request.Name, request.Description, request.Permissions)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -926,7 +906,7 @@ func (a *Admin) updateRolePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only super_admin can change role permissions"})
 		return
 	}
-	provider, ok := a.userAuth.(interface{ UpdateRolePermissions(string, []string) error })
+	provider, ok := a.userManager.(interface{ UpdateRolePermissions(string, []string) error })
 	if !ok {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "role management unavailable"})
 		return
@@ -1150,34 +1130,7 @@ func joinOpenAPIPath(prefix, path string) string {
 
 func stringValue(value any) string { text, _ := value.(string); return strings.TrimSpace(text) }
 
-func openAPIAuthMode(operation, document map[string]any) string {
-	security, exists := operation["security"]
-	if !exists {
-		security = document["security"]
-	}
-	items, ok := security.([]any)
-	if !ok || len(items) == 0 {
-		return "none"
-	}
-	components, _ := document["components"].(map[string]any)
-	schemes, _ := components["securitySchemes"].(map[string]any)
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		for schemeName := range item {
-			scheme, _ := schemes[schemeName].(map[string]any)
-			if stringValue(scheme["type"]) == "apiKey" {
-				return "api_key"
-			}
-			if stringValue(scheme["type"]) == "http" && strings.EqualFold(stringValue(scheme["scheme"]), "bearer") {
-				return "jwt"
-			}
-		}
-	}
-	return "none"
-}
+func openAPIAuthMode(operation, document map[string]any) string { return "api_key" }
 
 func openAPIContentSchema(operation map[string]any, key string, document map[string]any) (json.RawMessage, error) {
 	container, _ := operation[key].(map[string]any)
@@ -1339,8 +1292,6 @@ func (a *Admin) exportOpenAPI(w http.ResponseWriter, _ *http.Request) {
 		}
 		if api.AuthMode == "api_key" {
 			operation["security"] = []map[string][]string{{"ApiKeyAuth": {}}}
-		} else if api.AuthMode == "jwt" {
-			operation["security"] = []map[string][]string{{"BearerAuth": {}}}
 		}
 		paths[api.Path][method] = operation
 	}
@@ -1350,7 +1301,6 @@ func (a *Admin) exportOpenAPI(w http.ResponseWriter, _ *http.Request) {
 		"paths":   paths,
 		"components": map[string]any{"securitySchemes": map[string]any{
 			"ApiKeyAuth": map[string]any{"type": "apiKey", "in": "header", "name": "X-API-Key"},
-			"BearerAuth": map[string]any{"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
 		}},
 	})
 }
@@ -1363,7 +1313,7 @@ func responseStatus(api model.API) int {
 }
 
 func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, updatedAt time.Time) model.API {
-	return model.API{ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: strings.ToLower(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return model.API{ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: "api_key", AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
 func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) error {
@@ -1382,41 +1332,13 @@ func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) err
 	if !strings.HasPrefix(request.Path, "/") || strings.Contains(request.Path, "//") {
 		return errors.New("path must start with / and must not contain //")
 	}
-	if request.AuthMode != "" && request.AuthMode != "none" && request.AuthMode != "api_key" && request.AuthMode != "jwt" && request.AuthMode != "hmac" {
-		return errors.New("auth_mode must be none, api_key, jwt, or hmac")
+	if request.AuthMode != "" && request.AuthMode != "api_key" {
+		return errors.New("auth_mode must be api_key")
 	}
-	if request.AuthMode == "jwt" {
-		if strings.TrimSpace(request.AuthConfig["issuer"]) == "" || strings.TrimSpace(request.AuthConfig["audience"]) == "" {
-			return errors.New("jwt auth requires issuer and audience")
-		}
-		secretEnv := request.AuthConfig["secret_env"]
-		if secretEnv == "" {
-			// #nosec G101 -- this is an environment variable name, not a credential value.
-			secretEnv = "API_AUTH_JWT_HS256_SECRET"
-		}
-		if !authSecretEnvironment.MatchString(secretEnv) {
-			return errors.New("jwt secret_env must use the API_AUTH_ namespace")
-		}
+	if len(request.AuthConfig) != 0 {
+		return errors.New("KEY authentication does not accept auth_config")
 	}
-	if request.AuthMode == "hmac" {
-		if !authSecretEnvironment.MatchString(strings.TrimSpace(request.AuthConfig["secret_env"])) {
-			return errors.New("hmac auth requires an API_AUTH_ secret_env")
-		}
-		timestampHeader := strings.TrimSpace(request.AuthConfig["timestamp_header"])
-		if timestampHeader == "" {
-			timestampHeader = "X-Timestamp"
-		}
-		signatureHeader := strings.TrimSpace(request.AuthConfig["signature_header"])
-		if signatureHeader == "" {
-			signatureHeader = "X-Signature"
-		}
-		if !httpguts.ValidHeaderFieldName(timestampHeader) || !httpguts.ValidHeaderFieldName(signatureHeader) {
-			return errors.New("hmac timestamp_header and signature_header must be valid HTTP header names")
-		}
-		if strings.EqualFold(timestampHeader, signatureHeader) || strings.EqualFold(timestampHeader, "X-Nonce") || strings.EqualFold(signatureHeader, "X-Nonce") {
-			return errors.New("hmac timestamp_header, signature_header, and X-Nonce must be distinct")
-		}
-	}
+
 	if request.ResponseStatus != 0 && (request.ResponseStatus < 100 || request.ResponseStatus > 599) {
 		return errors.New("response_status must be between 100 and 599")
 	}
@@ -1541,4 +1463,19 @@ func (a *Admin) checkRouteConflict(excludeID, method, path string) error {
 		}
 	}
 	return nil
+}
+
+func validateStoredAPI(api model.API, productionMode bool) error {
+	if api.AuthMode != "api_key" {
+		return errors.New("stored routes must use KEY authentication")
+	}
+	payload, err := json.Marshal(api)
+	if err != nil {
+		return err
+	}
+	var request model.CreateAPIRequest
+	if err := json.Unmarshal(payload, &request); err != nil {
+		return err
+	}
+	return validateAPIRequest(request, productionMode)
 }

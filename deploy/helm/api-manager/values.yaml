@@ -47,15 +47,8 @@ env:
 
 existingSecret: "" # use a pre-created Secret instead of chart-managed values
 
-# Route-level JWT/HMAC secrets stay in the API_AUTH_ namespace. In production,
-# add these keys to existingSecret; the chart exposes only *_FILE paths.
-authSecretFiles: []
-# - API_AUTH_JWT_HS256_SECRET
-# - API_AUTH_PARTNER_HMAC
-
 secrets:
   ADMIN_TOKEN: ""
-  USER_JWT_SECRET: ""
   REDIS_PASSWORD: ""
   CREDENTIAL_ENCRYPTION_KEY: ""
   POSTGRES_DSN: ""

@@ -9,7 +9,6 @@ import (
 type Memory struct {
 	mu      sync.Mutex
 	windows map[string]window
-	nonces  map[string]time.Time
 }
 
 type window struct {
@@ -19,7 +18,7 @@ type window struct {
 }
 
 func NewMemory() *Memory {
-	return &Memory{windows: make(map[string]window), nonces: make(map[string]time.Time)}
+	return &Memory{windows: make(map[string]window)}
 }
 
 func (m *Memory) Close() error               { return nil }
@@ -54,33 +53,5 @@ func (m *Memory) Allow(key string, limit int, windowSize time.Duration, now time
 	}
 	current.count++
 	m.windows[key] = current
-	return true
-}
-
-func (m *Memory) UseNonce(key string, ttl time.Duration) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := time.Now()
-	if expiration, ok := m.nonces[key]; ok && now.Before(expiration) {
-		return false
-	}
-	if len(m.nonces) > 20000 {
-		for k, expiration := range m.nonces {
-			if !now.Before(expiration) {
-				delete(m.nonces, k)
-			}
-		}
-		if len(m.nonces) > 20000 {
-			return false
-		}
-	}
-	m.nonces[key] = now.Add(ttl)
-	if len(m.nonces) > 10000 {
-		for key, expiration := range m.nonces {
-			if !now.Before(expiration) {
-				delete(m.nonces, key)
-			}
-		}
-	}
 	return true
 }

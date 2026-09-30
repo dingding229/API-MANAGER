@@ -43,8 +43,8 @@ func validRoute(r Route) error {
 	if !routeMethod[r.Method] || !strings.HasPrefix(r.Path, "/api/") || strings.Contains(r.Path, "//") || strings.ContainsAny(r.Path, "?#\\ \t\r\n") || len(r.Path) > 512 {
 		return errors.New("route requires a supported uppercase method and a clean /api/ path")
 	}
-	if r.AuthMode != "none" && r.AuthMode != "api_key" && r.AuthMode != "jwt" && r.AuthMode != "hmac" {
-		return errors.New("route auth_mode must be none, api_key, jwt, or hmac")
+	if r.AuthMode != "api_key" {
+		return errors.New("route auth_mode must be api_key")
 	}
 	params := make(map[string]bool)
 	parts := strings.Split(r.Path, "/")
@@ -140,7 +140,11 @@ func ParseManifest(data []byte) (Manifest, error) {
 		return Manifest{}, errors.New("plugin routes exceed 100 entries")
 	}
 	seen := make(map[string]bool)
-	for _, route := range manifest.Routes {
+	for index, route := range manifest.Routes {
+		if route.AuthMode == "" {
+			route.AuthMode = "api_key"
+			manifest.Routes[index].AuthMode = route.AuthMode
+		}
 		if err := validRoute(route); err != nil {
 			return Manifest{}, fmt.Errorf("invalid plugin route %q: %w", route.Path, err)
 		}

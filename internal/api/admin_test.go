@@ -21,38 +21,21 @@ func TestValidateAPIRequestRequiresHTTPSInProduction(t *testing.T) {
 	}
 }
 
-func TestValidateAPIRequestRestrictsAuthSecretEnvironment(t *testing.T) {
-	base := model.CreateAPIRequest{
-		Name:         "secured",
-		Method:       "POST",
-		Path:         "/api/secured",
-		ResponseBody: `{}`,
+func TestValidateAPIRequestOnlyAcceptsKeys(t *testing.T) {
+	for _, mode := range []string{"", "api_key", "none", "jwt", "hmac", "other"} {
+		r := model.CreateAPIRequest{Name: "secured", Method: "POST", Path: "/api/secured", AuthMode: mode, ResponseBody: `{}`}
+		err := validateAPIRequest(r, true)
+		if (err == nil) != (mode == "" || mode == "api_key") {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
 	}
-	for _, tc := range []struct {
-		name       string
-		authMode   string
-		authConfig map[string]string
-		wantError  bool
-	}{
-		{name: "JWT platform secret rejected", authMode: "jwt", authConfig: map[string]string{"issuer": "issuer", "audience": "audience", "secret_env": "ADMIN_TOKEN"}, wantError: true},
-		{name: "JWT API auth secret accepted", authMode: "jwt", authConfig: map[string]string{"issuer": "issuer", "audience": "audience", "secret_env": "API_AUTH_CUSTOM_JWT"}},
-		{name: "JWT default accepted", authMode: "jwt", authConfig: map[string]string{"issuer": "issuer", "audience": "audience"}},
-		{name: "HMAC platform secret rejected", authMode: "hmac", authConfig: map[string]string{"secret_env": "REDIS_PASSWORD"}, wantError: true},
-		{name: "HMAC API auth secret accepted", authMode: "hmac", authConfig: map[string]string{"secret_env": "API_AUTH_ORDERS_HMAC"}},
-		{name: "HMAC invalid header rejected", authMode: "hmac", authConfig: map[string]string{"secret_env": "API_AUTH_ORDERS_HMAC", "signature_header": "Bad Header"}, wantError: true},
-		{name: "HMAC duplicate headers rejected", authMode: "hmac", authConfig: map[string]string{"secret_env": "API_AUTH_ORDERS_HMAC", "timestamp_header": "X-Nonce"}, wantError: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			request := base
-			request.AuthMode = tc.authMode
-			request.AuthConfig = tc.authConfig
-			err := validateAPIRequest(request, true)
-			if tc.wantError && err == nil {
-				t.Fatal("expected validation error")
-			}
-			if !tc.wantError && err != nil {
-				t.Fatalf("unexpected validation error: %v", err)
-			}
-		})
+}
+
+func TestRollbackRejectsLegacyModesBeforeChangingRoutes(t *testing.T) {
+	for _, mode := range []string{"none", "jwt", "hmac", ""} {
+		err := validateStoredAPI(model.API{Name: "legacy", Method: "GET", Path: "/api/legacy", AuthMode: mode}, true)
+		if err == nil {
+			t.Fatalf("legacy mode %q accepted", mode)
+		}
 	}
 }

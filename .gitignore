@@ -13,3 +13,7 @@ __pycache__/
 *.key
 
 /server
+
+# Local mounted credentials are never source/build artifacts.
+secrets/
+.env.*

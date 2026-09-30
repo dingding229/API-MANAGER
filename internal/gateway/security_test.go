@@ -17,10 +17,10 @@ func TestStripGatewayCredentials(t *testing.T) {
 	header := http.Header{
 		"Authorization": {"Bearer secret"}, "Cookie": {"session=secret"}, "X-Api-Key": {"key"},
 		"X-Admin-Token": {"admin"}, "X-Timestamp": {"1"}, "X-Nonce": {"nonce"}, "X-Signature": {"sig"},
-		"X-Custom": {"kept"}, "X-Custom-Timestamp": {"timestamp"}, "X-Custom-Signature": {"signature"},
+		"X-Custom": {"kept"},
 	}
-	stripGatewayCredentials(header, model.API{AuthMode: "hmac", AuthConfig: map[string]string{"timestamp_header": "X-Custom-Timestamp", "signature_header": "X-Custom-Signature"}})
-	for _, name := range []string{"Authorization", "Cookie", "X-API-Key", "X-Admin-Token", "X-Timestamp", "X-Nonce", "X-Signature", "X-Custom-Timestamp", "X-Custom-Signature"} {
+	stripGatewayCredentials(header, model.API{AuthMode: "api_key"})
+	for _, name := range []string{"Authorization", "Cookie", "X-API-Key", "X-Admin-Token", "X-Timestamp", "X-Nonce", "X-Signature"} {
 		if header.Get(name) != "" {
 			t.Fatalf("sensitive header %s was retained", name)
 		}

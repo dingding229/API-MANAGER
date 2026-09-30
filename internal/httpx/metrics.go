@@ -1,9 +1,8 @@
 package httpx
 
 import (
-	"crypto/subtle"
+	"api-manager/internal/auth"
 	"net/http"
-	"strings"
 )
 
 // ProtectMetrics leaves development scrapes unchanged; production requires a
@@ -14,10 +13,7 @@ func ProtectMetrics(next http.Handler, token string) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		authorization := r.Header.Get("Authorization")
-		provided := strings.TrimPrefix(authorization, "Bearer ")
-		if authorization == provided || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+		if !auth.MatchesKey(token, auth.RequestKey(r)) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

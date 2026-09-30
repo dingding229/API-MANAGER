@@ -14,7 +14,7 @@ class NoRedirects(HTTPRedirectHandler):
         return None
 
 
-def request(base, path, token=None, header="Authorization"):
+def request(base, path, token=None, header="X-API-Key"):
     headers = {header: (f"Bearer {token}" if header == "Authorization" else token)} if token else {}
     # The verifier targets the direct API; do not route its credentials through
     # environment-configured proxies or follow even same-origin redirects.
@@ -30,7 +30,7 @@ def request(base, path, token=None, header="Authorization"):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="Private direct API URL; no redirects or cached endpoints")
-    parser.add_argument("--secret-dir", required=True, type=Path)
+    parser.add_argument("--secret-dir", default=Path(__file__).resolve().parents[1] / "secrets", type=Path)
     args = parser.parse_args()
     base = args.url.rstrip("/")
     try:
@@ -50,8 +50,11 @@ def main():
         checks = {
             "readiness": (request(base, "/health/ready"), 200),
             "anonymous metrics denied": (request(base, "/metrics"), 401),
-            "metrics bearer accepted": (request(base, "/metrics", metrics), 200),
-            "bootstrap token not accepted on management APIs": (request(base, "/admin/v1/apis", admin, "X-Admin-Token"), 401),
+            "metrics KEY accepted": (request(base, "/metrics", metrics), 200),
+            "anonymous management denied": (request(base, "/admin/v1/apis"), 401),
+            "admin KEY accepted": (request(base, "/admin/v1/apis", admin), 200),
+            "metrics KEY cannot administer": (request(base, "/admin/v1/apis", metrics), 401),
+            "console KEY accepted": (request(base, "/auth/v1/me", admin), 200),
         }
     except (OSError, URLError, ValueError):
         print("FAIL: API connection or Secret read failed; credentials are not displayed")
