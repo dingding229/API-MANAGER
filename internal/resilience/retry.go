@@ -1,13 +1,14 @@
 package resilience
 
 import (
-	"io"
+	"errors"
 	"net/http"
 	"time"
 )
 
 // RetryTransport retries only requests that can be replayed safely. It never
-// retries a non-idempotent request body unless the request provides GetBody.
+// retries a request body unless the request provides GetBody. Incoming server
+// requests normally do not provide GetBody, so their body is sent once.
 type RetryTransport struct {
 	Base       http.RoundTripper
 	Attempts   int
@@ -16,6 +17,9 @@ type RetryTransport struct {
 }
 
 func (t RetryTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request == nil {
+		return nil, errors.New("nil HTTP request")
+	}
 	base := t.Base
 	if base == nil {
 		base = http.DefaultTransport
@@ -29,9 +33,15 @@ func (t RetryTransport) RoundTrip(request *http.Request) (*http.Response, error)
 	}
 	var lastErr error
 	for attempt := 0; attempt <= attempts; attempt++ {
-		current, err := cloneRequest(request)
-		if err != nil {
-			return nil, err
+		current := request.Clone(request.Context())
+		// The base transport owns and closes the original stream on the first
+		// attempt. Only subsequent attempts may obtain a fresh body.
+		if attempt > 0 && request.Body != nil && request.Body != http.NoBody {
+			body, err := request.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			current.Body = body
 		}
 		response, err := base.RoundTrip(current)
 		if err == nil && !retryableStatus(response.StatusCode) {
@@ -44,7 +54,8 @@ func (t RetryTransport) RoundTrip(request *http.Request) (*http.Response, error)
 			return response, err
 		}
 		if response != nil && response.Body != nil {
-			_, _ = io.Copy(io.Discard, response.Body)
+			// Do not drain an untrusted, potentially infinite error response.
+			// Closing it promptly also cancels its network read.
 			_ = response.Body.Close()
 		}
 		if t.OnRetry != nil {
@@ -70,19 +81,7 @@ func replayable(request *http.Request) bool {
 	default:
 		return false
 	}
-	return request.Body == nil || request.Body == http.NoBody || request.ContentLength == 0 || request.GetBody != nil
-}
-
-func cloneRequest(request *http.Request) (*http.Request, error) {
-	clone := request.Clone(request.Context())
-	if request.Body != nil && request.Body != http.NoBody && request.ContentLength != 0 {
-		body, err := request.GetBody()
-		if err != nil {
-			return nil, err
-		}
-		clone.Body = body
-	}
-	return clone, nil
+	return request.Body == nil || request.Body == http.NoBody || request.GetBody != nil
 }
 
 func retryableStatus(status int) bool {

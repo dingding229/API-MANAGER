@@ -392,6 +392,7 @@ func (g *Gateway) proxy(w http.ResponseWriter, r *http.Request, api model.API) {
 	}
 	proxy := &httputil.ReverseProxy{}
 	safeTransport := http.DefaultTransport.(*http.Transport).Clone()
+	defer safeTransport.CloseIdleConnections()
 	safeTransport.Proxy = nil // Never delegate DNS/IP validation to a proxy.
 	safeTransport.DialContext = security.DialContext(g.credentials, api.UpstreamAuthRef, target)
 	proxy.Transport = resilience.RetryTransport{Base: safeTransport, Attempts: api.UpstreamRetries, OnRetry: func() {

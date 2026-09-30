@@ -20,7 +20,7 @@ for path in $(git ls-files); do
     cmd/server/*|internal/*|configs/*|deploy/helm/api-manager/*|\
     security/trivy.yaml|security/tempo-vex.json|\
     scripts/check-release-boundaries.sh|scripts/init-production-secrets.py|\
-    scripts/preflight-production.py|scripts/verify-production.py|scripts/backup-production.py)
+    scripts/preflight-production.py|scripts/verify-production.py|scripts/backup-production.py|scripts/test-production.py)
       ;;
     *)
       unexpected="${unexpected}${path}\n"

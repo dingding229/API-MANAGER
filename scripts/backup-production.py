@@ -16,6 +16,7 @@ import sys
 import tarfile
 
 VOLUME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+TOOL_IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
 def run(*args, **kwargs):
@@ -36,12 +37,12 @@ def main():
     parser.add_argument("--plugin-volume", default="api-manager-prod-plugin-data")
     parser.add_argument("--library-volume", default="api-manager-prod-plugin-library")
     parser.add_argument("--observability-volume", default="api-manager-prod-observability")
-    parser.add_argument("--tool-image", required=True, help="Reviewed image containing tar, pinned by @sha256 digest")
+    parser.add_argument("--tool-image", default="docker.io/dingding229/api-manager:latest", help="Docker Hub image containing tar (default: docker.io/dingding229/api-manager:latest)")
     args = parser.parse_args()
     if not os.getenv("PGSERVICE") or not os.getenv("PGSERVICEFILE") or not os.getenv("PGPASSFILE"):
         parser.error("PGSERVICE, PGSERVICEFILE and PGPASSFILE must be set (no password arguments)")
-    if "@sha256:" not in args.tool_image:
-        parser.error("--tool-image must be pinned by immutable digest")
+    if not TOOL_IMAGE.fullmatch(args.tool_image):
+        parser.error("--tool-image must use a Docker Hub tag such as docker.io/dingding229/api-manager:latest")
     for volume in (args.plugin_volume, args.library_volume, args.observability_volume):
         if not VOLUME.fullmatch(volume):
             parser.error("invalid Docker volume name")
@@ -50,6 +51,7 @@ def main():
                   "--filter", "label=com.docker.compose.service=api-manager", capture_output=True, text=True).stdout.strip()
     if running:
         parser.error("API is still running; stop writes before taking a consistent database/plugin backup")
+    run("docker", "pull", "--quiet", args.tool_image)
     for volume in (args.plugin_volume, args.library_volume, args.observability_volume):
         run("docker", "volume", "inspect", volume, stdout=subprocess.DEVNULL)
     if args.output_dir.is_symlink():

@@ -11,8 +11,8 @@ import re
 import stat
 from urllib.parse import urlsplit, parse_qs
 
-DEFAULT_IMAGE = "docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46"
-IMAGE = re.compile(r"^docker\.io/dingding229/api-manager@sha256:[0-9a-f]{64}$")
+DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
+IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
 FILES = ("admin_token", "user_jwt_secret", "credential_encryption_key",
          "metrics_token", "grafana_admin_password", "postgres_dsn", "redis_password")
@@ -20,9 +20,9 @@ FILES = ("admin_token", "user_jwt_secret", "credential_encryption_key",
 
 def validate(environ, project_root):
     errors = []
-    image = environ.get("API_MANAGER_IMAGE", DEFAULT_IMAGE)
+    image = (environ.get("API_MANAGER_IMAGE") or DEFAULT_IMAGE)
     if not IMAGE.fullmatch(image):
-        errors.append("API_MANAGER_IMAGE must use docker.io/dingding229/api-manager pinned to a full sha256 digest")
+        errors.append("API_MANAGER_IMAGE must use a Docker Hub tag such as docker.io/dingding229/api-manager:latest")
     directory = environ.get("PROD_SECRETS_DIR", "")
     if not directory or not Path(directory).is_absolute():
         return errors + ["PROD_SECRETS_DIR must be an absolute private path"]
@@ -83,7 +83,7 @@ def validate(environ, project_root):
     if environ.get("PROD_OBSERVABILITY_STACK_ENABLED", "").lower() in ("1", "true", "yes"):
         match = SIZE.fullmatch(environ.get("PROD_API_MEMORY_LIMIT", ""))
         multipliers = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
-        if not match or int(match.group(1)) * multipliers[match.group(2).lower()] < 2 << 30:
+        if not match or int(match.group(1)) * multipliers[(match.group(2) or "").lower()] < 2 << 30:
             errors.append("the full observability stack requires PROD_API_MEMORY_LIMIT of at least 2g")
     return errors
 

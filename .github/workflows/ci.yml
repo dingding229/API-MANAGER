@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: dingding229/api-manager
+  IMAGE_NAME: docker.io/dingding229/api-manager
 
 jobs:
   validate:
@@ -28,6 +28,9 @@ jobs:
           fetch-depth: 0
       - name: Enforce release source boundaries
         run: ./scripts/check-release-boundaries.sh
+      - name: Restrict manual production publication to main
+        if: github.event_name == 'workflow_dispatch'
+        run: test "$GITHUB_REF" = refs/heads/main
       - name: Validate release tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -67,7 +70,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/init-production-secrets.py scripts/backup-production.py scripts/preflight-production.py scripts/verify-production.py
+          python3 -m py_compile scripts/init-production-secrets.py scripts/backup-production.py scripts/preflight-production.py scripts/verify-production.py scripts/test-production.py
+          python3 scripts/test-production.py
           secret_dir=$(mktemp -d)
           trap 'rm -rf "$secret_dir"' EXIT
           chmod 0700 "$secret_dir"
@@ -85,7 +89,7 @@ jobs:
           docker compose --env-file /dev/null -f compose.production.yaml config -q
           PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
           docker compose --env-file /dev/null -f compose.production.yaml config --images \
-          | grep -Eq '^docker\.io/dingding229/api-manager@sha256:[0-9a-f]{64}$'
+          | grep -Eq '^docker\.io/dingding229/api-manager:latest$'
           if API_MANAGER_IMAGE=ghcr.io/example/api-manager@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             PROD_SECRETS_DIR="$secret_dir" PROD_REDIS_ADDR=redis.example:6380 \
             python3 scripts/preflight-production.py; then
@@ -118,15 +122,15 @@ jobs:
           helm lint deploy/helm/api-manager \
             --set productionMode=true --set serviceMonitor.enabled=true \
             --set existingSecret=ci-placeholder \
-            --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set image.tag=latest --set image.pullPolicy=Always \
             --set env.REDIS_TLS_ENABLED=true
           helm template api-manager deploy/helm/api-manager \
             --set productionMode=true --set serviceMonitor.enabled=true \
             --set existingSecret=ci-placeholder \
-            --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --set image.tag=latest --set image.pullPolicy=Always \
             --set env.REDIS_TLS_ENABLED=true \
             --set 'authSecretFiles[0]=API_AUTH_JWT_HS256_SECRET' > /tmp/api-manager-production.yaml
-          test "$(grep -Ec 'image: "docker\.io/dingding229/api-manager@sha256:[0-9a-f]{64}"' /tmp/api-manager-production.yaml)" -eq 2
+          test "$(grep -Ec 'image: "docker\.io/dingding229/api-manager:latest"' /tmp/api-manager-production.yaml)" -eq 2
       - name: Scan rendered Kubernetes manifests
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -204,6 +208,8 @@ jobs:
   publish-amd64:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: scan
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -218,6 +224,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Push private amd64 image from verified source
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -227,9 +234,24 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Scan final amd64 image before promoting latest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: remote
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          trivy-config: security/trivy.yaml
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
   publish-arm64:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: scan
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -245,6 +267,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Push private arm64 image from verified source
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -253,6 +276,19 @@ jobs:
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-arm64
           provenance: mode=max
           sbom: true
+
+      - name: Scan final arm64 image before promoting latest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: remote
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          trivy-config: security/trivy.yaml
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
 
   publish-manifest:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -278,6 +314,8 @@ jobs:
         shell: bash
         env:
           PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
+          AMD64_DIGEST: ${{ needs.publish-amd64.outputs.image-digest }}
+          ARM64_DIGEST: ${{ needs.publish-arm64.outputs.image-digest }}
         run: |
           set -euo pipefail
           args=()
@@ -286,8 +324,8 @@ jobs:
           done <<< "$PUBLISH_TAGS"
           [ "${#args[@]}" -gt 0 ]
           docker buildx imagetools create "${args[@]}" \
-            "${IMAGE_NAME}:staged-${GITHUB_SHA}-amd64" \
-            "${IMAGE_NAME}:staged-${GITHUB_SHA}-arm64"
+            "${IMAGE_NAME}@${AMD64_DIGEST}" \
+            "${IMAGE_NAME}@${ARM64_DIGEST}"
           docker buildx imagetools inspect "${args[1]}"
           echo '### Private multi-platform Docker image published' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "${PUBLISH_TAGS}" >> "$GITHUB_STEP_SUMMARY"

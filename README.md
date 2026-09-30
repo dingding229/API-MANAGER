@@ -2,22 +2,35 @@
 
 API Manager 是面向私有化部署的 API 网关与管理平台，提供路由发布、上游代理、API 鉴权、限流与配额、WASM 插件、用户与 RBAC、审计日志以及运行观测控制台。
 
-发布镜像：`docker.io/dingding229/api-manager`，支持 `linux/amd64` 和 `linux/arm64`。生产环境必须使用经过审核的完整镜像摘要，例如 `docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46`，不要直接依赖可变的 `latest` 标签。
+默认镜像来自 Docker Hub：
 
-## 能力与部署边界
+```text
+docker.io/dingding229/api-manager:latest
+```
+
+镜像支持 `linux/amd64` 和 `linux/arm64`，包含以下观测组件：
+
+- Loki
+- Alloy
+- Tempo
+- Prometheus
+- Alertmanager
+- Grafana
+
+镜像内观测栈适用于单实例部署，不提供组件级隔离或高可用。需要长期保留、跨实例聚合或高可用时，应使用独立的外部观测平台。
+
+## 功能
 
 - API Key、JWT HS256、HMAC-SHA256 鉴权。
 - 请求大小限制、请求/响应 Schema 校验、上游超时、重试与熔断。
 - 本地或 Redis 分布式限流；PostgreSQL 持久化管理数据。
 - WASM 插件上传、校验、存储、启用和版本库管理。
 - 内置日志、指标、Trace、告警与 Dashboard；`/metrics` 输出 Prometheus 格式指标。
-- 镜像包含 Loki、Alloy、Tempo、Prometheus、Alertmanager 和 Grafana，可按需在同一容器内启动。
+- 上游凭证加密保存，客户端管理凭证不会转发到上游。
 
-镜像内观测栈适用于单实例部署，不提供组件级隔离或高可用。需要长期保留、跨实例聚合或高可用时，应使用独立的外部观测平台。
+## 快速启动
 
-## 本地快速启动
-
-需要 Docker Compose 和镜像拉取权限。创建仅供本机使用的 `.env`：
+需要 Docker Compose 和 Docker Hub 拉取权限。创建仅供本机使用的 `.env`：
 
 ```bash
 cat > .env <<EOF_ENV
@@ -44,7 +57,7 @@ curl -f http://127.0.0.1:8080/health/ready
 
 `docker compose down` 保留数据卷；`docker compose down -v` 会删除数据卷。
 
-### 启用镜像内完整观测栈
+### 启用镜像内观测栈
 
 在 `.env` 中增加：
 
@@ -53,22 +66,47 @@ OBSERVABILITY_STACK_ENABLED=true
 GRAFANA_ADMIN_PASSWORD=<独立的至少 32 字符随机密码>
 ```
 
-重新执行 `docker compose up -d`。Grafana 地址为 `http://127.0.0.1:3000/`，用户名为 `admin`。请为容器预留至少 2 GiB 内存和足够的持久化磁盘空间。
+然后执行：
+
+```bash
+docker compose pull api-manager
+docker compose up -d api-manager
+```
+
+Grafana 地址为 `http://127.0.0.1:3000/`，用户名为 `admin`。完整观测栈建议为容器预留至少 2 GiB 内存和足够的持久化磁盘空间。
+
+## 更新 Docker 镜像
+
+Compose 使用 Docker Hub 的 `latest` 标签，并配置为每次启动时检查远端镜像。更新时执行：
+
+```bash
+docker login
+docker compose pull api-manager
+docker compose up -d --force-recreate api-manager
+```
+
+也可以覆盖镜像地址，但生产预检只接受 Docker Hub 上 `docker.io/dingding229/api-manager:<tag>` 形式的镜像标签：
+
+```bash
+export API_MANAGER_IMAGE=docker.io/dingding229/api-manager:latest
+```
+
+`latest` 是可变标签。若需要审计或回滚，请在部署系统中记录实际拉取到的镜像摘要。
 
 ## 生产部署：Docker Compose
 
-`compose.production.yaml` 仅部署 API Manager。生产环境还需要：
+`compose.production.yaml` 只部署 API Manager。生产环境还需要：
 
 - 由受信任证书签发的外部 PostgreSQL，DSN 使用 `sslmode=verify-full`。
 - 启用 TLS 和密码认证的外部 Redis。
 - HTTPS 反向代理或入口网关。
-- 固定到完整 `sha256` 摘要的已审核镜像。
+- Docker Hub 拉取权限。
 
 本项目不提供私有 CA 注入或跳过证书验证的配置。PostgreSQL、Redis、OTLP 和 HTTPS 上游均使用容器系统信任根验证服务端证书。生产模式下，API 上游地址必须使用 HTTPS。
 
 ### 1. 创建 Secret 目录
 
-在仓库外创建新的 Secret 目录，并生成五个相互独立的随机应用 Secret：
+在仓库外创建 Secret 目录，并生成五个相互独立的随机应用 Secret：
 
 ```bash
 python3 scripts/init-production-secrets.py \
@@ -93,7 +131,7 @@ Secret 目录必须为 `0700`，文件必须为普通文件且权限为 `0444`�
 ### 2. 执行生产预检
 
 ```bash
-export API_MANAGER_IMAGE='docker.io/dingding229/api-manager@sha256:13416e9216fca1ba2359d2432ecfe2cb169ead3a400ddc7ad95d00ff17c09d46'
+export API_MANAGER_IMAGE='docker.io/dingding229/api-manager:latest'
 export PROD_SECRETS_DIR='/absolute/path/api-manager-secrets'
 export PROD_REDIS_ADDR='redis.example.com:6380'
 
@@ -109,14 +147,15 @@ export PROD_OBSERVABILITY_STACK_ENABLED=true
 export PROD_API_MEMORY_LIMIT=2g
 ```
 
-生产 Compose 已将 Grafana 密码以 `/run/secrets/grafana_admin_password` 只读挂载，无需另行添加密码挂载。
-
 ### 3. 启动与验证
 
 ```bash
 docker login
 docker compose --env-file /dev/null \
-  -f compose.production.yaml up -d
+  -f compose.production.yaml pull api-manager
+
+docker compose --env-file /dev/null \
+  -f compose.production.yaml up -d --force-recreate api-manager
 
 python3 scripts/verify-production.py \
   --url http://127.0.0.1:8080 \
@@ -139,56 +178,66 @@ export PGPASSFILE='/absolute/path/.pgpass'
 
 python3 scripts/backup-production.py \
   --output-dir /absolute/path/backups \
-  --tool-image 'alpine@sha256:<完整镜像摘要>'
+  --tool-image docker.io/dingding229/api-manager:latest
 ```
 
-备份包含 PostgreSQL dump、插件、插件库、观测数据卷归档和 SHA-256 清单。必须定期在隔离环境中进行恢复演练。
+备份主机需要 Docker，以及与数据库版本兼容的 `pg_dump` 和 `pg_restore`。备份覆盖数据库及插件、插件库、观测数据三个 Docker 卷；可用 `--plugin-volume`、`--library-volume`、`--observability-volume` 覆盖卷名。备份必须加密保存，并定期执行恢复演练。
 
 ## Kubernetes / Helm
 
-Chart 位于 `deploy/helm/api-manager`。生产模式要求：
-
-- `replicaCount: 1`。
-- `persistence.enabled: true`。
-- `image.digest` 为完整的小写 SHA-256 摘要。
-- 使用预先创建的 `existingSecret`，不在 Helm values 中保存生产 Secret。
-- Redis TLS 已启用。
-
-先准备命名空间、镜像拉取 Secret 和运行时 Secret：
+先创建命名空间及应用 Secret（`PROD_SECRETS_DIR` 指向前文的目录）：
 
 ```bash
 kubectl create namespace api-manager
-kubectl -n api-manager create secret docker-registry dockerhub-regcred \
-  --docker-server=https://index.docker.io/v1/ \
-  --docker-username="$DOCKERHUB_USER" \
-  --docker-password="$DOCKERHUB_TOKEN"
+kubectl -n api-manager create secret generic api-manager-secrets \
+  --from-file=ADMIN_TOKEN="$PROD_SECRETS_DIR/admin_token" \
+  --from-file=USER_JWT_SECRET="$PROD_SECRETS_DIR/user_jwt_secret" \
+  --from-file=CREDENTIAL_ENCRYPTION_KEY="$PROD_SECRETS_DIR/credential_encryption_key" \
+  --from-file=POSTGRES_DSN="$PROD_SECRETS_DIR/postgres_dsn" \
+  --from-file=REDIS_PASSWORD="$PROD_SECRETS_DIR/redis_password" \
+  --from-file=METRICS_TOKEN="$PROD_SECRETS_DIR/metrics_token" \
+  --from-file=GRAFANA_ADMIN_PASSWORD="$PROD_SECRETS_DIR/grafana_admin_password"
 ```
 
-`api-manager-secrets` 至少需要以下键：
+私有镜像仓库需要 Docker Hub 拉取凭据。在具备拉取权限的主机上执行 `docker login`，然后创建专用于 Kubernetes 的拉取 Secret；凭据文件必须包含 Docker Hub 凭据，不能仅含本机凭据助手的配置：
 
-- `ADMIN_TOKEN`
-- `USER_JWT_SECRET`
-- `CREDENTIAL_ENCRYPTION_KEY`
-- `POSTGRES_DSN`
-- `REDIS_PASSWORD`
-- `METRICS_TOKEN`
+```bash
+kubectl -n api-manager create secret generic dockerhub \
+  --type=kubernetes.io/dockerconfigjson \
+  --from-file=.dockerconfigjson=/absolute/path/dockerconfig.json
+```
 
-启用完整观测栈时，还需 `GRAFANA_ADMIN_PASSWORD`。这些核心 Secret 通过只读 Secret 卷和 `*_FILE` 配置提供给应用，不直接写入 Pod 环境变量。
+准备生产 values 文件，为 PostgreSQL、Redis、上游 API 和入口代理配置明确的 NetworkPolicy 放行规则。默认生产网络策略拒绝未声明的入站及出站流量；未放行依赖时应用不会就绪。
 
-安装示例：
+Chart 位于 `deploy/helm/api-manager`，默认使用 Docker Hub 的 `latest` 标签和 `Always` 拉取策略：
 
 ```bash
 helm upgrade --install api-manager deploy/helm/api-manager \
   --namespace api-manager \
+  --create-namespace \
   --set productionMode=true \
-  --set image.digest='sha256:<完整镜像摘要>' \
-  --set 'imagePullSecrets[0].name=dockerhub-regcred' \
+  --values /absolute/path/production-values.yaml \
   --set existingSecret=api-manager-secrets \
+  --set 'imagePullSecrets[0].name=dockerhub' \
   --set env.REDIS_ADDR='redis.example.com:6380' \
-  --set env.REDIS_TLS_ENABLED=true
+  --set env.REDIS_TLS_ENABLED=true \
+  --set image.repository=docker.io/dingding229/api-manager \
+  --set image.tag=latest \
+  --set image.pullPolicy=Always
 ```
 
-Chart 使用单一持久卷中的 `plugins`、`plugin-library` 和 `observability` 独立子目录，并采用 `Recreate` 更新策略，避免 RWO 卷在滚动升级期间发生多重挂载。
+`existingSecret` 必须包含以上生产 Secret。Chart 默认关闭 ServiceAccount Token 自动挂载、丢弃全部 Linux capabilities，并使用只读根文件系统。
+
+镜像标签更新后执行以下命令触发重新拉取：
+
+```bash
+kubectl -n api-manager rollout restart deployment/api-manager-api-manager
+kubectl -n api-manager rollout status deployment/api-manager-api-manager
+```
+
+生产环境需要根据入口网关、Prometheus 抓取器和外部服务配置 `ingress`、`networkPolicy`、`serviceMonitor` 与 `extraEgress`。生产模式要求启用 Redis TLS、持久化存储和外部 Secret。
+
+Chart 使用单一持久卷中的 `plugins`、`plugin-library` 和 `observability` 独立子目录，并采用 `Recreate` 更新策略，避免 RWO 卷在更新期间发生多重挂载。
 
 ## JWT / HMAC 路由 Secret
 
@@ -255,7 +304,3 @@ HMAC 的时间戳、Nonce 和签名头仅用于网关鉴权，不会转发给上
 - 加密密钥必须长期保存；丢失或更换后，已有上游调用凭证无法再次解密。
 - 单容器六组件模式和单副本插件注册表不适合作为高可用观测平台。
 - 上线前必须完成实际环境的 PostgreSQL/Redis TLS 联调、备份恢复演练、容量测试和入口层 HTTPS 验证。
-
-## 发布策略
-
-推送到 `main` 只执行测试、构建和安全扫描，不自动覆盖 Docker Hub `latest`。只有 `v*` 发布标签或显式的手动发布工作流会推送 amd64、arm64 分架构镜像并生成多架构 manifest。发布标签版本必须与 Helm Chart 的 `version` 和 `appVersion` 一致。

@@ -83,7 +83,7 @@ func ValidateInstance(raw json.RawMessage, body []byte) error {
 	var instance any
 	if len(bytes.TrimSpace(body)) == 0 {
 		instance = nil
-	} else if err := json.NewDecoder(bytes.NewReader(body)).Decode(&instance); err != nil {
+	} else if err := json.Unmarshal(body, &instance); err != nil {
 		return fmt.Errorf("request body must be valid JSON: %w", err)
 	}
 	if err := compiled.Validate(instance); err != nil {

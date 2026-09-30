@@ -1,6 +1,8 @@
+{{- if ne .Values.image.repository "docker.io/dingding229/api-manager" }}{{ fail "image.repository must be docker.io/dingding229/api-manager" }}{{- end }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$" (.Values.image.tag | toString)) }}{{ fail "image.tag must be a Docker Hub tag" }}{{- end }}
+{{- if and .Values.productionMode (ne .Values.image.pullPolicy "Always") }}{{ fail "productionMode requires image.pullPolicy=Always" }}{{- end }}
 {{- $stackEnabled := eq (lower (toString (index .Values.env "OBSERVABILITY_STACK_ENABLED"))) "true" -}}
 {{- if gt (int .Values.replicaCount) 1 }}{{ fail "replicaCount > 1 requires a distributed plugin reload mechanism; use one replica" }}{{- end }}
-{{- if and .Values.productionMode (not (regexMatch "^sha256:[0-9a-f]{64}$" (.Values.image.digest | toString))) }}{{ fail "productionMode requires a full lowercase sha256 image.digest" }}{{- end }}
 {{- if and .Values.productionMode (not .Values.existingSecret) }}{{ fail "productionMode requires existingSecret; do not store production secrets in Helm values" }}{{- end }}
 {{- if and .Values.productionMode (not .Values.persistence.enabled) }}{{ fail "productionMode requires persistence.enabled=true for runtime data" }}{{- end }}
 {{- if and (gt (len .Values.authSecretFiles) 0) (not .Values.existingSecret) }}{{ fail "authSecretFiles requires existingSecret" }}{{- end }}
@@ -41,7 +43,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
         - name: initialize-data-directories
-          image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "-ec"]
           args: ["mkdir -p /data/plugins /data/plugin-library /data/observability && chmod 0700 /data/plugins /data/plugin-library /data/observability"]
@@ -52,7 +54,7 @@ spec:
               mountPath: /data
       containers:
         - name: api-manager
-          image: "{{ .Values.image.repository }}{{ if .Values.image.digest }}@{{ .Values.image.digest }}{{ else }}:{{ .Values.image.tag }}{{ end }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}

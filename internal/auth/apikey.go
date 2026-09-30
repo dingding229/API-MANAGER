@@ -155,7 +155,8 @@ func validateHMAC(api model.API, r *http.Request) error {
 	signatureHeader := configValue(api.AuthConfig, "signature_header", "X-Signature")
 	timestamp := r.Header.Get(timestampHeader)
 	unix, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil || abs(time.Now().Unix()-unix) > 300 {
+	now := time.Now().Unix()
+	if err != nil || unix < now-300 || unix > now+300 {
 		return ErrUnauthorized
 	}
 	nonce := r.Header.Get("X-Nonce")
@@ -243,11 +244,4 @@ func configValue(values map[string]string, key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func abs(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
-	return value
 }

@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"api-manager/internal/upstream"
 	"bytes"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"api-manager/internal/model"
@@ -58,5 +62,33 @@ func TestResponseValidatorStreamsNonSuccessResponses(t *testing.T) {
 	}
 	if recorder.Code != http.StatusBadGateway || recorder.Body.Len() != len(payload) {
 		t.Fatalf("streamed response = status %d, bytes %d", recorder.Code, recorder.Body.Len())
+	}
+}
+
+func TestProxyForwardsIncomingPostBodyOnce(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != "payload" {
+			t.Errorf("body=%q error=%v", body, err)
+		}
+		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("X-API-Key") != "upstream-only-key" {
+			t.Error("gateway credentials leaked or upstream credential not injected")
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("upstream-response"))
+	}))
+	defer up.Close()
+	g := New(nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	g.SetUpstreamCredentials(upstream.Credentials{"test": {Origin: up.URL, APIKey: "upstream-only-key"}})
+	r := httptest.NewRequest(http.MethodPost, "http://gateway.invalid/api/test", strings.NewReader("payload"))
+	r.Header.Set("Authorization", "Bearer client-secret")
+	r.Header.Set("Cookie", "session=client-secret")
+	r.Header.Set("X-API-Key", "client-secret")
+	w := httptest.NewRecorder()
+	g.proxy(newCaptureWriter(w), r, model.API{ID: "body-test", UpstreamURL: up.URL, UpstreamAuthRef: "test", UpstreamRetries: 3})
+	if calls != 1 || w.Code != http.StatusServiceUnavailable || w.Body.String() != "upstream-response" {
+		t.Fatalf("calls=%d code=%d response=%q", calls, w.Code, w.Body.String())
 	}
 }
