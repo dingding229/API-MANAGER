@@ -209,7 +209,7 @@ function apiForm(item = {}) {
       <label class="field"><span class="field-label">名称 <span aria-hidden="true">*</span></span><input name="name" required placeholder="订单查询" value="${value('name')}"></label>
       <div class="grid-2">
         <label class="field"><span class="field-label">请求方法 <span aria-hidden="true">*</span></span><select name="method" required aria-describedby="method-hint"><option ${selected(item.method,'GET')}>GET</option><option ${selected(item.method,'POST')}>POST</option><option ${selected(item.method,'PUT')}>PUT</option><option ${selected(item.method,'DELETE')}>DELETE</option><option ${selected(item.method,'PATCH')}>PATCH</option><option ${selected(item.method,'HEAD')}>HEAD</option><option ${selected(item.method,'OPTIONS')}>OPTIONS</option>${item.method && !['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(item.method) ? `<option selected>${esc(item.method)}</option>` : ''}</select><span id="method-hint" class="field-hint">每条接口路由只绑定一种请求方法。</span></label>
-        <label class="field"><span class="field-label">鉴权</span><select name="auth_mode" aria-describedby="auth-hint"><option value="api_key" ${selected(item.auth_mode,"api_key")}>KEY</option><option value="none" ${selected(item.auth_mode,"none")}>无需验证</option></select><span id="auth-hint" class="field-hint">KEY 保护访问；无需验证用于公开接口。</span></label>
+        <fieldset class="field auth-mode-field" aria-describedby="auth-hint"><legend class="field-label">鉴权方式</legend><div class="auth-mode-control" role="radiogroup" aria-label="鉴权方式"><label class="auth-mode-option"><input type="radio" name="auth_mode" value="api_key" ${item.auth_mode === 'none' ? '' : 'checked'}><span><strong>KEY</strong><small>需要调用凭证</small></span></label><label class="auth-mode-option"><input type="radio" name="auth_mode" value="none" ${item.auth_mode === 'none' ? 'checked' : ''}><span><strong>无需验证</strong><small>公开访问</small></span></label></div><span id="auth-hint" class="field-hint">KEY 保护访问；无需验证用于公开接口。</span></fieldset>
       </div>
       <label class="field"><span class="field-label">访问路径 <span aria-hidden="true">*</span></span><input name="path" required placeholder="/api/example/v1/status" value="${value('path')}" aria-describedby="path-hint"><span id="path-hint" class="field-hint">必须以 / 开头；只填路径，不要填插件名、完整网址或连续斜线。</span></label>
       <label class="field"><span class="field-label">说明</span><input name="description" value="${value('description')}" placeholder="简短描述这个接口的用途"></label>
@@ -652,7 +652,8 @@ async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode =
   if (!form) return;
   form.elements.name.value = title || `${pluginName} · ${path.split('/').pop()}`;
   form.elements.method.value = method;
-  form.elements.auth_mode.value = authMode;
+  const authOption = [...form.querySelectorAll('input[name="auth_mode"]')].find((input) => input.value === authMode) || form.querySelector('input[name="auth_mode"]');
+  if (authOption) authOption.checked = true;
   form.elements.path.value = path;
   form.elements.plugin.value = pluginName;
   form.scrollIntoView({behavior:'smooth', block:'start'});

@@ -126,3 +126,92 @@ form .permission-options, form .role-select-list { gap: 8px; }
   form select, form input[type="checkbox"] { appearance: auto; background-image: none; }
   form input[type="checkbox"]:checked { background-color: Canvas; border-color: ButtonText; }
 }
+
+/* Two auth modes are a choice, not a long list: use a compact segmented radio control. */
+form .auth-mode-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+form .auth-mode-field .field-label {
+  display: block;
+}
+form .auth-mode-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-height: var(--control-height);
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-muted);
+}
+form .auth-mode-option {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 34px;
+  place-items: center;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--control-muted);
+  cursor: pointer;
+  text-align: center;
+  transition: color .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+form .auth-mode-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  line-height: 1.15;
+}
+form .auth-mode-option strong {
+  font-size: 13px;
+  font-weight: 750;
+}
+form .auth-mode-option small {
+  overflow: hidden;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+form .auth-mode-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+form .auth-mode-option:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .7);
+}
+form .auth-mode-option:has(input:checked) {
+  border-color: #d4ddfb;
+  background: var(--panel);
+  color: var(--brand-strong);
+  box-shadow: 0 1px 3px rgba(23, 32, 51, .08);
+}
+form .auth-mode-option:focus-within {
+  outline: 2px solid var(--control-focus-border);
+  outline-offset: 1px;
+}
+@media (max-width: 600px) {
+  form .auth-mode-option { padding-inline: 6px; }
+  form .auth-mode-option small { font-size: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  form .auth-mode-option { transition: none; }
+}
+@media (forced-colors: active) {
+  form .auth-mode-control { background: Canvas; }
+  form .auth-mode-option:has(input:checked) { border-color: Highlight; background: Highlight; color: HighlightText; }
+}
