@@ -17,6 +17,8 @@ const permissionLabels = {
   'credential.write': '创建与吊销调用凭证',
   'plugin.read': '查看插件',
   'plugin.manage': '管理插件配置',
+  'user.read': '查看用户、角色与权限',
+  'user.manage': '创建用户与分配角色',
   'audit.read': '查看审计日志',
   'observability.read': '查看运行指标、日志、链路与告警',
   'observability.manage': '确认和管理运行告警',
