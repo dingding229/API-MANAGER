@@ -85,7 +85,7 @@ func (s *Service) Create(email, password, role string) (model.User, error) {
 func (s *Service) CreateWithRoles(email, password string, roles []string) (model.User, error) {
 	email = normalizeUsername(email)
 	if !validUsername(email) || !validPassword(password) {
-		return model.User{}, errors.New("valid username or email and password with 12 to 72 bytes are required")
+		return model.User{}, errors.New("valid username or email and password with 8 to 72 bytes are required")
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
