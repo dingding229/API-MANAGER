@@ -23,7 +23,7 @@ function fields(value: unknown): Field[] {
 export function projectCatalog(value: unknown): Catalog {
   const data = object(value);
   if (data.version !== 1 || !Array.isArray(data.apis)) throw new Error('invalid catalog');
-  const apis = data.apis.slice(0, 200).flatMap((entry): ApiDoc[] => {
+  const apis = data.apis.slice(0, 1400).flatMap((entry): ApiDoc[] => {
     const api = object(entry);
     if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(String(api.method)) || !['api_key', 'none'].includes(String(api.authentication)) || typeof api.path !== 'string' || api.path.length > 512 || !api.path.startsWith('/api/') || /[\x00-\x20\x7f?#\\]/.test(api.path)) return [];
     if (typeof api.id !== 'string' || !api.id || typeof api.title !== 'string' || !api.title.trim()) return [];

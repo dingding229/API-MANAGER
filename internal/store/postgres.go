@@ -510,7 +510,7 @@ func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 func (p *Postgres) ListUsers() []model.User {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users ORDER BY created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT u.id,u.username,COALESCE(u.email,''),u.password_hash,u.role,u.status,u.created_at,u.updated_at,ARRAY(SELECT r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY r.name) FROM users u ORDER BY u.created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -518,8 +518,7 @@ func (p *Postgres) ListUsers() []model.User {
 	users := make([]model.User, 0)
 	for rows.Next() {
 		var user model.User
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err == nil {
-			user.Roles = p.userRoles(ctx, user.ID)
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Roles); err == nil {
 			if len(user.Roles) > 0 {
 				user.Role = user.Roles[0]
 			}
@@ -772,7 +771,7 @@ func (p *Postgres) ListPermissions() []model.Permission {
 func (p *Postgres) ListRoles() []model.Role {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT id,name,description FROM roles WHERE tenant_id IS NULL ORDER BY name`)
+	rows, err := p.pool.Query(ctx, `SELECT r.id,r.name,r.description,ARRAY(SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id ORDER BY p.code) FROM roles r WHERE r.tenant_id IS NULL ORDER BY r.name`)
 	if err != nil {
 		return nil
 	}
@@ -780,10 +779,12 @@ func (p *Postgres) ListRoles() []model.Role {
 	roles := make([]model.Role, 0)
 	for rows.Next() {
 		var role model.Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description); err != nil {
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.Permissions); err != nil {
 			continue
 		}
-		role.Permissions = p.rolePermissions(ctx, role.ID)
+		if role.Name == "super_admin" && len(role.Permissions) == 0 {
+			role.Permissions = []string{"*"}
+		}
 		roles = append(roles, role)
 	}
 	return roles

@@ -141,4 +141,21 @@ func TestPostgresProductionInvariants(t *testing.T) {
 	if wins != 1 {
 		t.Fatal("concurrent demotion removed final administrator")
 	}
+	failures := make(chan bool, 30)
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			users, roles := p.ListUsers(), p.ListRoles()
+			failures <- len(users) != 2 || len(roles) != len(DefaultRoles())
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for failed := range failures {
+		if failed {
+			t.Fatal("concurrent user/role listing exhausted the connection pool")
+		}
+	}
+
 }

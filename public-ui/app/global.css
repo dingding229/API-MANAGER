@@ -18,3 +18,9 @@ button,a,select{transition:background-color .18s ease,color .18s ease}button:hov
 .code-card button:disabled{cursor:wait;opacity:.7}.code-card>p{padding:0 15px 12px;color:var(--muted);font-size:13px}.endpoint-head b,.method{font-size:11px}mark{font-size:12px;color:#9d3730}.sidebar button em{font-size:12px;color:var(--muted)}
 .brand-mark{width:18px;height:18px;display:inline-block;border-radius:6px 6px 6px 2px;background:linear-gradient(145deg,#9aaaff 0 45%,#4d69df 46% 100%);box-shadow:0 0 0 3px rgba(144,164,255,.13);transform:rotate(-45deg)}
 .brand-symbol{display:grid;place-items:center;width:34px;height:34px;background:var(--brand);border-radius:9px}
+
+/* Align public filters with the console's input height and focus affordance. */
+.toolbar select{appearance:none;min-height:44px;border-radius:9px;padding:10px 38px 10px 12px;border:1px solid var(--line);background-color:#fff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2359677e' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+.toolbar select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:620px){.toolbar select,.search input{font-size:16px}.toolbar select{padding-right:38px}}
+@media(forced-colors:active){.toolbar select{appearance:auto;background-image:none}}

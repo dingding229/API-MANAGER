@@ -24,7 +24,7 @@ test('invalid optional public origin falls back without taking down the catalog'
 test('invalid catalog, methods, auth and paths fail closed', () => {
   assert.throws(() => projectCatalog({ version: 2, apis: [] }));
   for (const override of [{ method: '$(echo)' }, { authentication: 'jwt' }, { path: '/admin/v1/apis' }, { path: '/api/test\nsh' }, { path: '/api/foo?bar' }, { path: '/api/foo\\bar' }]) assert.equal(projectCatalog({ version: 1, apis: [{ ...api, ...override }] }).apis.length, 0);
-  assert.equal(projectCatalog({ version: 1, apis: Array(205).fill(api) }).apis.length, 200);
+  assert.equal(projectCatalog({ version: 1, apis: Array(1500).fill(api) }).apis.length, 1400);
 });
 
 test('cURL uses KEY only when required and accurately represents body/header types', () => {
