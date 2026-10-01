@@ -39,10 +39,17 @@ func NewMemory() *Memory {
 
 func (m *Memory) seedRBAC() {
 	for _, permission := range DefaultPermissions() {
-		m.permissions[permission.Code] = permission
+		if _, exists := m.permissions[permission.Code]; !exists {
+			m.permissions[permission.Code] = permission
+		}
 	}
 	for _, role := range DefaultRoles() {
-		m.roles[role.Name] = role
+		if existing, exists := m.roles[role.Name]; exists {
+			existing.Description = role.Description
+			m.roles[role.Name] = existing
+		} else {
+			m.roles[role.Name] = role
+		}
 	}
 }
 

@@ -110,3 +110,24 @@ func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
 		t.Fatal("re-enabled user cannot log in")
 	}
 }
+
+func TestRolePermissionUpdatesValidateAndProtectSuperAdmin(t *testing.T) {
+	m := store.NewMemory()
+	service := NewService(m)
+	if err := service.UpdateRolePermissions("viewer", []string{"api.read", "api.read", "observability.read"}); err != nil {
+		t.Fatal(err)
+	}
+	role, err := m.GetRoleByName("viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(role.Permissions) != 2 {
+		t.Fatalf("permissions not normalized: %#v", role.Permissions)
+	}
+	if err := service.UpdateRolePermissions("viewer", []string{"unknown.permission"}); err == nil {
+		t.Fatal("unknown permission accepted")
+	}
+	if err := service.UpdateRolePermissions("super_admin", []string{"api.read"}); err == nil {
+		t.Fatal("super_admin mutation accepted")
+	}
+}

@@ -264,6 +264,7 @@ func (a *Admin) createAPI(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
+	request.Method = normalizeAPIMethod(request.Method)
 	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -298,6 +299,7 @@ func (a *Admin) updateAPI(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
+	request.Method = normalizeAPIMethod(request.Method)
 	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -911,6 +913,10 @@ func (a *Admin) updateRolePermissions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only super_admin can change role permissions"})
 		return
 	}
+	if strings.EqualFold(name, "super_admin") {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "super_admin permissions are immutable"})
+		return
+	}
 	provider, ok := a.userManager.(interface{ UpdateRolePermissions(string, []string) error })
 	if !ok {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "role management unavailable"})
@@ -1321,6 +1327,10 @@ func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, update
 	return model.API{PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
+var allowedAPIMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}
+
+func normalizeAPIMethod(method string) string { return strings.ToUpper(strings.TrimSpace(method)) }
+
 func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) error {
 	if len(request.PublicTitle) > 120 || len(request.PublicSummary) > 600 || len(request.PublicCategory) > 48 {
 		return errors.New("public documentation fields exceed their size limits")
@@ -1338,8 +1348,8 @@ func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) err
 	if strings.TrimSpace(request.Name) == "" {
 		return errors.New("name is required")
 	}
-	if strings.TrimSpace(request.Method) == "" {
-		return errors.New("method is required")
+	if !allowedAPIMethods[normalizeAPIMethod(request.Method)] {
+		return errors.New("method must be exactly one of GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
 	}
 	if !strings.HasPrefix(request.Path, "/") || strings.Contains(request.Path, "//") {
 		return errors.New("path must start with / and must not contain //")

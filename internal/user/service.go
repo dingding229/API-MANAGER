@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/mail"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,7 +127,39 @@ func (s *Service) ListRoles() []model.Role                 { return s.store.List
 func (s *Service) ListPermissions() []model.Permission     { return s.store.ListPermissions() }
 func (s *Service) GetRole(name string) (model.Role, error) { return s.store.GetRoleByName(name) }
 func (s *Service) UpdateRolePermissions(name string, codes []string) error {
-	return s.store.UpdateRolePermissions(name, codes)
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return errors.New("role name is required")
+	}
+	if name == "super_admin" {
+		return errors.New("super_admin permissions are immutable")
+	}
+	normalized := normalizePermissions(codes)
+	known := make(map[string]struct{})
+	for _, permission := range s.store.ListPermissions() {
+		known[permission.Code] = struct{}{}
+	}
+	for _, code := range normalized {
+		if _, ok := known[code]; !ok {
+			return fmt.Errorf("unknown permission %q", code)
+		}
+	}
+	return s.store.UpdateRolePermissions(name, normalized)
+}
+func normalizePermissions(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "" && value != "*" {
+			if _, ok := set[value]; !ok {
+				set[value] = struct{}{}
+				result = append(result, value)
+			}
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (s *Service) CreateRole(name, description string, permissions []string) (model.Role, error) {

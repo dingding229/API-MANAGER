@@ -568,6 +568,10 @@ func ensureRoleTx(ctx context.Context, tx pgx.Tx, role model.Role) error {
 		return err
 	} else if _, err := tx.Exec(ctx, `UPDATE roles SET description=$2 WHERE id=$1`, roleID, role.Description); err != nil {
 		return err
+	} else {
+		// Existing roles may have been customized by administrators. Seeding must
+		// never overwrite their permissions on every application restart.
+		return nil
 	}
 	return setRolePermissionsTx(ctx, tx, roleID, role.Permissions)
 }

@@ -43,12 +43,19 @@ function permissionChecklist(permissions, selected = []) {
   const categories = {api: '接口管理', credential: '调用凭证', plugin: '插件管理', user: '用户管理', audit: '审计日志', observability: '运行观测'};
   const groups = new Map();
   for (const permission of permissions) {
-    const category = permission.code.split('.')[0];
-    const name = categories[category] || '其他权限';
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(permission);
+    const category = permission.code.split('.')[0]; const name = categories[category] || '其他权限';
+    if (!groups.has(name)) groups.set(name, []); groups.get(name).push(permission);
   }
-  return `<div class="permission-groups" role="group" aria-label="选择权限">${[...groups].map(([name, entries]) => `<fieldset class="permission-group"><legend>${esc(name)}</legend><div class="permission-options">${entries.map(p => `<label class="permission-option" title="${esc(p.code)}"><input type="checkbox" name="permission" value="${esc(p.code)}" ${selectedCodes.has(p.code) ? 'checked' : ''}><span>${esc(permissionLabel(p.code))}</span></label>`).join('')}</div></fieldset>`).join('')}</div>`;
+  const total = permissions.length; const checked = permissions.filter(p => selectedCodes.has(p.code)).length;
+  return `<div class="permission-picker" data-permission-picker><div class="permission-picker-toolbar"><strong>可授予权限</strong><span class="small" data-permission-count>${checked}/${total} 已选择</span><span class="permission-picker-actions"><button type="button" class="link" data-permission-all>全选</button><button type="button" class="link" data-permission-none>清空</button></span></div><div class="permission-groups" role="group" aria-label="选择权限">${[...groups].map(([name, entries]) => `<fieldset class="permission-group"><legend>${esc(name)}</legend><div class="permission-options">${entries.map(p => `<label class="permission-option" title="${esc(p.code)}"><input type="checkbox" name="permission" value="${esc(p.code)}" ${selectedCodes.has(p.code) ? 'checked' : ''}><span>${esc(permissionLabel(p.code))}</span></label>`).join('')}</div></fieldset>`).join('')}</div></div>`;
+}
+function bindPermissionPicker(root) {
+  const picker = root.querySelector('[data-permission-picker]'); if (!picker) return;
+  const boxes = () => [...picker.querySelectorAll('input[name="permission"]')];
+  const update = () => { const all=boxes(); const count=all.filter(input=>input.checked).length; const node=picker.querySelector('[data-permission-count]'); if(node) node.textContent=`${count}/${all.length} 已选择`; };
+  picker.querySelector('[data-permission-all]')?.addEventListener('click',()=>{boxes().forEach(input=>{input.checked=true});update()});
+  picker.querySelector('[data-permission-none]')?.addEventListener('click',()=>{boxes().forEach(input=>{input.checked=false});update()});
+  boxes().forEach(input=>input.addEventListener('change',update)); update();
 }
 
 function rolePermissionsSummary(codes = []) {
@@ -199,7 +206,7 @@ function apiForm(item = {}) {
       <div class="form-section-heading"><div><h3 id="api-basics-title">基础信息</h3><p>先定义公开路由和访问方式。</p></div><span class="required-note">带 * 为必填</span></div>
       <label class="field"><span class="field-label">名称 <span aria-hidden="true">*</span></span><input name="name" required placeholder="订单查询" value="${value('name')}"></label>
       <div class="grid-2">
-        <label class="field"><span class="field-label">方法 <span aria-hidden="true">*</span></span><select name="method"><option ${selected(item.method,'GET')}>GET</option><option ${selected(item.method,'POST')}>POST</option><option ${selected(item.method,'PUT')}>PUT</option><option ${selected(item.method,'DELETE')}>DELETE</option><option ${selected(item.method,'PATCH')}>PATCH</option><option ${selected(item.method,'HEAD')}>HEAD</option><option ${selected(item.method,'OPTIONS')}>OPTIONS</option>${item.method && !['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(item.method) ? `<option selected>${esc(item.method)}</option>` : ''}</select></label>
+        <label class="field"><span class="field-label">请求方法 <span aria-hidden="true">*</span></span><select name="method" required aria-describedby="method-hint"><option ${selected(item.method,'GET')}>GET</option><option ${selected(item.method,'POST')}>POST</option><option ${selected(item.method,'PUT')}>PUT</option><option ${selected(item.method,'DELETE')}>DELETE</option><option ${selected(item.method,'PATCH')}>PATCH</option><option ${selected(item.method,'HEAD')}>HEAD</option><option ${selected(item.method,'OPTIONS')}>OPTIONS</option>${item.method && !['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(item.method) ? `<option selected>${esc(item.method)}</option>` : ''}</select><span id="method-hint" class="field-hint">每个接口只绑定一种请求方式；如需支持多个方法，请分别创建接口。</span></label>
         <label class="field"><span class="field-label">鉴权</span><select name="auth_mode"><option value="api_key" ${selected(item.auth_mode,"api_key")}>KEY</option><option value="none" ${selected(item.auth_mode,"none")}>无需验证</option></select></label>
       </div>
       <label class="field"><span class="field-label">访问路径 <span aria-hidden="true">*</span></span><input name="path" required placeholder="/api/example/v1/status" value="${value('path')}" aria-describedby="path-hint"><span id="path-hint" class="field-hint">必须以 / 开头；只填路径，不要填插件名、完整网址或连续斜线。</span></label>
@@ -241,6 +248,8 @@ function apiForm(item = {}) {
 }
 function apiFormData(form) {
   const data = Object.fromEntries(new FormData(form).entries());
+  data.method = String(data.method || '').trim().toUpperCase();
+  if (!['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].includes(data.method)) throw new Error('请选择一个有效的请求方法');
   for (const key of ['request_schema', 'response_schema', 'parameters_schema']) { if (data[key]?.trim()) data[key] = JSON.parse(data[key]); else delete data[key]; }
   for (const key of ['rate_limit_per_minute', 'daily_quota', 'monthly_quota', 'response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
   data.strip_path = form.elements.strip_path.checked;
@@ -366,43 +375,21 @@ async function renderUsers() {
 
 async function renderRoles() {
   if (state.page !== 'roles') return;
-  const page = $('#page');
-  if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载角色和权限…</div>';
   try {
     const [roles, permissions] = await Promise.all([api('/admin/v1/roles'), api('/admin/v1/permissions')]);
-    if (!page.isConnected) return; page.innerHTML = `<div class="roles-page">
+    if (!page.isConnected) return;
+    page.innerHTML = `<div class="roles-page">
       <div class="table-wrap roles-table-wrap"><table class="roles-table"><thead><tr><th scope="col">角色</th><th scope="col">说明</th><th scope="col">权限</th><th scope="col">操作</th></tr></thead><tbody>
-      ${roles.map(r => `<tr><td><strong title="${esc(r.name)}">${esc(roleLabel(r.name))}</strong>${roleLabels[r.name] ? `<br><span class="small">${esc(r.name)}</span>` : ''}</td><td>${esc(roleDescription(r))}</td><td>${rolePermissionsSummary(r.permissions || [])}</td><td>${can('*') && r.name !== 'super_admin' ? `<button class="secondary" data-role="${esc(r.name)}">编辑权限</button>` : ''}</td></tr>`).join('')}
+      ${roles.map(role => { const locked=role.name==='super_admin'; return `<tr><td><strong title="${esc(role.name)}">${esc(roleLabel(role.name))}</strong>${roleLabels[role.name]?`<br><span class="small">${esc(role.name)}</span>`:''}</td><td>${esc(roleDescription(role))}</td><td>${rolePermissionsSummary(role.permissions||[])}</td><td>${can('*') ? (locked ? '<span class="small">系统保护</span>' : `<button type="button" class="secondary" data-role="${esc(role.name)}">编辑权限</button>`) : '<span class="small">只读</span>'}</td></tr>`; }).join('')}
       </tbody></table></div>
-      ${can('*') ? `<section class="card role-editor" id="role-editor"><h2>创建角色</h2><p class="small">设置角色信息，并选择该角色可以执行的操作。</p><form id="role-form" class="form-stack"><div class="role-fields"><label>名称<input name="name" required placeholder="例如 support"></label><label>说明<input name="description" placeholder="简述角色用途"></label></div>${permissionChecklist(permissions)}<div class="role-form-actions"><button type="submit">创建角色</button></div></form></section>` : ''}
+      ${can('*') ? `<section class="card role-editor" id="role-editor" hidden></section><section class="card role-editor" id="role-create"><h2>创建角色</h2><p class="small">创建自定义角色。权限为空时，该角色不能访问管理 API。</p><form id="role-form" class="form-stack"><div class="role-fields"><label>名称<input name="name" required minlength="3" maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}" placeholder="例如 support"><span class="field-hint">3–64 位，只能使用字母、数字、点、下划线和短横线。</span></label><label>说明<input name="description" maxlength="200" placeholder="简述角色用途"></label></div>${permissionChecklist(permissions)}<div class="role-form-actions"><button type="submit">创建角色</button></div></form></section>` : ''}
     </div>`;
-    const createForm = $('#role-form');
-    if (createForm) createForm.onsubmit = async (event) => {
-      event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      try {
-        await api('/admin/v1/roles', {method:'POST', body:JSON.stringify({name:form.get('name'), description:form.get('description'), permissions:form.getAll('permission')})});
-        notice('角色创建成功', true); renderRoles();
-      } catch (error) { notice(error.message); }
-    };
-    $$('#page [data-role]').forEach(button => button.onclick = () => {
-      const role = roles.find(item => item.name === button.dataset.role);
-      if (!role) return;
-      const editor = $('#role-editor');
-      editor.innerHTML = `<h2>编辑权限：${esc(roleLabel(role.name))}</h2><p class="small">${esc(role.name)} · 勾选要授予的权限，保存后立即生效。</p><form id="role-permissions-form" class="form-stack">${permissionChecklist(permissions, role.permissions || [])}<div class="role-form-actions"><button type="button" class="secondary" id="cancel-role-edit">取消</button><button type="submit">保存权限</button></div></form>`;
-      $('#cancel-role-edit').onclick = () => renderRoles();
-      $('#role-permissions-form').onsubmit = async (event) => {
-        event.preventDefault();
-        const codes = new FormData(event.currentTarget).getAll('permission');
-        try {
-          await api(`/admin/v1/roles/${encodeURIComponent(role.name)}/permissions`, {method:'PUT', body:JSON.stringify({permissions:codes})});
-          notice('权限保存成功', true); renderRoles();
-        } catch (error) { notice(error.message); }
-      };
-    });
-  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+    const createForm=$('#role-form'); bindPermissionPicker(createForm);
+    if(createForm) createForm.onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{const form=new FormData(event.currentTarget);try{await api('/admin/v1/roles',{method:'POST',body:JSON.stringify({name:form.get('name'),description:form.get('description'),permissions:form.getAll('permission')})});notice('角色创建成功',true);renderRoles()}catch(error){notice(error.message)}})};
+    $$('#page [data-role]').forEach(button=>button.onclick=()=>{const role=roles.find(item=>item.name===button.dataset.role);if(!role)return;const editor=$('#role-editor');if(!editor)return;editor.hidden=false;editor.innerHTML=`<div class="role-editor-heading"><div><h2>编辑权限：${esc(roleLabel(role.name))}</h2><p class="small">${esc(role.name)} · 修改后立即生效。</p></div><button type="button" class="secondary" id="cancel-role-edit">取消</button></div><form id="role-permissions-form" class="form-stack">${permissionChecklist(permissions,role.permissions||[])}<div class="role-form-actions"><button type="submit">保存权限</button></div></form>`;bindPermissionPicker(editor);$('#cancel-role-edit').onclick=()=>{editor.hidden=true;editor.replaceChildren()};editor.scrollIntoView({behavior:'smooth',block:'start'});const form=$('#role-permissions-form');form.onsubmit=async event=>{event.preventDefault();await withSubmitting(form,'保存中…',async()=>{const codes=new FormData(form).getAll('permission');try{await api(`/admin/v1/roles/${encodeURIComponent(role.name)}/permissions`,{method:'PUT',body:JSON.stringify({permissions:codes})});notice('权限保存成功',true);renderRoles()}catch(error){notice(error.message)}})}});
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty" role="alert">${esc(error.message)}</div>`; }
 }
-
 
 function formatMetric(value, digits = 0) {
   const number = Number(value || 0);
