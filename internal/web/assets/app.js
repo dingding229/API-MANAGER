@@ -504,14 +504,38 @@ function openProfileModal(user) {
   };
 }
 
+function userActions(user, roles) {
+  const isSelf = user.id === state.user?.id;
+  const targetRoles = user.roles?.length ? user.roles : [user.role].filter(Boolean);
+  const canManageTarget = can('user.manage') && (can('*') || (!isSelf && targetRoles.every(name => {
+    const role = roles.find(candidate => candidate.name === name);
+    return role && roleCanBeGranted(role);
+  })));
+  const edit = isSelf || canManageTarget ? `<button type="button" class="secondary" data-user-profile="${esc(user.id)}">编辑信息</button>` : '';
+  const role = canManageTarget ? `<button type="button" class="secondary" data-user-roles="${esc(user.id)}">编辑角色</button>` : '';
+  const status = canManageTarget && !isSelf ? `<button type="button" class="${user.status === 'active' ? 'danger' : 'secondary'}" data-user-status="${esc(user.id)}" data-status="${user.status === 'active' ? 'disabled' : 'active'}">${user.status === 'active' ? '禁用' : '启用'}</button>` : '';
+  return edit + role + status || '<span class="small">无可用操作</span>';
+}
+
 async function renderUsers() {
   if (state.page !== 'users') return;
   const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
     if (!page.isConnected) return;
-    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${u.id === state.user?.id ? `<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button>` : ''}${can('user.manage')?`${u.id !== state.user?.id ? `<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button>` : ''}<button class="${u.status==='active'?'danger':''}" data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="8" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
-    $('#user-form').onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries()))});notice('用户创建成功',true);renderUsers()}catch(error){notice(error.message)}})};
+    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${userActions(u, roles)}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
+    $('#user-form').elements.password.oninput = event => event.target.setCustomValidity('');
+    $('#user-form').onsubmit = async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const bytes = new TextEncoder().encode(form.elements.password.value).length;
+      form.elements.password.setCustomValidity(bytes < 8 || bytes > 72 ? '密码必须为 8–72 个 UTF-8 字节。' : '');
+      if (!form.reportValidity()) return;
+      await withSubmitting(form, '创建中…', async () => {
+        try { await api('/admin/v1/users', {method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))}); notice('用户创建成功', true); renderUsers(); }
+        catch (error) { notice(error.message); }
+      });
+    };
     $$('#page [data-user-profile]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userProfile);if(user)openProfileModal(user)});
     $$('#page [data-user-status]').forEach(button=>button.onclick=async()=>{await withSubmitting(button.closest('.actions'),'处理中…',async()=>{try{await api(`/admin/v1/users/${encodeURIComponent(button.dataset.userStatus)}/status`,{method:'PUT',body:JSON.stringify({status:button.dataset.status})});notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})});
     $$('#page [data-user-roles]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userRoles);if(user)openRoleModal(user,roles)});

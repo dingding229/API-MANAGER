@@ -362,6 +362,9 @@ jobs:
   publish-manifest:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [publish-amd64, publish-arm64]
+    concurrency:
+      group: dockerhub-promotion-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -383,13 +386,25 @@ jobs:
         shell: bash
         env:
           PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
+          GH_TOKEN: ${{ github.token }}
           AMD64_DIGEST: ${{ needs.publish-amd64.outputs.image-digest }}
           ARM64_DIGEST: ${{ needs.publish-arm64.outputs.image-digest }}
         run: |
           set -euo pipefail
+          current_main=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')
           args=()
+          published_tags=()
           while IFS= read -r tag; do
-            [ -n "$tag" ] && args+=(-t "$tag")
+            [ -n "$tag" ] || continue
+            label="${tag#${IMAGE_NAME}:}"
+            # Old releases can finish later: publish immutable version/SHA tags,
+            # but only the current main commit may move latest or rolling tags.
+            if [ "$GITHUB_SHA" != "$current_main" ] && { [ "$label" = latest ] || [[ "$label" =~ ^[0-9]+\.[0-9]+$ ]]; }; then
+              echo "Skipping stale rolling tag: $tag"
+              continue
+            fi
+            args+=(-t "$tag")
+            published_tags+=("$tag")
           done <<< "$PUBLISH_TAGS"
           [ "${#args[@]}" -gt 0 ]
           docker buildx imagetools create "${args[@]}" \
@@ -397,4 +412,4 @@ jobs:
             "${IMAGE_NAME}@${ARM64_DIGEST}"
           docker buildx imagetools inspect "${args[1]}"
           echo '### Private multi-platform Docker image published' >> "$GITHUB_STEP_SUMMARY"
-          printf '%s\n' "${PUBLISH_TAGS}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "${published_tags[@]}" >> "$GITHUB_STEP_SUMMARY"

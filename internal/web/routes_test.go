@@ -126,3 +126,23 @@ func TestUserProfileEditingAssetsAreAvailable(t *testing.T) {
 		t.Error("account settings control missing from console shell")
 	}
 }
+
+func TestPasswordPolicyIsConsistentInConsole(t *testing.T) {
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "byteLength < 8") || !strings.Contains(string(js), "8–72") {
+		t.Fatal("profile password policy not eight bytes")
+	}
+	if strings.Contains(string(js)+string(html), `minlength="12"`) {
+		t.Fatal("old password minimum remains")
+	}
+	if !strings.Contains(string(html), `id="account-settings"`) {
+		t.Fatal("self-service account settings missing")
+	}
+}

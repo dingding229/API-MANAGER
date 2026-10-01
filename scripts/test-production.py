@@ -61,6 +61,14 @@ class ProductionScriptTests(unittest.TestCase):
         target.symlink_to(source)
         self.assertTrue(preflight.validate(self.env, ROOT))
 
+    def test_admin_password_accepts_eight_utf8_bytes(self):
+        target = self.folder / "admin_password"
+        for password, valid in (("12345678", True), ("密码12", True), ("1234567", False), ("密1234", False), ("x" * 73, False)):
+            target.chmod(0o600)
+            target.write_text(password)
+            target.chmod(0o444)
+            self.assertEqual(not preflight.validate(self.env, ROOT), valid)
+
     def test_stack_memory_bounds(self):
         for memory in ("2g", "2048m", "2147483648", ""):
             env = dict(self.env, OBSERVABILITY_STACK_ENABLED="true", API_MEMORY_LIMIT=memory)

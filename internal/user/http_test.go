@@ -101,3 +101,44 @@ func TestSelfProfileUpdateRejectsWrongCurrentPassword(t *testing.T) {
 		t.Fatalf("wrong password status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
+	s := NewService(store.NewMemory())
+	u, err := s.Create("self-reader", "old-reader-password", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Authenticate(u.Email, "old-reader-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHTTP(s)
+	for _, password := range []string{"1234567", "密1234"} {
+		r := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"password":"`+password+`","current_password":"old-reader-password"}`))
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 400 {
+			t.Fatalf("short password accepted: %d", w.Code)
+		}
+		if _, err := s.ValidateSession(token); err != nil {
+			t.Fatal("failed edit revoked session")
+		}
+	}
+	r := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"password":"密码12","current_password":"old-reader-password"}`))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("eight-byte self change failed: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := s.ValidateSession(token); err == nil {
+		t.Fatal("old session survived password change")
+	}
+	if _, _, err := s.Authenticate(u.Email, "old-reader-password"); err == nil {
+		t.Fatal("old password still works")
+	}
+	if _, _, err := s.Authenticate(u.Email, "密码12"); err != nil {
+		t.Fatal("new password rejected")
+	}
+}

@@ -279,8 +279,8 @@ func (c Config) Validate() error {
 	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {
 		return errors.New("USER_SESSION_TTL must be between 1 second and 24 hours")
 	}
-	if c.AdminPassword != "" && (len(c.AdminPassword) < 12 || len(c.AdminPassword) > 72 || c.AdminPassword == c.CredentialEncryptionKey || c.AdminPassword == c.RedisPassword || c.AdminPassword == c.MetricsToken) {
-		return errors.New("ADMIN_PASSWORD must be a distinct 12..72 byte password")
+	if c.AdminPassword != "" && (len(c.AdminPassword) < 8 || len(c.AdminPassword) > 72 || c.AdminPassword == c.CredentialEncryptionKey || c.AdminPassword == c.RedisPassword || c.AdminPassword == c.MetricsToken) {
+		return errors.New("ADMIN_PASSWORD must be a distinct 8..72 byte password")
 	}
 
 	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 5*time.Minute {

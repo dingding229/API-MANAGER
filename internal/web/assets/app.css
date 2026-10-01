@@ -196,27 +196,15 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 }
 
 
+/* Quiet, equal-height row actions; destructive actions come last. */
 .user-table { table-layout: fixed; min-width: 760px !important; }
 .user-table th:nth-child(1) { width: 29%; }
 .user-table th:nth-child(2) { width: 25%; }
 .user-table th:nth-child(3) { width: 16%; }
 .user-table th:nth-child(4) { width: 30%; }
-.user-table .actions {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
-  padding: 4px;
-  border: 1px solid #e5e9f2;
-  border-radius: 10px;
-  background: #fbfcff;
-}
-.user-table .actions button { min-width: 44px; }
-.user-table .actions button.danger {
-  border: 1px solid #fecdd3;
-  background: #fff1f2;
-  color: #b42318;
-}
-@media (max-width: 600px), (pointer: coarse) {
-  .user-table .actions { padding: 4px; }
-  .user-table .actions button { min-height: 44px; }
-}
+.user-table .user-cell-badges .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.user-table .actions { gap: 8px; flex-wrap: nowrap; }
+.user-table .actions button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: #344054; }
+.user-table .actions button:hover:not(:disabled) { border-color: #9aabc7; background: var(--surface-muted); }
+.user-table .actions button.danger { border-color: transparent; color: var(--danger); background: transparent; }
+.user-table .actions button.danger:hover:not(:disabled) { border-color: #fecdd3; background: #fff1f2; }

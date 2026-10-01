@@ -114,3 +114,22 @@ func TestPrivateComposeDatastoresAreTheOnlyPlaintextException(t *testing.T) {
 		t.Fatal("external PostgreSQL plaintext allowed")
 	}
 }
+
+func TestAdminPasswordUsesEightByteMinimum(t *testing.T) {
+	setValidTestEnvironment(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		password string
+		valid    bool
+	}{
+		{"12345678", true}, {"密码12", true}, {"1234567", false}, {"密1234", false}, {strings.Repeat("a", 73), false},
+	} {
+		cfg.AdminPassword = tc.password
+		if err := cfg.Validate(); (err == nil) != tc.valid {
+			t.Errorf("%d-byte password: %v", len(tc.password), err)
+		}
+	}
+}

@@ -41,8 +41,8 @@ def validate(environ, project_root):
         except (OSError, UnicodeError):
             errors.append(f"{name} is not readable text")
             continue
-        if len(value.encode()) < (12 if name == "admin_password" else 32) or (name == "admin_password" and len(value.encode()) > 72) or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
-            errors.append(f"{name} must contain a single-line 32+ byte secret")
+        if len(value.encode()) < (8 if name == "admin_password" else 32) or (name == "admin_password" and len(value.encode()) > 72) or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
+            errors.append(f"{name} must contain a single-line {'8..72' if name == 'admin_password' else '32+'} byte secret")
         values.append(value)
     if len(set(values)) != len(values):
         errors.append("All credentials must be distinct")
