@@ -154,6 +154,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
+          file: Dockerfile.release
           load: true
           push: false
           platforms: linux/amd64
@@ -290,6 +291,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
+          file: Dockerfile.release
           push: true
           platforms: linux/amd64
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-amd64
@@ -333,6 +335,7 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
+          file: Dockerfile.release
           push: true
           platforms: linux/arm64
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-arm64
