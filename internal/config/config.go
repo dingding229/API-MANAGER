@@ -224,7 +224,7 @@ func secret(name string) (string, error) {
 		return "", fmt.Errorf("read %s_FILE: invalid or oversized secret", name)
 	}
 	result := strings.TrimRight(string(contents), "\r\n")
-	if result == "" || strings.ContainsRune(result, 0) {
+	if strings.ContainsRune(result, 0) || (result == "" && name != "SMTP_PASSWORD") {
 		return "", fmt.Errorf("%s_FILE must contain a non-empty text value", name)
 	}
 	return result, nil

@@ -141,3 +141,23 @@ func TestSMTPPortIsValidatedAtLoad(t *testing.T) {
 		t.Fatal("invalid SMTP port accepted")
 	}
 }
+
+func TestOptionalSMTPPasswordFileMayBeEmpty(t *testing.T) {
+	setValidTestEnvironment(t)
+	file := filepath.Join(t.TempDir(), "smtp_password")
+	if err := os.WriteFile(file, nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SMTP_PASSWORD_FILE", file)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SMTPPassword != "" {
+		t.Fatal("empty SMTP secret altered")
+	}
+	t.Setenv("ADMIN_PASSWORD_FILE", file)
+	if _, err := Load(); err == nil {
+		t.Fatal("empty mandatory admin password secret accepted")
+	}
+}
