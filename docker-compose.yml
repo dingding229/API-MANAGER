@@ -23,6 +23,13 @@ services:
       PRODUCTION_MODE: "true"
       ALLOW_INTERNAL_PLAINTEXT: "true"
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_MODE: ${SMTP_MODE:-starttls}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      PASSWORD_RESET_BASE_URL: ${PASSWORD_RESET_BASE_URL:-}
       ADMIN_PASSWORD_FILE: /run/secrets/admin_password
       CREDENTIAL_ENCRYPTION_KEY_FILE: /run/secrets/credential_encryption_key
       METRICS_TOKEN_FILE: /run/secrets/metrics_token
@@ -45,6 +52,7 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "false"
     secrets:
       - admin_password
+      - smtp_password
       - credential_encryption_key
       - metrics_token
       - postgres_password
@@ -121,6 +129,7 @@ services:
     logging: *logging
 
 secrets:
+  smtp_password: {file: "${SECRETS_DIR:-./secrets}/smtp_password"}
   admin_password: {file: "${SECRETS_DIR:-./secrets}/admin_password"}
   credential_encryption_key: {file: "${SECRETS_DIR:-./secrets}/credential_encryption_key"}
   metrics_token: {file: "${SECRETS_DIR:-./secrets}/metrics_token"}

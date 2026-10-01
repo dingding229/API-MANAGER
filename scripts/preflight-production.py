@@ -11,7 +11,7 @@ import stat
 DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
 IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
-FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password")
+FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
 
 
 def validate(environ, project_root):
@@ -40,6 +40,10 @@ def validate(environ, project_root):
             value = path.read_text().rstrip("\r\n")
         except (OSError, UnicodeError):
             errors.append(f"{name} is not readable text")
+            continue
+        if name == "smtp_password":
+            if any(c in value for c in ("\r", "\n", "\x00")):
+                errors.append("smtp_password must be a single-line optional secret")
             continue
         if len(value.encode()) < (8 if name == "admin_password" else 32) or (name == "admin_password" and len(value.encode()) > 72) or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
             errors.append(f"{name} must contain a single-line {'8..72' if name == 'admin_password' else '32+'} byte secret")

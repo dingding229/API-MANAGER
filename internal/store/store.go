@@ -21,6 +21,7 @@ type Store interface {
 	FindCredentialByHash(string) (model.Credential, bool)
 
 	CreateUser(model.User) error
+	GetUserByUsername(string) (model.User, error)
 	GetUserByEmail(string) (model.User, error)
 	ListUsers() []model.User
 	CountUsers() int

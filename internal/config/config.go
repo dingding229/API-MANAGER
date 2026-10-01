@@ -15,47 +15,49 @@ import (
 )
 
 type Config struct {
-	UpstreamCredentials       string
-	HTTPAddr                  string
-	PublicAPIBaseURL          string
-	AdminPath                 string
-	PublicUIDir               string
-	AdminUsername             string
-	AdminPassword             string
-	UserSessionTTL            time.Duration
-	ProductionMode            bool
-	AllowInternalPlaintext    bool
-	MetricsToken              string
-	ShutdownTimeout           time.Duration
-	MaxBodyBytes              int64
-	LogLevel                  string
-	PostgresDSN               string
-	RedisAddr                 string
-	RedisPassword             string
-	RedisUsername             string
-	RedisTLS                  bool
-	RedisDB                   int
-	UseRedis                  bool
-	PluginDir                 string
-	PluginMaxBytes            int64
-	PluginDatabaseWrites      bool
-	PluginLibraryDir          string
-	CredentialEncryptionKey   string
-	CORSOrigins               string
-	OTELEnabled               bool
-	OTELServiceName           string
-	OTLPEndpoint              string
-	OTLPInsecure              bool
-	ObservabilityDir          string
-	ObservabilityStackEnabled bool
-	ObservabilityMaxLogs      int
-	ObservabilityMaxTraces    int
-	ObservabilityFileBytes    int64
+	UpstreamCredentials                                                            string
+	HTTPAddr                                                                       string
+	PublicAPIBaseURL                                                               string
+	AdminPath                                                                      string
+	PublicUIDir                                                                    string
+	AdminUsername                                                                  string
+	AdminPassword                                                                  string
+	SMTPHost, SMTPUsername, SMTPPassword, SMTPFrom, SMTPMode, PasswordResetBaseURL string
+	SMTPPort                                                                       int
+	UserSessionTTL                                                                 time.Duration
+	ProductionMode                                                                 bool
+	AllowInternalPlaintext                                                         bool
+	MetricsToken                                                                   string
+	ShutdownTimeout                                                                time.Duration
+	MaxBodyBytes                                                                   int64
+	LogLevel                                                                       string
+	PostgresDSN                                                                    string
+	RedisAddr                                                                      string
+	RedisPassword                                                                  string
+	RedisUsername                                                                  string
+	RedisTLS                                                                       bool
+	RedisDB                                                                        int
+	UseRedis                                                                       bool
+	PluginDir                                                                      string
+	PluginMaxBytes                                                                 int64
+	PluginDatabaseWrites                                                           bool
+	PluginLibraryDir                                                               string
+	CredentialEncryptionKey                                                        string
+	CORSOrigins                                                                    string
+	OTELEnabled                                                                    bool
+	OTELServiceName                                                                string
+	OTLPEndpoint                                                                   string
+	OTLPInsecure                                                                   bool
+	ObservabilityDir                                                               string
+	ObservabilityStackEnabled                                                      bool
+	ObservabilityMaxLogs                                                           int
+	ObservabilityMaxTraces                                                         int
+	ObservabilityFileBytes                                                         int64
 }
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN"} {
+	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -63,6 +65,10 @@ func Load() (Config, error) {
 		secrets[name] = value
 	}
 
+	smtpPort, err := envInt("SMTP_PORT", 587)
+	if err != nil {
+		return Config{}, err
+	}
 	redisAddr := env("REDIS_ADDR", "redis:6379")
 	productionMode, err := envBool("PRODUCTION_MODE", false)
 	if err != nil {
@@ -143,13 +149,14 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
-		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
-		PublicAPIBaseURL:          env("PUBLIC_API_BASE_URL", ""),
-		AdminPath:                 env("ADMIN_PATH", "/admin"),
-		PublicUIDir:               env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
-		AdminUsername:             env("ADMIN_USERNAME", "admin"),
-		AdminPassword:             secrets["ADMIN_PASSWORD"],
+		UpstreamCredentials: secrets["API_UPSTREAM_CREDENTIALS"],
+		HTTPAddr:            env("HTTP_ADDR", ":8080"),
+		PublicAPIBaseURL:    env("PUBLIC_API_BASE_URL", ""),
+		AdminPath:           env("ADMIN_PATH", "/admin"),
+		PublicUIDir:         env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
+		AdminUsername:       env("ADMIN_USERNAME", "admin"),
+		AdminPassword:       secrets["ADMIN_PASSWORD"],
+		SMTPHost:            env("SMTP_HOST", ""), SMTPUsername: env("SMTP_USERNAME", ""), SMTPPassword: secrets["SMTP_PASSWORD"], SMTPFrom: env("SMTP_FROM", ""), SMTPMode: env("SMTP_MODE", "starttls"), PasswordResetBaseURL: env("PASSWORD_RESET_BASE_URL", ""), SMTPPort: smtpPort,
 		UserSessionTTL:            userSessionTTL,
 		ProductionMode:            productionMode,
 		AllowInternalPlaintext:    allowInternalPlaintext,
@@ -276,6 +283,9 @@ func (c Config) Validate() error {
 		return errors.New("PUBLIC_UI_DIR must be an absolute directory")
 	}
 
+	if c.SMTPHost != "" && (c.SMTPPort < 1 || c.SMTPPort > 65535) {
+		return errors.New("SMTP_PORT must be between 1 and 65535")
+	}
 	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {
 		return errors.New("USER_SESSION_TTL must be between 1 second and 24 hours")
 	}

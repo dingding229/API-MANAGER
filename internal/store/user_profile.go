@@ -18,18 +18,23 @@ func (m *Memory) UpdateUserProfile(id string, change model.UserProfileUpdate) (m
 	if !ok {
 		return model.User{}, false, ErrNotFound
 	}
-	if u.Email != change.ExpectedUsername || u.PasswordHash != change.ExpectedPasswordHash {
+	if u.Username != change.ExpectedUsername || u.Email != change.ExpectedEmail || u.PasswordHash != change.ExpectedPasswordHash {
 		return model.User{}, false, ErrConflict
 	}
 	for otherID, other := range m.users {
-		if otherID != id && strings.EqualFold(other.Email, change.Username) {
+		if otherID != id && (strings.EqualFold(other.Username, change.Username) || (change.Email != "" && strings.EqualFold(other.Email, change.Email))) {
 			return model.User{}, false, ErrConflict
 		}
 	}
-	changed := u.Email != change.Username || u.PasswordHash != change.PasswordHash
+	changed := u.Username != change.Username || u.Email != change.Email || u.PasswordHash != change.PasswordHash
 	if changed {
-		u.Email, u.PasswordHash, u.UpdatedAt = change.Username, change.PasswordHash, time.Now().UTC()
+		u.Username, u.Email, u.PasswordHash, u.UpdatedAt = change.Username, change.Email, change.PasswordHash, time.Now().UTC()
 		m.users[id] = u
+		for key, reset := range m.resets {
+			if reset.UserID == id {
+				delete(m.resets, key)
+			}
+		}
 		for key, session := range m.sessions {
 			if session.UserID == id {
 				delete(m.sessions, key)
@@ -49,20 +54,20 @@ func (p *Postgres) UpdateUserProfile(id string, change model.UserProfileUpdate) 
 	}
 	defer tx.Rollback(ctx)
 	var u model.User
-	err = tx.QueryRow(ctx, `SELECT id,email,password_hash,role,status,created_at,updated_at FROM users WHERE id=$1 FOR UPDATE`, id).
-		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	err = tx.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE id=$1 FOR UPDATE`, id).
+		Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, false, ErrNotFound
 	}
 	if err != nil {
 		return model.User{}, false, err
 	}
-	if u.Email != change.ExpectedUsername || u.PasswordHash != change.ExpectedPasswordHash {
+	if u.Username != change.ExpectedUsername || u.Email != change.ExpectedEmail || u.PasswordHash != change.ExpectedPasswordHash {
 		return model.User{}, false, ErrConflict
 	}
-	changed := u.Email != change.Username || u.PasswordHash != change.PasswordHash
+	changed := u.Username != change.Username || u.Email != change.Email || u.PasswordHash != change.PasswordHash
 	if changed {
-		err = tx.QueryRow(ctx, `UPDATE users SET email=$2,password_hash=$3,updated_at=NOW() WHERE id=$1 RETURNING updated_at`, id, change.Username, change.PasswordHash).Scan(&u.UpdatedAt)
+		err = tx.QueryRow(ctx, `UPDATE users SET username=$2,email=NULLIF($3,''),password_hash=$4,updated_at=NOW() WHERE id=$1 RETURNING updated_at`, id, change.Username, change.Email, change.PasswordHash).Scan(&u.UpdatedAt)
 		if err != nil {
 			var pgError *pgconn.PgError
 			if errors.As(err, &pgError) && pgError.Code == "23505" {
@@ -73,7 +78,10 @@ func (p *Postgres) UpdateUserProfile(id string, change model.UserProfileUpdate) 
 		if _, err = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1`, id); err != nil {
 			return model.User{}, false, err
 		}
-		u.Email, u.PasswordHash = change.Username, change.PasswordHash
+		if _, err = tx.Exec(ctx, `DELETE FROM password_resets WHERE user_id=$1`, id); err != nil {
+			return model.User{}, false, err
+		}
+		u.Username, u.Email, u.PasswordHash = change.Username, change.Email, change.PasswordHash
 	}
 	rows, err := tx.Query(ctx, `SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=$1 ORDER BY r.name`, id)
 	if err != nil {

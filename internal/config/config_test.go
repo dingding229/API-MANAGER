@@ -10,7 +10,7 @@ import (
 func setValidTestEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "USER_SESSION_TTL",
+		"ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "USER_SESSION_TTL", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE", "SMTP_HOST", "SMTP_PORT", "SMTP_MODE", "SMTP_FROM", "SMTP_USERNAME", "PASSWORD_RESET_BASE_URL",
 		"CREDENTIAL_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY_FILE", "POSTGRES_DSN", "POSTGRES_DSN_FILE",
 		"REDIS_PASSWORD", "REDIS_PASSWORD_FILE", "API_UPSTREAM_CREDENTIALS", "API_UPSTREAM_CREDENTIALS_FILE",
 		"METRICS_TOKEN", "METRICS_TOKEN_FILE",
@@ -131,5 +131,13 @@ func TestAdminPasswordUsesEightByteMinimum(t *testing.T) {
 		if err := cfg.Validate(); (err == nil) != tc.valid {
 			t.Errorf("%d-byte password: %v", len(tc.password), err)
 		}
+	}
+}
+
+func TestSMTPPortIsValidatedAtLoad(t *testing.T) {
+	setValidTestEnvironment(t)
+	t.Setenv("SMTP_PORT", "abc")
+	if _, err := Load(); err == nil {
+		t.Fatal("invalid SMTP port accepted")
 	}
 }

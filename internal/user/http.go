@@ -22,6 +22,12 @@ func sessionToken(r *http.Request) string {
 }
 func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/recovery":
+		h.recoveryStatus(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/forgot-password":
+		h.forgotPassword(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/reset-password":
+		h.resetPassword(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/login":
 		var request model.LoginRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
@@ -46,7 +52,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, status, map[string]string{"error": message})
 			return
 		}
-		h.service.RecordAudit(audit.Actor{ID: user.ID, Type: "user", Email: user.Email}, r, "auth.login", "user", user.ID, 200, nil)
+		h.service.RecordAudit(audit.Actor{ID: user.ID, Type: "user", Email: user.Username}, r, "auth.login", "user", user.ID, 200, nil)
 		writeJSON(w, 200, map[string]any{"token": token, "user": user, "permissions": h.service.store.GetUserPermissions(user.ID)})
 	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/me":
 		user, err := h.service.ValidateSession(sessionToken(r))

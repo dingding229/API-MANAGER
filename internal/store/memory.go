@@ -21,6 +21,7 @@ type Memory struct {
 	credentials map[string]model.Credential
 	users       map[string]model.User
 	sessions    map[string]model.Session
+	resets      map[string]model.PasswordReset
 	releases    map[string][]model.Release
 	permissions map[string]model.Permission
 	roles       map[string]model.Role
@@ -32,7 +33,7 @@ type Memory struct {
 }
 
 func NewMemory() *Memory {
-	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), sessions: make(map[string]model.Session), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
+	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), sessions: make(map[string]model.Session), resets: make(map[string]model.PasswordReset), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
 	memory.seedRBAC()
 	return memory
 }
@@ -190,7 +191,7 @@ func (m *Memory) CreateUser(user model.User) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, existing := range m.users {
-		if existing.Email == user.Email {
+		if existing.Username == user.Username || (user.Email != "" && existing.Email == user.Email) {
 			return ErrConflict
 		}
 	}
@@ -213,16 +214,24 @@ func (m *Memory) CreateUser(user model.User) error {
 	return nil
 }
 
+func (m *Memory) GetUserByUsername(username string) (model.User, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, u := range m.users {
+		if u.Username == username {
+			u.Roles = append([]string(nil), m.userRoles[u.ID]...)
+			return u, nil
+		}
+	}
+	return model.User{}, ErrNotFound
+}
 func (m *Memory) GetUserByEmail(email string) (model.User, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, user := range m.users {
-		if user.Email == email {
-			user.Roles = append([]string(nil), m.userRoles[user.ID]...)
-			if len(user.Roles) > 0 {
-				user.Role = user.Roles[0]
-			}
-			return user, nil
+	for _, u := range m.users {
+		if email != "" && u.Email == email {
+			u.Roles = append([]string(nil), m.userRoles[u.ID]...)
+			return u, nil
 		}
 	}
 	return model.User{}, ErrNotFound
@@ -301,6 +310,11 @@ func (m *Memory) UpdateUserStatus(id, status string) error {
 	user.UpdatedAt = time.Now().UTC()
 	m.users[id] = user
 	if status == "disabled" {
+		for hash, reset := range m.resets {
+			if reset.UserID == id {
+				delete(m.resets, hash)
+			}
+		}
 		for hash, session := range m.sessions {
 			if session.UserID == id {
 				delete(m.sessions, hash)

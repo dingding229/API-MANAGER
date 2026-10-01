@@ -355,7 +355,7 @@ func (p *Postgres) CreateUser(user model.User) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO users(id,email,password_hash,role,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, user.ID, user.Email, user.PasswordHash, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
+	_, err = tx.Exec(ctx, `INSERT INTO users(id,username,email,password_hash,role,status,created_at,updated_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8)`, user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -383,12 +383,30 @@ func (p *Postgres) CreateUser(user model.User) error {
 	return tx.Commit(ctx)
 }
 
+func (p *Postgres) GetUserByUsername(username string) (model.User, error) {
+	ctx, cancel := dbContext()
+	defer cancel()
+	var user model.User
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE username=$1`, username).
+		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.User{}, ErrNotFound
+	}
+	if err == nil {
+		user.Roles = p.userRoles(ctx, user.ID)
+		if len(user.Roles) > 0 {
+			user.Role = user.Roles[0]
+		}
+	}
+	return user, err
+}
+
 func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var user model.User
-	err := p.pool.QueryRow(ctx, `SELECT id,email,password_hash,role,status,created_at,updated_at FROM users WHERE email=$1`, email).
-		Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE email=$1`, email).
+		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, ErrNotFound
 	}
@@ -404,7 +422,7 @@ func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 func (p *Postgres) ListUsers() []model.User {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT id,email,password_hash,role,status,created_at,updated_at FROM users ORDER BY created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -412,7 +430,7 @@ func (p *Postgres) ListUsers() []model.User {
 	users := make([]model.User, 0)
 	for rows.Next() {
 		var user model.User
-		if err := rows.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err == nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err == nil {
 			user.Roles = p.userRoles(ctx, user.ID)
 			if len(user.Roles) > 0 {
 				user.Role = user.Roles[0]
@@ -771,7 +789,7 @@ func (p *Postgres) GetUserByID(id string) (model.User, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var user model.User
-	err := p.pool.QueryRow(ctx, `SELECT id,email,password_hash,role,status,created_at,updated_at FROM users WHERE id=$1`, id).Scan(&user.ID, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE id=$1`, id).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, ErrNotFound
 	}
@@ -801,6 +819,9 @@ func (p *Postgres) UpdateUserStatus(id, status string) error {
 		return ErrNotFound
 	}
 	if status == "disabled" {
+		if _, err := tx.Exec(ctx, `DELETE FROM password_resets WHERE user_id=$1`, id); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1`, id); err != nil {
 			return err
 		}
@@ -866,7 +887,7 @@ func (p *Postgres) ListAuditLogs(query model.AuditLogQuery) (model.AuditLogPage,
 		return model.AuditLogPage{}, fmt.Errorf("count audit logs: %w", err)
 	}
 	args = append(args, query.PageSize, (query.Page-1)*query.PageSize)
-	rows, err := p.pool.Query(ctx, `SELECT a.id,COALESCE(a.actor_id::text,''),a.actor_type,COALESCE(a.actor_email,u.email,''),a.action,a.resource_type,
+	rows, err := p.pool.Query(ctx, `SELECT a.id,COALESCE(a.actor_id::text,''),a.actor_type,COALESCE(a.actor_email,u.username,''),a.action,a.resource_type,
 		COALESCE(a.resource_id,''),COALESCE(a.request_id,''),COALESCE(a.method,''),COALESCE(a.path,''),COALESCE(a.remote_addr,''),
 		COALESCE(a.user_agent,''),COALESCE(a.status_code,0),a.details,a.created_at
 		FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id `+where+` ORDER BY a.created_at DESC,a.id DESC LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)

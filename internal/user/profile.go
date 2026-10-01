@@ -17,10 +17,12 @@ var (
 )
 
 func normalizeUsername(value string) string { return strings.ToLower(strings.TrimSpace(value)) }
-func validUsername(value string) bool {
+func normalizeEmail(value string) string    { return strings.ToLower(strings.TrimSpace(value)) }
+func validEmail(value string) bool {
 	address, err := mail.ParseAddress(value)
-	return usernamePattern.MatchString(value) || (err == nil && address.Address == value && len(value) <= 254)
+	return err == nil && address.Address == value && strings.Contains(value, "@") && len(value) <= 254 && !strings.ContainsAny(value, "\r\n\x00")
 }
+func validUsername(value string) bool { return usernamePattern.MatchString(value) || validEmail(value) }
 func validPassword(value string) bool { return len(value) >= 8 && len(value) <= 72 }
 
 // UpdateProfile separates self-service reauthentication from delegated user management.
@@ -41,14 +43,21 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	} else if !s.canEditProfile(actorID, target) {
 		return model.User{}, false, ErrProfileForbidden
 	}
-	if request.Username == nil && request.Password == nil {
-		return model.User{}, false, fmt.Errorf("%w: username or new password is required", ErrInvalidProfile)
+	if request.Username == nil && request.Email == nil && request.Password == nil {
+		return model.User{}, false, fmt.Errorf("%w: username, email or new password is required", ErrInvalidProfile)
 	}
-	username := target.Email
+	username := target.Username
 	if request.Username != nil {
 		username = normalizeUsername(*request.Username)
 		if !validUsername(username) {
 			return model.User{}, false, fmt.Errorf("%w: use a 3 to 64 character username or a valid email address", ErrInvalidProfile)
+		}
+	}
+	email := target.Email
+	if request.Email != nil {
+		email = normalizeEmail(*request.Email)
+		if email != "" && !validEmail(email) {
+			return model.User{}, false, fmt.Errorf("%w: a valid email address is required", ErrInvalidProfile)
 		}
 	}
 	passwordHash := target.PasswordHash
@@ -62,7 +71,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 		}
 		passwordHash = string(hash)
 	}
-	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{Username: username, PasswordHash: passwordHash, ExpectedUsername: target.Email, ExpectedPasswordHash: target.PasswordHash})
+	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{Username: username, Email: email, ExpectedEmail: target.Email, PasswordHash: passwordHash, ExpectedUsername: target.Username, ExpectedPasswordHash: target.PasswordHash})
 }
 
 func (s *Service) canEditProfile(actorID string, target model.User) bool {

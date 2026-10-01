@@ -108,7 +108,7 @@ func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := s.Authenticate(u.Email, "old-reader-password")
+	_, token, err := s.Authenticate(u.Username, "old-reader-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,10 +135,10 @@ func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
 	if _, err := s.ValidateSession(token); err == nil {
 		t.Fatal("old session survived password change")
 	}
-	if _, _, err := s.Authenticate(u.Email, "old-reader-password"); err == nil {
+	if _, _, err := s.Authenticate(u.Username, "old-reader-password"); err == nil {
 		t.Fatal("old password still works")
 	}
-	if _, _, err := s.Authenticate(u.Email, "密码12"); err != nil {
+	if _, _, err := s.Authenticate(u.Username, "密码12"); err != nil {
 		t.Fatal("new password rejected")
 	}
 }

@@ -35,7 +35,7 @@ func WriteProfileError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		status, code, message = http.StatusNotFound, "user_not_found", "user not found"
 	case errors.Is(err, store.ErrConflict):
-		status, code, message = http.StatusConflict, "profile_conflict", "username already exists or account was modified; refresh and retry"
+		status, code, message = http.StatusConflict, "profile_conflict", "username/email already exists or account was modified; refresh and retry"
 	}
 	writeJSON(w, status, map[string]string{"error": message, "code": code})
 }
@@ -44,7 +44,7 @@ func ProfileUpdateResponse(actorID string, user model.User, changed bool) map[st
 	return map[string]any{"user": user, "sessions_revoked": changed, "reauthentication_required": actorID == user.ID && changed}
 }
 func ProfileUpdateAudit(user model.User, request model.UpdateUserProfileRequest, changed bool) map[string]any {
-	return map[string]any{"username": user.Email, "password_changed": request.Password != nil, "sessions_revoked": changed}
+	return map[string]any{"username": user.Username, "email_changed": request.Email != nil, "password_changed": request.Password != nil, "sessions_revoked": changed}
 }
 func (h *HTTP) updateOwnProfile(w http.ResponseWriter, r *http.Request) {
 	actor, err := h.service.ValidateSession(sessionToken(r))
@@ -61,6 +61,6 @@ func (h *HTTP) updateOwnProfile(w http.ResponseWriter, r *http.Request) {
 		WriteProfileError(w, err)
 		return
 	}
-	h.service.RecordAudit(audit.Actor{ID: actor.ID, Type: "user", Email: actor.Email}, r, "user.profile.update", "user", updated.ID, http.StatusOK, ProfileUpdateAudit(updated, request, changed))
+	h.service.RecordAudit(audit.Actor{ID: actor.ID, Type: "user", Email: actor.Username}, r, "user.profile.update", "user", updated.ID, http.StatusOK, ProfileUpdateAudit(updated, request, changed))
 	writeJSON(w, http.StatusOK, ProfileUpdateResponse(actor.ID, updated, changed))
 }

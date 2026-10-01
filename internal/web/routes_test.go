@@ -96,7 +96,7 @@ func TestUserTableUsesScopedCenteredRowLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, markup := range []string{`<table class="user-table">`, `<div class="user-cell"><strong>`, `<div class="user-cell user-cell-badges">`, `<div class="user-cell"><span class="badge`} {
+	for _, markup := range []string{`<table class="user-table">`, `<div class="user-cell user-identity"><strong>`, `<div class="user-cell user-cell-badges">`, `<div class="user-cell"><span class="badge`} {
 		if !strings.Contains(string(js), markup) {
 			t.Errorf("missing centered user cell markup: %s", markup)
 		}
@@ -144,5 +144,20 @@ func TestPasswordPolicyIsConsistentInConsole(t *testing.T) {
 	}
 	if !strings.Contains(string(html), `id="account-settings"`) {
 		t.Fatal("self-service account settings missing")
+	}
+}
+
+func TestOverviewAndRecoveryAssets(t *testing.T) {
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"/admin/v1/overview", "gateway_requests_total", "overview-panels", "profile-email", "forgot-password", "reset-password"} {
+		if !strings.Contains(string(js), marker) {
+			t.Errorf("missing feature: %s", marker)
+		}
+	}
+	if strings.Contains(string(js), "用户名或邮箱") {
+		t.Fatal("username/email combined control remains")
 	}
 }

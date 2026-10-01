@@ -208,3 +208,27 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 .user-table .actions button:hover:not(:disabled) { border-color: #9aabc7; background: var(--surface-muted); }
 .user-table .actions button.danger { border-color: transparent; color: var(--danger); background: transparent; }
 .user-table .actions button.danger:hover:not(:disabled) { border-color: #fecdd3; background: #fff1f2; }
+
+/* Overview fills every row and keeps both information panels the same height. */
+.overview-page { display: grid; gap: 20px; min-width: 0; }
+.overview-stats { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 14px; align-items: stretch; }
+.overview-stats .stat { min-height: 128px; display: flex; flex-direction: column; }
+.overview-stats .stat .number { margin-top: 12px; }
+.overview-stats .metric-caption { margin-top: auto; }
+.overview-panels { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,.85fr); gap: 20px; align-items: stretch; }
+.overview-panel { display: flex; flex-direction: column; min-height: 218px; }
+.overview-panel > .actions, .overview-panel > button { margin-top: auto; align-self: flex-start; }
+.overview-panel > .small { margin: 0 0 20px; line-height: 1.7; }
+.overview-section-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.overview-section-head h2 { margin-bottom: 6px; }
+.overview-section-head p { margin: 0; }
+.overview-runtime { display: flex; flex-wrap: wrap; gap: 12px 24px; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.overview-runtime strong { margin-left: 6px; color: var(--ink); }
+.overview-account { display: grid; gap: 8px; margin: 0 0 18px; }
+.overview-account > div { display: grid; grid-template-columns: 68px minmax(0,1fr); gap: 12px; }
+.overview-account dt { color: var(--muted); }
+.overview-account dd { margin: 0; overflow-wrap: anywhere; }
+.user-table .user-identity { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
+.auth-recovery-link { background: transparent; color: var(--brand-strong); padding: 8px 0; min-height: 44px; margin-top: 10px; }
+@media(max-width:1100px) { .overview-stats { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media(max-width:700px) { .overview-panels { grid-template-columns: minmax(0,1fr); } .overview-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-section-head { flex-direction: column; } .overview-stats .stat { padding: 15px; } }

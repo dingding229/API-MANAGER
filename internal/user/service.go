@@ -25,6 +25,7 @@ const passwordHashCost = 12
 
 type Store interface {
 	CreateUser(model.User) error
+	GetUserByUsername(string) (model.User, error)
 	GetUserByEmail(string) (model.User, error)
 	GetUserByID(string) (model.User, error)
 	ListUsers() []model.User
@@ -43,8 +44,9 @@ type Store interface {
 }
 
 type Service struct {
-	store Store
-	ttl   time.Duration
+	store    Store
+	ttl      time.Duration
+	recovery *recovery
 }
 type sessionStore interface {
 	CreateSession(model.Session) error
@@ -78,14 +80,17 @@ func (s *Service) RecordAudit(actor audit.Actor, r *http.Request, action, resour
 	audit.New(auditStore, nil).Record(r.Context(), actor, r, action, resourceType, resourceID, statusCode, details)
 }
 
-func (s *Service) Create(email, password, role string) (model.User, error) {
-	return s.CreateWithRoles(email, password, []string{role})
+func (s *Service) Create(username, password, role string) (model.User, error) {
+	return s.CreateWithRoles(username, password, []string{role})
 }
 
-func (s *Service) CreateWithRoles(email, password string, roles []string) (model.User, error) {
-	email = normalizeUsername(email)
-	if !validUsername(email) || !validPassword(password) {
-		return model.User{}, errors.New("valid username or email and password with 8 to 72 bytes are required")
+func (s *Service) CreateWithRoles(username, password string, roles []string) (model.User, error) {
+	return s.CreateWithContact(username, "", password, roles)
+}
+func (s *Service) CreateWithContact(username, email, password string, roles []string) (model.User, error) {
+	username, email = normalizeUsername(username), normalizeEmail(email)
+	if !validUsername(username) || (email != "" && !validEmail(email)) || !validPassword(password) {
+		return model.User{}, errors.New("valid username, optional email and password with 8 to 72 bytes are required")
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
@@ -101,11 +106,11 @@ func (s *Service) CreateWithRoles(email, password string, roles []string) (model
 		return model.User{}, fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	newUser := model.User{ID: ids.NewUUID(), Email: email, PasswordHash: string(hash), Role: roles[0], Roles: roles, Status: "active", CreatedAt: now, UpdatedAt: now}
-	if err := s.store.CreateUser(newUser); err != nil {
+	u := model.User{ID: ids.NewUUID(), Username: username, Email: email, PasswordHash: string(hash), Role: roles[0], Roles: roles, Status: "active", CreatedAt: now, UpdatedAt: now}
+	if err = s.store.CreateUser(u); err != nil {
 		return model.User{}, err
 	}
-	return newUser, nil
+	return u, nil
 }
 
 func (s *Service) Can(userID, permission string) bool {
@@ -223,7 +228,7 @@ func (s *Service) EnsureInitialAdmin(username, password string) error {
 }
 
 func (s *Service) Authenticate(username, password string) (model.User, string, error) {
-	user, lookupErr := s.store.GetUserByEmail(strings.ToLower(strings.TrimSpace(username)))
+	user, lookupErr := s.store.GetUserByUsername(strings.ToLower(strings.TrimSpace(username)))
 	hash := []byte(user.PasswordHash)
 	if lookupErr != nil || len(hash) == 0 {
 		hash = dummyPasswordHash
@@ -241,7 +246,7 @@ func (s *Service) Authenticate(username, password string) (model.User, string, e
 		return model.User{}, "", err
 	}
 	token := "us_" + hex.EncodeToString(random)
-	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedUsername: user.Email, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
+	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedUsername: user.Username, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return model.User{}, "", ErrInvalidCredentials
 		}

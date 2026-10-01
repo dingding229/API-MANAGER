@@ -130,6 +130,17 @@ func main() {
 	admin.SetProductionMode(cfg.ProductionMode)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)
+	if cfg.SMTPHost != "" {
+		mailer, err := user.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPMode)
+		if err != nil {
+			logger.Error("invalid SMTP configuration")
+			os.Exit(1)
+		}
+		if err = userService.ConfigureRecovery(rootCtx, mailer, cfg.PasswordResetBaseURL); err != nil {
+			logger.Error("invalid password recovery URL")
+			os.Exit(1)
+		}
+	}
 	authHandler := user.NewHTTP(userService)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)

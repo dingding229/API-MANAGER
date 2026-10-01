@@ -153,7 +153,7 @@ func TestUpdateProfileReauthenticatesSelfAndRevokesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !revoked || updated.Email != username {
+	if !revoked || updated.Username != username {
 		t.Fatalf("profile update result = %#v, revoked=%v", updated, revoked)
 	}
 	if _, err := s.ValidateSession(oldToken); err == nil {
@@ -181,7 +181,7 @@ func TestUpdateProfileRequiresCurrentPasswordForSelfAndProtectsPrivilegedTarget(
 	if _, _, err := s.UpdateProfile(reader.ID, reader.ID, model.UpdateUserProfileRequest{Username: &username}); !errors.Is(err, ErrCurrentPassword) {
 		t.Fatalf("missing current password error = %v", err)
 	}
-	admin, err := m.GetUserByEmail("admin")
+	admin, err := m.GetUserByUsername("admin")
 	if err != nil {
 		t.Fatal(err)
 	}

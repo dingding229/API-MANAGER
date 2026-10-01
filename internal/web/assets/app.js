@@ -1,5 +1,5 @@
 sessionStorage.removeItem('api_manager_key');
-const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {} };
+const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {}, recoveryEnabled: false };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -98,13 +98,13 @@ async function withSubmitting(form, pendingText, action) {
 }
 
 function authErrorMessage(error) {
-  return error?.message === 'invalid credentials' ? '用户名或密码不正确' : (error?.message || '请求失败');
+  return error?.message === 'invalid credentials' ? '用户名、邮箱或密码不正确' : (error?.message || '请求失败');
 }
 
 function showConsole() {
   $('#login-view').classList.add('hidden');
   $('#console-view').classList.remove('hidden');
-  $('#current-user').textContent = `${state.user?.email || ''} · ${state.user?.roles?.join(', ') || state.user?.role || ''}`;
+  $('#current-user').textContent = `${state.user?.username || ''} · ${state.user?.roles?.join(', ') || state.user?.role || ''}`;
   $$('#nav button[data-permission]').forEach((button) => button.classList.toggle('hidden', !can(button.dataset.permission)));
   renderPage();
 }
@@ -130,7 +130,7 @@ async function login(username,password) {
   const response=await fetch('/auth/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),cache:'no-store'});
   const result=await response.json().catch(()=>({}));
   if(!response.ok) throw new Error(result.error||'登录失败');
-  state.token=result.token;state.user=result.user;state.permissions=result.permissions||[];
+  state.token=result.token;state.user=result.user;state.permissions=result.permissions||[];state.page='overview';
   sessionStorage.setItem('api_manager_session',state.token);
   $('#password').value='';showConsole();
 }
@@ -154,29 +154,33 @@ function renderPage() {
   return renderers[state.page]();
 }
 
+function overviewStat(label,value,hint='') {
+  return `<div class="stat"><span class="small">${esc(label)}</span><div class="number">${value === undefined ? '—' : esc(value)}</div>${hint ? `<span class="metric-caption">${esc(hint)}</span>` : ''}</div>`;
+}
+function overviewSeries(points, timestamp) {
+  const end = Math.floor(new Date(timestamp).getTime() / 60000) * 60000;
+  const minutes = new Map(points.map(point => [Math.floor(new Date(point.timestamp).getTime()/60000)*60000, point]));
+  return Array.from({length:60}, (_,index) => {
+    const time=end-(59-index)*60000;
+    return minutes.get(time) || {timestamp:new Date(time).toISOString(),requests:0};
+  });
+}
 async function renderOverview() {
   if (state.page !== 'overview') return;
-  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
+  const page=$('#page'); page.innerHTML='<div class="empty">加载总览…</div>';
   try {
-    const [apis, credentials, plugins, ready] = await Promise.all([
-      can('api.read') ? api('/admin/v1/apis') : Promise.resolve([]),
-      can('credential.read') ? api('/admin/v1/credentials') : Promise.resolve([]),
-      can('plugin.read') ? api('/admin/v1/plugins') : Promise.resolve({plugins:[]}),
-      fetch('/health/ready').then((r) => r.json()).catch(() => ({status:'unknown'}))
-    ]);
-    if (!page.isConnected) return; page.innerHTML = `<div class="stats">
-      <div class="stat"><span class="small">接口数量</span><div class="number">${apis.length}</div></div>
-      <div class="stat"><span class="small">已发布接口</span><div class="number">${apis.filter(x=>x.enabled).length}</div></div>
-      <div class="stat"><span class="small">调用凭证</span><div class="number">${credentials.length}</div></div>
-      <div class="stat"><span class="small">插件</span><div class="number">${(plugins.plugins || []).length}</div></div>
-      <div class="stat"><span class="small">服务状态</span><div class="number">${esc(ready.status)}</div></div>
-    </div>
-    <div class="split spaced-split">
-      <div class="card"><h2>快速开始</h2><p class="muted">先创建调用凭证，再创建接口并发布。管理操作使用用户名和密码登录后的会话，并按用户角色校验权限。</p><div class="actions"><button data-go="apis">管理接口</button><button class="secondary" data-go="credentials">创建凭证</button></div></div>
-      <div class="card"><h2>当前账号</h2><p>${esc(state.user?.email)}</p><p class="small">角色：${esc((state.user?.roles || [state.user?.role]).filter(Boolean).join(', '))}</p><p class="small">权限：${state.permissions.length} 项</p></div>
-    </div>`;
-    $$('[data-go]').forEach((button) => button.onclick = () => { state.page = button.dataset.go; renderPage(); });
-  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+    const [data,ready]=await Promise.all([api('/admin/v1/overview'),api('/health/ready')]);
+    if (!page.isConnected) return;
+    const resources=data.resources||{}, metrics=data.metrics;
+    const resourceCards=[overviewStat('接口数量',resources.apis),overviewStat('已发布接口',resources.published),overviewStat('有效调用凭证',resources.active_credentials),overviewStat('已启用插件',resources.enabled_plugins),overviewStat('服务状态',ready.status==='ready'?'运行正常':'待检查')];
+    if (resources.users!==undefined) resourceCards.push(overviewStat('用户数量',resources.users));
+    const successRate=metrics&&metrics.gateway_requests_total ? ((1-metrics.gateway_error_rate)*100).toFixed(1)+'%' : '暂无调用';
+    const requestCards=metrics ? [overviewStat('业务请求总数',formatMetric(metrics.gateway_requests_total),'进程启动以来'),overviewStat('最近 5 分钟请求',formatMetric(data.recent_requests),'仅统计业务 API'),overviewStat('业务成功率',successRate,'HTTP 状态码小于 400'),overviewStat('平均响应时间',formatMetric(metrics.average_latency_ms,1)+' ms'),overviewStat('P95 响应时间',formatMetric(metrics.p95_latency_ms,1)+' ms'),overviewStat('业务失败请求',formatMetric(metrics.gateway_errors_total),'含 4xx 与 5xx')] : [];
+    const roles=(state.user?.roles||[state.user?.role]).filter(Boolean).map(roleLabel).join('、');
+    page.innerHTML=`<div class="overview-page"><section class="overview-stats" aria-label="资源与服务">${resourceCards.join('')}</section>${metrics ? `<section class="overview-stats" aria-label="接口请求统计">${requestCards.join('')}</section><section class="card overview-traffic"><div class="overview-section-head"><div><h2>请求趋势</h2><p class="small">最近一小时业务 API 调用；累计值在主程序重启后重新统计。</p></div><span class="small">已运行 ${esc(formatUptime(metrics.uptime_seconds))}</span></div>${observationChart(overviewSeries(metrics.series||[],data.timestamp),'requests','每分钟请求数','#365cff')}<div class="overview-runtime"><span>HTTP 请求总数 <strong>${esc(formatMetric(metrics.http_requests_total))}</strong></span><span>鉴权失败 <strong>${esc(formatMetric(metrics.auth_failures))}</strong></span><span>限流次数 <strong>${esc(formatMetric(metrics.rate_limit_hits))}</strong></span><span>当前 HTTP 并发 <strong>${esc(formatMetric(metrics.inflight))}</strong></span></div></section>` : '<p class="small">当前账号没有运行统计查看权限。</p>'}<section class="overview-panels"><div class="card overview-panel"><h2>快速操作</h2><p class="small">配置接口、创建调用凭证，再按需发布。管理功能由当前账号的角色权限控制。</p><div class="actions">${can('api.read')?'<button data-go="apis">管理接口</button>':''}${can('credential.read')?'<button class="secondary" data-go="credentials">调用凭证</button>':''}${can('observability.read')?'<button class="secondary" data-go="observability">运行观测</button>':''}</div></div><div class="card overview-panel"><h2>当前账号</h2><dl class="overview-account"><div><dt>用户名</dt><dd>${esc(state.user?.username)}</dd></div><div><dt>邮箱</dt><dd>${esc(state.user?.email||'未绑定')}</dd></div><div><dt>角色</dt><dd>${esc(roles)}</dd></div><div><dt>权限</dt><dd>${can('*')?'全部权限':state.permissions.length+' 项'}</dd></div></dl><button type="button" class="secondary" data-overview-account>账号设置</button></div></section></div>`;
+    page.querySelectorAll('[data-go]').forEach(button=>button.onclick=()=>{state.page=button.dataset.go;renderPage()});
+    page.querySelector('[data-overview-account]').onclick=()=>openProfileModal(state.user);
+  } catch(error){if(page.isConnected)page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`}
 }
 
 async function renderAPIs() {
@@ -393,7 +397,7 @@ function openRoleModal(user, roles) {
   const modal = document.createElement('div');
   modal.id = 'role-edit-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
   modal._previousFocus = document.activeElement;
-  modal.innerHTML = `<section class="modal-card role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title"><div class="modal-heading"><div><p class="eyebrow">USER ACCESS</p><h2 id="role-modal-title">编辑角色</h2><p class="small">${esc(user.email)} · 选择该用户要拥有的角色。</p></div><button type="button" class="modal-close" aria-label="关闭角色编辑">×</button></div><form id="role-edit-form" class="form-stack"><fieldset class="role-select-fieldset"><legend>用户角色</legend><div class="role-select-list">${options.map(role => `<label class="role-select-option"><input type="checkbox" name="role" value="${esc(role.name)}" ${currentRoles.has(role.name) ? 'checked' : ''}><span><strong>${esc(roleLabel(role.name))}</strong><small>${esc(roleDescription(role))}</small></span></label>`).join('')}</div></fieldset><p id="role-edit-error" class="message" role="alert" aria-live="polite"></p><div class="modal-actions"><button type="button" class="secondary" data-role-modal-cancel>取消</button><button type="submit">保存角色</button></div></form></section>`;
+  modal.innerHTML = `<section class="modal-card role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title"><div class="modal-heading"><div><p class="eyebrow">USER ACCESS</p><h2 id="role-modal-title">编辑角色</h2><p class="small">${esc(user.username)} · 选择该用户要拥有的角色。</p></div><button type="button" class="modal-close" aria-label="关闭角色编辑">×</button></div><form id="role-edit-form" class="form-stack"><fieldset class="role-select-fieldset"><legend>用户角色</legend><div class="role-select-list">${options.map(role => `<label class="role-select-option"><input type="checkbox" name="role" value="${esc(role.name)}" ${currentRoles.has(role.name) ? 'checked' : ''}><span><strong>${esc(roleLabel(role.name))}</strong><small>${esc(roleDescription(role))}</small></span></label>`).join('')}</div></fieldset><p id="role-edit-error" class="message" role="alert" aria-live="polite"></p><div class="modal-actions"><button type="button" class="secondary" data-role-modal-cancel>取消</button><button type="submit">保存角色</button></div></form></section>`;
   document.body.appendChild(modal);
   const close = () => closeRoleModal();
   modal.querySelector('.modal-close').onclick = close;
@@ -437,7 +441,7 @@ function openProfileModal(user) {
   modal.id = 'user-profile-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
   modal._previousFocus = document.activeElement; modal._previousInert = $('#app')?.inert || false;
   modal._previousOverflow = document.body.style.overflow;
-  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" aria-describedby="profile-impact" tabindex="-1"><div class="modal-heading"><div><h2 id="profile-modal-title">${isSelf ? '账号设置' : '编辑基本信息'}</h2><p class="small">${esc(user.email)} · ${isSelf ? '修改自己的登录信息' : '修改该用户的登录信息'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field" for="profile-username"><span class="field-label">用户名或邮箱 <span aria-hidden="true">*</span></span><input id="profile-username" name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.email)}" autocomplete="username" spellcheck="false" aria-describedby="profile-username-hint"><span id="profile-username-hint" class="field-hint">用户名为 3–64 位字母、数字、点、下划线或短横线，也可使用有效邮箱；保存时统一为小写。</span></label>${isSelf ? '<label class="field" for="profile-current-password"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input id="profile-current-password" name="current_password" type="password" required maxlength="72" autocomplete="current-password"><span class="field-hint">修改自己的用户名或密码均需确认当前密码。</span></label>' : ''}<div class="field"><label class="field-label" for="profile-new-password">新密码（可选）</label><div class="password-input-row"><input id="profile-new-password" name="password" data-password-field type="password" maxlength="72" autocomplete="new-password" aria-describedby="profile-password-hint"><button type="button" class="secondary" data-toggle-password aria-label="显示新密码和确认密码" aria-pressed="false">显示</button></div><span id="profile-password-hint" class="field-hint">留空保留现有密码。新密码要求 8–72 个 UTF-8 字节；英文、数字和符号通常每个占 1 字节。</span></div><label class="field" for="profile-password-confirm"><span class="field-label">确认新密码</span><input id="profile-password-confirm" name="password_confirm" data-password-field type="password" maxlength="72" autocomplete="new-password"></label><p id="profile-impact" class="profile-impact">${isSelf ? '用户名或密码变更成功后，当前账号的全部会话将失效，请使用新信息重新登录。' : '用户名或密码变更成功后，该用户的全部已有会话将失效。角色和账号状态保持不变。'}</p><p id="profile-edit-error" class="message" role="alert" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
+  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" aria-describedby="profile-impact" tabindex="-1"><div class="modal-heading"><div><h2 id="profile-modal-title">${isSelf ? '账号设置' : '编辑基本信息'}</h2><p class="small">${esc(user.username)} · ${isSelf ? '修改自己的登录信息' : '修改该用户的登录信息'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field" for="profile-username"><span class="field-label">用户名 <span aria-hidden="true">*</span></span><input id="profile-username" name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.username)}" autocomplete="username" spellcheck="false" aria-describedby="profile-username-hint"><span id="profile-username-hint" class="field-hint">用户名独立于邮箱；原有登录名保留。新用户名建议使用 3–64 位字母、数字、点、下划线或短横线。</span></label><label class="field" for="profile-email"><span class="field-label">邮箱（可选）</span><input id="profile-email" name="email" type="email" maxlength="254" value="${esc(user.email||'')}" autocomplete="email"><span class="field-hint">独立的联系邮箱，用于找回密码。未绑定邮箱时请联系管理员重置。</span></label>${isSelf ? '<label class="field" for="profile-current-password"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input id="profile-current-password" name="current_password" type="password" required maxlength="72" autocomplete="current-password"><span class="field-hint">修改自己的用户名、邮箱或密码均需确认当前密码。</span></label>' : ''}<div class="field"><label class="field-label" for="profile-new-password">新密码（可选）</label><div class="password-input-row"><input id="profile-new-password" name="password" data-password-field type="password" maxlength="72" autocomplete="new-password" aria-describedby="profile-password-hint"><button type="button" class="secondary" data-toggle-password aria-label="显示新密码和确认密码" aria-pressed="false">显示</button></div><span id="profile-password-hint" class="field-hint">留空保留现有密码。新密码要求 8–72 个 UTF-8 字节；英文、数字和符号通常每个占 1 字节。</span></div><label class="field" for="profile-password-confirm"><span class="field-label">确认新密码</span><input id="profile-password-confirm" name="password_confirm" data-password-field type="password" maxlength="72" autocomplete="new-password"></label><p id="profile-impact" class="profile-impact">${isSelf ? '用户名、邮箱或密码变更成功后，当前账号的全部会话将失效，请使用新信息重新登录。' : '用户名、邮箱或密码变更成功后，该用户的全部已有会话将失效。角色和账号状态保持不变。'}</p><p id="profile-edit-error" class="message" role="alert" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
   document.body.appendChild(modal);
   $('#app').inert = true; document.body.style.overflow = 'hidden';
   const close = () => closeProfileModal();
@@ -467,7 +471,7 @@ function openProfileModal(user) {
     }
     if (password !== confirmation) form.elements.password_confirm.setCustomValidity('两次输入的新密码不一致。');
     if (!form.reportValidity()) return;
-    const data = {username: form.elements.username.value.trim()};
+    const data = {username: form.elements.username.value.trim(), email: form.elements.email.value.trim()};
     if (isSelf) data.current_password = form.elements.current_password.value;
     if (password) data.password = password;
     modal._saving = true;
@@ -477,7 +481,7 @@ function openProfileModal(user) {
       const result = await api(isSelf ? '/auth/v1/me' : `/admin/v1/users/${encodeURIComponent(user.id)}/profile`, {method:'PUT', body:JSON.stringify(data)});
       closeProfileModal(true);
       if (result.reauthentication_required) {
-        clearSession(); $('#username').value = result.user.email; $('#password').value = '';
+        clearSession(); $('#username').value = result.user.username; $('#password').value = '';
         notice('信息已更新，请使用新的登录信息重新登录。', true, 'auth'); $('#password').focus();
         return;
       }
@@ -523,7 +527,7 @@ async function renderUsers() {
   try {
     const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
     if (!page.isConnected) return;
-    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${userActions(u, roles)}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
+    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名与邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell user-identity"><strong>${esc(u.username)}</strong><span class="small">${esc(u.email||'未绑定邮箱')}</span></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${userActions(u, roles)}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名<input name="username" type="text" minlength="3" maxlength="64" required autocomplete="username"></label><label>邮箱（可选）<input name="email" type="email" maxlength="254" autocomplete="email" placeholder="name@example.com"></label><label>密码<input name="password" type="password" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
     $('#user-form').elements.password.oninput = event => event.target.setCustomValidity('');
     $('#user-form').onsubmit = async event => {
       event.preventDefault();
@@ -909,3 +913,38 @@ $('#account-settings').onclick = () => openProfileModal(state.user);
 $('#refresh').onclick = renderPage;
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
 hydrateSession();
+
+let pendingResetToken = '';
+function openRecoveryModal(resetToken = '') {
+  const old = $('#recovery-modal'); if (old?._saving) return; old?.remove();
+  const resetting = Boolean(resetToken);
+  const modal=document.createElement('div'); modal.id='recovery-modal'; modal.className='modal-backdrop';
+  const previous=document.activeElement; const app=$('#app'); const wasInert=app.inert; const overflow=document.body.style.overflow;
+  modal.innerHTML=`<section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="recovery-title" tabindex="-1"><div class="modal-heading"><div><h2 id="recovery-title">${resetting?'设置新密码':'找回密码'}</h2><p class="small">${resetting?'重置链接仅可使用一次，15 分钟内有效。':'向账号绑定的邮箱发送重置链接。'}</p></div><button class="modal-close" type="button" aria-label="关闭找回密码">×</button></div>${state.recoveryEnabled?`<form class="form-stack" id="recovery-form">${resetting?'<label>新密码<input name="password" type="password" required maxlength="72" autocomplete="new-password"></label><label>确认新密码<input name="confirm" type="password" required maxlength="72" autocomplete="new-password"></label><span class="field-hint">新密码为 8–72 个 UTF-8 字节。成功后所有旧会话失效。</span>':'<label>已绑定邮箱<input name="email" type="email" required maxlength="254" autocomplete="email"></label><span class="field-hint">无论邮箱是否存在，都会显示相同的提交结果。请检查收件箱和垃圾邮件。</span>'}<p class="message" id="recovery-message" role="status" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-recovery-close>取消</button><button type="submit">${resetting?'保存新密码':'发送重置链接'}</button></div></form>`:'<p class="profile-impact">管理员尚未配置邮件服务。请先联系管理员重置密码；配置 SMTP 后即可通过绑定邮箱自行找回。</p><div class="modal-actions"><button type="button" data-recovery-close>知道了</button></div>'}</section>`;
+  document.body.append(modal); app.inert=true;document.body.style.overflow='hidden';
+  const close=()=>{if(modal._saving)return;modal.querySelectorAll('input').forEach(input=>{input.value=''});app.inert=wasInert;document.body.style.overflow=overflow;modal.remove();pendingResetToken='';if(previous?.isConnected)previous.focus()};
+  modal.querySelector('.modal-close').onclick=close;modal.querySelector('[data-recovery-close]').onclick=close;
+  modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  modal.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();close()};if(e.key==='Tab'){const controls=[...modal.querySelectorAll('input:not(:disabled),button:not(:disabled)')];const first=controls[0],last=controls.at(-1);if(!first){e.preventDefault();return};if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}};
+  const form=modal.querySelector('form');
+  if(form){form.querySelectorAll('input').forEach(input=>input.oninput=()=>{input.setCustomValidity('');if(form.elements.confirm)form.elements.confirm.setCustomValidity('')});form.onsubmit=async e=>{
+    e.preventDefault();if(modal._saving)return;
+    if(resetting){const bytes=new TextEncoder().encode(form.elements.password.value).length;form.elements.password.setCustomValidity(bytes<8||bytes>72?'密码必须为 8–72 个 UTF-8 字节。':'');form.elements.confirm.setCustomValidity(form.elements.password.value===form.elements.confirm.value?'':'两次输入的密码不一致。')}
+    if(!form.reportValidity())return;
+    const payload=resetting?{token:resetToken,password:form.elements.password.value}:{email:form.elements.email.value.trim()};
+    const message=modal.querySelector('#recovery-message');modal._saving=true;const controls=[...modal.querySelectorAll('input,button')];controls.forEach(el=>el.disabled=true);
+    try{await api(resetting?'/auth/v1/reset-password':'/auth/v1/forgot-password',{method:'POST',body:JSON.stringify(payload)});modal._saving=false;
+      if(resetting){close();clearSession();notice('密码已重置，请使用新密码登录。',true,'auth');$('#password').focus()}else{message.textContent='如果该邮箱已绑定有效账号，重置链接将发送到该邮箱，15 分钟内有效。';message.focus();form.querySelector('[type="submit"]').textContent='已提交';controls.filter(el=>el.hasAttribute('data-recovery-close')||el.classList.contains('modal-close')).forEach(el=>el.disabled=false)}
+    }catch(error){modal._saving=false;controls.forEach(el=>el.disabled=false);message.textContent=error.status===429?'请求太频繁，请一分钟后重试。':resetting?'链接无效、已过期或已使用，请重新找回密码。':'暂时无法发送，请稍后重试或联系管理员。';message.focus()}
+  }}
+  (modal.querySelector('input')||modal.querySelector('[data-recovery-close]')).focus();
+}
+async function initRecovery() {
+  const match=location.hash.match(/^#reset=([0-9a-f]{64})$/);
+  if(match){pendingResetToken=match[1];history.replaceState(null,'',location.pathname+location.search)}
+  try{const result=await api('/auth/v1/recovery');state.recoveryEnabled=result.enabled===true}catch(_){state.recoveryEnabled=false}
+  $('#forgot-password').onclick=()=>openRecoveryModal();
+  if(pendingResetToken)openRecoveryModal(pendingResetToken);
+}
+
+initRecovery();

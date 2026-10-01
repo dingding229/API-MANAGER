@@ -37,6 +37,12 @@ env:
   ADMIN_PATH: /admin
   PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
   ADMIN_USERNAME: admin
+  SMTP_HOST: ""
+  SMTP_PORT: "587"
+  SMTP_MODE: starttls
+  SMTP_FROM: ""
+  SMTP_USERNAME: ""
+  PASSWORD_RESET_BASE_URL: ""
   LOG_LEVEL: info
   USE_REDIS: "true"
   REDIS_ADDR: redis:6379
@@ -52,6 +58,7 @@ existingSecret: "" # use a pre-created Secret instead of chart-managed values
 
 secrets:
   ADMIN_PASSWORD: ""
+  SMTP_PASSWORD: ""
   REDIS_PASSWORD: ""
   CREDENTIAL_ENCRYPTION_KEY: ""
   POSTGRES_DSN: ""

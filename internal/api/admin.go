@@ -32,6 +32,7 @@ type UserManager interface {
 	ValidateSession(string) (model.User, error)
 	Create(string, string, string) (model.User, error)
 	CreateWithRoles(string, string, []string) (model.User, error)
+	CreateWithContact(string, string, string, []string) (model.User, error)
 	Can(string, string) bool
 	CreateRole(string, string, []string) (model.Role, error)
 	AssignRoles(string, []string) error
@@ -91,6 +92,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/overview":
+		a.overview(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/summary":
 		a.observabilitySummary(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/logs":
@@ -184,7 +187,7 @@ func (a *Admin) requestActor(r *http.Request) (audit.Actor, bool) {
 	if err != nil {
 		return audit.Actor{}, false
 	}
-	return audit.Actor{ID: user.ID, Type: "user", Email: user.Email}, true
+	return audit.Actor{ID: user.ID, Type: "user", Email: user.Username}, true
 }
 func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 	actor, ok := r.Context().Value(auditActorContextKey{}).(audit.Actor)
@@ -808,7 +811,7 @@ func (a *Admin) createUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only super_admin can grant privileged roles"})
 		return
 	}
-	user, err := a.userManager.CreateWithRoles(request.Email, request.Password, roles)
+	user, err := a.userManager.CreateWithContact(request.Username, request.Email, request.Password, roles)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "user already exists"})
@@ -817,7 +820,7 @@ func (a *Admin) createUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	a.recordAudit(r, "user.create", "user", user.ID, http.StatusCreated, map[string]any{"email": user.Email, "roles": user.Roles, "status": user.Status})
+	a.recordAudit(r, "user.create", "user", user.ID, http.StatusCreated, map[string]any{"username": user.Username, "email": user.Email, "roles": user.Roles, "status": user.Status})
 	writeJSON(w, http.StatusCreated, user)
 }
 
@@ -844,7 +847,7 @@ func (a *Admin) assignUserRoles(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
 		return
 	}
-	a.recordAudit(r, "user.roles.update", "user", user.ID, http.StatusOK, map[string]any{"email": user.Email, "roles": user.Roles})
+	a.recordAudit(r, "user.roles.update", "user", user.ID, http.StatusOK, map[string]any{"username": user.Username, "email": user.Email, "roles": user.Roles})
 	writeJSON(w, http.StatusOK, user)
 }
 
@@ -871,7 +874,7 @@ func (a *Admin) updateUserStatus(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	a.recordAudit(r, "user.status.update", "user", user.ID, http.StatusOK, map[string]any{"email": user.Email, "status": user.Status})
+	a.recordAudit(r, "user.status.update", "user", user.ID, http.StatusOK, map[string]any{"username": user.Username, "email": user.Email, "status": user.Status})
 	writeJSON(w, http.StatusOK, user)
 }
 

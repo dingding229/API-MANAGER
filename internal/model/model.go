@@ -100,6 +100,7 @@ type CreateCredentialRequest struct {
 
 type User struct {
 	ID           string    `json:"id"`
+	Username     string    `json:"username"`
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"-"`
 	Role         string    `json:"role,omitempty"`
@@ -110,6 +111,7 @@ type User struct {
 }
 
 type CreateUserRequest struct {
+	Username string   `json:"username"`
 	Email    string   `json:"email"`
 	Password string   `json:"password"`
 	Role     string   `json:"role,omitempty"`
@@ -120,6 +122,7 @@ type CreateUserRequest struct {
 // Omitted password preserves the existing password; an explicit empty one is invalid.
 type UpdateUserProfileRequest struct {
 	Username        *string `json:"username,omitempty"`
+	Email           *string `json:"email,omitempty"`
 	Password        *string `json:"password,omitempty"`
 	CurrentPassword string  `json:"current_password,omitempty"`
 }
@@ -127,6 +130,8 @@ type UpdateUserProfileRequest struct {
 // UserProfileUpdate is an internal optimistic guard for an atomic credential update.
 type UserProfileUpdate struct {
 	Username             string
+	Email                string
+	ExpectedEmail        string
 	PasswordHash         string
 	ExpectedUsername     string
 	ExpectedPasswordHash string
@@ -238,4 +243,15 @@ type Session struct {
 	Hash                      string    `json:"-"`
 	UserID                    string    `json:"user_id"`
 	ExpiresAt                 time.Time `json:"expires_at"`
+}
+
+// Recovery credentials are never serialized into API responses or stored in plaintext.
+type PasswordReset struct {
+	Hash         string    `json:"-"`
+	UserID       string    `json:"-"`
+	Username     string    `json:"-"`
+	Email        string    `json:"-"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"-"`
+	ExpiresAt    time.Time `json:"-"`
 }

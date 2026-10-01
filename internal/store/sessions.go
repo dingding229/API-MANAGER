@@ -19,7 +19,7 @@ func (m *Memory) CreateSession(session model.Session) error {
 	if !ok || user.Status != "active" {
 		return ErrNotFound
 	}
-	if session.AuthenticatedPasswordHash != "" && (user.Email != session.AuthenticatedUsername || user.PasswordHash != session.AuthenticatedPasswordHash) {
+	if session.AuthenticatedPasswordHash != "" && (user.Username != session.AuthenticatedUsername || user.PasswordHash != session.AuthenticatedPasswordHash) {
 		return ErrConflict
 	}
 	// Limit active sessions for a user without retaining plaintext tokens.
@@ -68,7 +68,7 @@ func (p *Postgres) CreateSession(session model.Session) error {
 	// The same account row lock is used by profile changes and session creation.
 	// Always lock the account before deleting sessions to avoid lock-order inversions.
 	var status, username, passwordHash string
-	if err = tx.QueryRow(ctx, `SELECT status,email,password_hash FROM users WHERE id=$1 FOR UPDATE`, session.UserID).Scan(&status, &username, &passwordHash); errors.Is(err, pgx.ErrNoRows) {
+	if err = tx.QueryRow(ctx, `SELECT status,username,password_hash FROM users WHERE id=$1 FOR UPDATE`, session.UserID).Scan(&status, &username, &passwordHash); errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err

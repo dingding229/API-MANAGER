@@ -64,6 +64,10 @@ spec:
             {{- end }}
             - name: PRODUCTION_MODE
               value: {{ .Values.productionMode | quote }}
+            {{- if index .Values.env "SMTP_HOST" }}
+            - name: SMTP_PASSWORD_FILE
+              value: /run/secrets/SMTP_PASSWORD
+            {{- end }}
             - name: ADMIN_PASSWORD_FILE
               value: /run/secrets/ADMIN_PASSWORD
             - name: POSTGRES_DSN_FILE
