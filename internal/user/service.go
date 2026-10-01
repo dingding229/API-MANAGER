@@ -44,9 +44,10 @@ type Store interface {
 }
 
 type Service struct {
-	store    Store
-	ttl      time.Duration
-	recovery *recovery
+	bootstrapHash string
+	store         Store
+	ttl           time.Duration
+	recovery      *recovery
 }
 type sessionStore interface {
 	CreateSession(model.Session) error
@@ -221,7 +222,7 @@ func (s *Service) EnsureInitialAdmin(username, password string) error {
 		return nil
 	}
 	if password == "" {
-		return errors.New("first startup requires ADMIN_PASSWORD or ADMIN_PASSWORD_FILE")
+		return errors.New("initial administrator helper requires an explicit password")
 	}
 	_, err = s.Create(username, password, "super_admin")
 	return err

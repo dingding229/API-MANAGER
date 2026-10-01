@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -484,7 +483,15 @@ func (g *Gateway) logRequest(r *http.Request, api model.API, w *captureWriter, s
 
 func (g *Gateway) match(method, path string) (model.API, bool, error) {
 	var apis []model.API
-	if checked, ok := g.store.(interface{ ListAPIsChecked() ([]model.API, error) }); ok {
+	if checked, ok := g.store.(interface {
+		RouteCandidatesChecked(string, string) ([]model.API, error)
+	}); ok {
+		var err error
+		apis, err = checked.RouteCandidatesChecked(method, path)
+		if err != nil {
+			return model.API{}, false, err
+		}
+	} else if checked, ok := g.store.(interface{ ListAPIsChecked() ([]model.API, error) }); ok {
 		var err error
 		apis, err = checked.ListAPIsChecked()
 		if err != nil {
@@ -493,28 +500,20 @@ func (g *Gateway) match(method, path string) (model.API, bool, error) {
 	} else {
 		apis = g.store.ListAPIs()
 	}
-	sort.Slice(apis, func(i, j int) bool {
-		a, b := apis[i].Path, apis[j].Path
-		if a == path && b != path {
-			return true
-		}
-		if b == path && a != path {
-			return false
-		}
-		staticA, staticB := staticSegments(a), staticSegments(b)
-		if staticA != staticB {
-			return staticA > staticB
-		}
-		if len(a) != len(b) {
-			return len(a) > len(b)
-		}
-		return a < b
-	})
+	var best model.API
+	found := false
 	for _, api := range apis {
-		if strings.EqualFold(api.Method, method) && matchPath(api.Path, path) {
-			return api, true, nil
+		if !api.AllowsMethod(method) || !matchPath(api.Path, path) {
+			continue
+		}
+		if !found || routeBefore(api.Path, best.Path, path) {
+			best, found = api, true
 		}
 	}
+	if found {
+		return best, true, nil
+	}
+
 	return model.API{}, false, nil
 }
 
@@ -635,4 +634,21 @@ func (w *captureWriter) ReadFrom(reader io.Reader) (int64, error) {
 		return n, err
 	}
 	return io.Copy(struct{ io.Writer }{Writer: w}, reader)
+}
+
+func routeBefore(a, b, actual string) bool {
+	if a == actual {
+		return b != actual
+	}
+	if b == actual {
+		return false
+	}
+	sa, sb := staticSegments(a), staticSegments(b)
+	if sa != sb {
+		return sa > sb
+	}
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a < b
 }

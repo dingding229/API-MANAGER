@@ -104,7 +104,7 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 	for _, item := range services {
 		// #nosec G204 -- executable names are from the fixed service table and BinaryDir is validated above.
 		cmd := exec.Command(filepath.Join(options.BinaryDir, item.name), item.args...)
-		cmd.Env = append(os.Environ(), item.env...)
+		cmd.Env = append(childEnvironment(), item.env...)
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		if err := cmd.Start(); err != nil {
 			s.Close()
@@ -177,4 +177,15 @@ func writeConfig(dir string, options Options) error {
 		}
 		return os.WriteFile(target, []byte(text), 0600)
 	})
+}
+
+// Monitoring children do not need database, SMTP, bootstrap or upstream secrets.
+func childEnvironment() []string {
+	result := []string{"PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/tmp"}
+	for _, name := range []string{"TZ", "SSL_CERT_FILE", "SSL_CERT_DIR", "GOMAXPROCS", "GOMEMLIMIT"} {
+		if value, ok := os.LookupEnv(name); ok {
+			result = append(result, name+"="+value)
+		}
+	}
+	return result
 }

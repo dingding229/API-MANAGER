@@ -80,43 +80,48 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		apis = c.store.ListAPIs()
 	}
 	result := Response{Version: 1, BaseURL: c.baseURL, APIs: make([]Document, 0)}
+	visible := 0
 	for _, a := range apis {
 		if !a.PublicVisible || !a.Enabled || a.PublishedAt == nil || strings.TrimSpace(a.PublicTitle) == "" || (a.AuthMode != "api_key" && a.AuthMode != "none") || !strings.HasPrefix(a.Path, "/api/") || strings.ContainsAny(a.Path, "?\r\n#") {
 			continue
 		}
-		digest := sha256.Sum256([]byte(a.Method + " " + a.Path))
-		category := a.PublicCategory
-		if category == "" {
-			category = "通用接口"
+		if visible >= 200 {
+			break
 		}
-		d := Document{ID: hex.EncodeToString(digest[:8]), Title: a.PublicTitle, Summary: a.PublicSummary, Category: category, Method: a.Method, Path: a.Path, Authentication: a.AuthMode, Parameters: make([]Parameter, 0), Body: make([]Parameter, 0)}
-		// Export only property names/types/required flags. No example/default values,
-		// schema descriptions, response body, upstream or credential fields cross this boundary.
-		d.Body = fields(a.RequestSchema, "body")
-		var params struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		}
-		if json.Unmarshal(a.ParametersSchema, &params) == nil {
-			for _, location := range []string{"path", "query", "header"} {
-				d.Parameters = append(d.Parameters, fields(params.Properties[location], location)...)
+		visible++
+		for _, method := range a.HTTPMethods() {
+			digest := sha256.Sum256([]byte(method + " " + a.Path))
+			category := a.PublicCategory
+			if category == "" {
+				category = "通用接口"
 			}
-		}
-		// Path placeholders are documented even if the administrator supplied no schema.
-		for _, part := range strings.Split(a.Path, "/") {
-			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-				name := strings.Trim(part, "{}")
-				found := false
-				for _, p := range d.Parameters {
-					if p.Name == name && p.Location == "path" {
-						found = true
+			d := Document{ID: hex.EncodeToString(digest[:8]), Title: a.PublicTitle, Summary: a.PublicSummary, Category: category, Method: method, Path: a.Path, Authentication: a.AuthMode, Parameters: make([]Parameter, 0), Body: make([]Parameter, 0)}
+			// Export only property names/types/required flags. No example/default values,
+			// schema descriptions, response body, upstream or credential fields cross this boundary.
+			d.Body = fields(a.RequestSchema, "body")
+			var params struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			}
+			if json.Unmarshal(a.ParametersSchema, &params) == nil {
+				for _, location := range []string{"path", "query", "header"} {
+					d.Parameters = append(d.Parameters, fields(params.Properties[location], location)...)
+				}
+			}
+			// Path placeholders are documented even if the administrator supplied no schema.
+			for _, part := range strings.Split(a.Path, "/") {
+				if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+					name := strings.Trim(part, "{}")
+					found := false
+					for _, p := range d.Parameters {
+						if p.Name == name && p.Location == "path" {
+							found = true
+						}
+					}
+					if !found {
+						d.Parameters = append(d.Parameters, Parameter{Name: name, Location: "path", Type: "string", Required: true})
 					}
 				}
-				if !found {
-					d.Parameters = append(d.Parameters, Parameter{Name: name, Location: "path", Type: "string", Required: true})
-				}
 			}
-		}
-		if len(result.APIs) < 200 {
 			result.APIs = append(result.APIs, d)
 		}
 	}
@@ -124,7 +129,13 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if result.APIs[i].Category != result.APIs[j].Category {
 			return result.APIs[i].Category < result.APIs[j].Category
 		}
-		return result.APIs[i].Title < result.APIs[j].Title
+		if result.APIs[i].Title != result.APIs[j].Title {
+			return result.APIs[i].Title < result.APIs[j].Title
+		}
+		if result.APIs[i].Path != result.APIs[j].Path {
+			return result.APIs[i].Path < result.APIs[j].Path
+		}
+		return result.APIs[i].Method < result.APIs[j].Method
 	})
 	_ = json.NewEncoder(w).Encode(result)
 }

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import secrets
 
-FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
+FILES = ("admin_bootstrap_key", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
         root = Path(__file__).resolve().parents[1]
         try:
             result = subprocess.run(["docker", "compose", "--project-directory", str(root), "-f", str(root / "docker-compose.yml"), "config", "--format", "json"], check=True, capture_output=True, text=True)
-            args.dir = Path(json.loads(result.stdout)["secrets"]["admin_password"]["file"]).parent
+            args.dir = Path(json.loads(result.stdout)["secrets"]["admin_bootstrap_key"]["file"]).parent
         except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
             parser.error("install Docker Compose or explicitly supply --dir")
     target = args.dir.expanduser()
@@ -40,7 +40,7 @@ def main():
         path.chmod(0o444)
         created += 1
     print(f"Created {created} missing credential files in {target}; existing values kept, no values displayed.")
-    print("Start with: docker compose up -d")
+    print("Start with: docker compose up -d; first administrator registers with admin_bootstrap_key, choosing their own password.")
 
 
 if __name__ == "__main__":

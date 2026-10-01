@@ -16,20 +16,22 @@ var (
 )
 
 type Memory struct {
-	mu          sync.RWMutex
-	apis        map[string]model.API
-	credentials map[string]model.Credential
-	users       map[string]model.User
-	sessions    map[string]model.Session
-	resets      map[string]model.PasswordReset
-	releases    map[string][]model.Release
-	permissions map[string]model.Permission
-	roles       map[string]model.Role
-	userRoles   map[string][]string
-	plugins     map[string]model.Plugin
-	pluginData  map[string]model.PluginData
-	auditLogs   []model.AuditLog
-	nextAuditID int64
+	bootstrapHash string
+	bootstrapUsed bool
+	mu            sync.RWMutex
+	apis          map[string]model.API
+	credentials   map[string]model.Credential
+	users         map[string]model.User
+	sessions      map[string]model.Session
+	resets        map[string]model.PasswordReset
+	releases      map[string][]model.Release
+	permissions   map[string]model.Permission
+	roles         map[string]model.Role
+	userRoles     map[string][]string
+	plugins       map[string]model.Plugin
+	pluginData    map[string]model.PluginData
+	auditLogs     []model.AuditLog
+	nextAuditID   int64
 }
 
 func NewMemory() *Memory {
@@ -58,13 +60,18 @@ func (m *Memory) Ping(context.Context) error { return nil }
 func (m *Memory) Close()                     {}
 
 func (m *Memory) CreateAPI(api model.API) error {
+	methods, err := model.NormalizeMethods(api.Method, api.Methods)
+	if err != nil {
+		return err
+	}
+	api.Methods, api.Method = methods, methods[0]
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.apis[api.ID]; exists {
 		return ErrConflict
 	}
 	for _, existing := range m.apis {
-		if existing.Method == api.Method && existing.Path == api.Path {
+		if model.RoutesConflict(existing, api) {
 			return ErrConflict
 		}
 	}
@@ -75,11 +82,27 @@ func (m *Memory) CreateAPI(api model.API) error {
 func (m *Memory) UpdateAPI(api model.API) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.updateAPI(api)
+}
+func (m *Memory) UpdateAndRelease(api model.API) (model.Release, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.updateAPI(api); err != nil {
+		return model.Release{}, err
+	}
+	return m.createRelease(m.apis[api.ID]), nil
+}
+func (m *Memory) updateAPI(api model.API) error {
+	methods, err := model.NormalizeMethods(api.Method, api.Methods)
+	if err != nil {
+		return err
+	}
+	api.Methods, api.Method = methods, methods[0]
 	if _, exists := m.apis[api.ID]; !exists {
 		return ErrNotFound
 	}
 	for id, existing := range m.apis {
-		if id != api.ID && existing.Method == api.Method && existing.Path == api.Path {
+		if id != api.ID && model.RoutesConflict(existing, api) {
 			return ErrConflict
 		}
 	}
@@ -258,6 +281,9 @@ func (m *Memory) CountUsers() int {
 func (m *Memory) CreateRelease(api model.API) (model.Release, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.createRelease(api), nil
+}
+func (m *Memory) createRelease(api model.API) model.Release {
 	version := len(m.releases[api.ID]) + 1
 	publishedAt := time.Now().UTC()
 	if api.PublishedAt != nil {
@@ -265,7 +291,7 @@ func (m *Memory) CreateRelease(api model.API) (model.Release, error) {
 	}
 	release := model.Release{ID: int64(version), APIID: api.ID, Version: version, Snapshot: api, PublishedAt: publishedAt}
 	m.releases[api.ID] = append(m.releases[api.ID], release)
-	return release, nil
+	return release
 }
 
 func (m *Memory) ListReleases(apiID string) []model.Release {
@@ -305,6 +331,9 @@ func (m *Memory) UpdateUserStatus(id, status string) error {
 	user, ok := m.users[id]
 	if !ok {
 		return ErrNotFound
+	}
+	if status == "disabled" && m.lastActiveAdmin(id) {
+		return ErrConflict
 	}
 	user.Status = status
 	user.UpdatedAt = time.Now().UTC()
@@ -396,6 +425,9 @@ func (m *Memory) AssignUserRoles(userID string, roles []string) error {
 	defer m.mu.Unlock()
 	if _, ok := m.users[userID]; !ok {
 		return ErrNotFound
+	}
+	if !containsSuperAdmin(roles) && m.lastActiveAdmin(userID) {
+		return ErrConflict
 	}
 	for _, role := range roles {
 		if _, ok := m.roles[role]; !ok {
@@ -639,4 +671,18 @@ func (m *Memory) DeletePlugin(id string) error {
 func clonePlugin(item model.Plugin) model.Plugin {
 	item.Manifest = append([]byte(nil), item.Manifest...)
 	return item
+}
+
+func (m *Memory) lastActiveAdmin(id string) bool {
+	target, ok := m.users[id]
+	if !ok || target.Status != "active" || !containsSuperAdmin(m.userRoles[id]) {
+		return false
+	}
+	count := 0
+	for uid, u := range m.users {
+		if u.Status == "active" && containsSuperAdmin(m.userRoles[uid]) {
+			count++
+		}
+	}
+	return count <= 1
 }

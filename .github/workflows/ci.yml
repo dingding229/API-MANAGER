@@ -98,11 +98,11 @@ jobs:
       - name: Lint Helm chart
         run: |
           helm lint deploy/helm/api-manager \
-            --set secrets.ADMIN_PASSWORD=ci-only-admin-password-at-least-thirty-two-characters \
+            --set secrets.ADMIN_BOOTSTRAP_KEY=ci-only-admin-password-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci
           helm template api-manager deploy/helm/api-manager \
-            --set secrets.ADMIN_PASSWORD=ci-only-admin-password-at-least-thirty-two-characters \
+            --set secrets.ADMIN_BOOTSTRAP_KEY=ci-only-admin-password-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci >/dev/null
           helm lint deploy/helm/api-manager \
@@ -223,7 +223,8 @@ jobs:
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError
           root=pathlib.Path(os.environ['SECRETS_DIR'])
-          password=(root/'admin_password').read_text().strip()
+          bootstrap_key=(root/'admin_bootstrap_key').read_text().strip()
+          password='CI-chosen-Password-88'
           def call(method,path,key=None,data=None,session=None):
               headers={'Content-Type':'application/json'}
               if key: headers['X-API-Key']=key
@@ -235,11 +236,14 @@ jobs:
                       return response.status,(json.loads(body) if body else {})
               except HTTPError as error:
                   error.close(); return error.code,{}
+          assert call('GET','/auth/v1/setup')[1]['available'] is True
+          assert call('POST','/auth/v1/setup',data={'key':bootstrap_key,'username':'admin','email':'admin@example.test','password':password})[0]==201
+          assert call('POST','/auth/v1/setup',data={'key':bootstrap_key,'username':'admin','email':'admin@example.test','password':password})[0]==403
           status,login=call('POST','/auth/v1/login',data={'username':'admin','password':password})
           assert status==200
           session=login['token']
           assert call('GET','/auth/v1/me',session=session)[0]==200
-          assert login['user']['username']=='admin' and login['user']['email']==''
+          assert login['user']['username']=='admin' and login['user']['email']=='admin@example.test'
           status,profile_user=call('POST','/admin/v1/users',session=session,data={'username':'contact-user','email':'contact@example.test','password':'UiRead88','role':'viewer'})
           assert status==201 and profile_user['username']=='contact-user' and profile_user['email']=='contact@example.test'
           assert call('GET','/admin/v1/overview',session=session)[0]==200
@@ -266,6 +270,17 @@ jobs:
           assert status==201 and public['auth_mode']=='none'
           assert call('POST','/admin/v1/apis/'+public['id']+'/publish',session=session)[0]==200
           assert call('GET','/api/public')[0]==200
+          status,multi=call('POST','/admin/v1/apis',session=session,data={'name':'multi','response_status':200,'methods':['GET','POST','HEAD','OPTIONS'],'path':'/api/multi','auth_mode':'none','public_visible':True,'public_title':'Multi-method API'})
+          assert status==201 and multi['methods']==['GET','POST','HEAD','OPTIONS']
+          assert call('POST','/admin/v1/apis/'+multi['id']+'/publish',session=session)[0]==200
+          for method in multi['methods']:
+              assert call(method,'/api/multi')[0]==200
+          assert call('PUT','/api/multi')[0]==404
+          assert call('POST','/admin/v1/apis',session=session,data={'name':'conflict','response_status':200,'methods':['POST','PUT'],'path':'/api/multi'})[0]==409
+          exported=call('GET','/admin/v1/openapi.json',session=session)[1]
+          assert set(exported['paths']['/api/multi'])=={'get','post','head','options'}
+          catalog=call('GET','/catalog.json')[1]
+          assert {a['method'] for a in catalog['apis'] if a['path']=='/api/multi'}=={'GET','POST','HEAD','OPTIONS'}
           status,audits=call('GET','/admin/v1/audit-logs',session=session)
           assert status==200 and audits['items']
           assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',session=session)[0]==200

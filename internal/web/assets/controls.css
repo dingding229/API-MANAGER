@@ -127,94 +127,8 @@ form .permission-options, form .role-select-list { gap: 8px; }
   form input[type="checkbox"]:checked { background-color: Canvas; border-color: ButtonText; }
 }
 
-/* Two auth modes are a choice, not a long list: use a compact segmented radio control. */
-form .auth-mode-field {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-form .auth-mode-field .field-label {
-  display: block;
-}
-form .auth-mode-control {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  min-height: var(--control-height);
-  padding: 4px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-muted);
-}
-form .auth-mode-option {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  min-height: 34px;
-  place-items: center;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--control-muted);
-  cursor: pointer;
-  text-align: center;
-  transition: color .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease;
-}
-form .auth-mode-option > span {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-  line-height: 1.15;
-}
-form .auth-mode-option strong {
-  font-size: 13px;
-  font-weight: 750;
-}
-form .auth-mode-option small {
-  overflow: hidden;
-  color: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-form .auth-mode-option input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
-form .auth-mode-option:hover {
-  color: var(--ink);
-  background: rgba(255, 255, 255, .7);
-}
-form .auth-mode-option:has(input:checked) {
-  border-color: #d4ddfb;
-  background: var(--panel);
-  color: var(--brand-strong);
-  box-shadow: 0 1px 3px rgba(23, 32, 51, .08);
-}
-form .auth-mode-option:focus-within {
-  outline: 2px solid var(--control-focus-border);
-  outline-offset: 1px;
-}
-@media (max-width: 600px) {
-  form .auth-mode-option { padding-inline: 6px; }
-  form .auth-mode-option small { font-size: 10px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  form .auth-mode-option { transition: none; }
-}
-@media (forced-colors: active) {
-  form .auth-mode-control { background: Canvas; }
-  form .auth-mode-option:has(input:checked) { border-color: Highlight; background: Highlight; color: HighlightText; }
-}
+
+
 
 
 .profile-modal .modal-heading .small { margin-bottom: 0; }
@@ -229,3 +143,43 @@ form .auth-mode-option:focus-within {
 .profile-modal .field > label.field-label { display: block; font-weight: 650; }
 .account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .account-actions button.link { min-height: 44px; padding: 8px 0; }
+
+/* Method choices use the same compact checkbox, border and 44px touch target. */
+form .method-field { margin:0; padding:0; border:0; min-width:0; }
+form .method-field legend { margin-bottom:8px; padding:0; }
+.method-options { display:flex; flex-wrap:wrap; gap:8px; }
+form .method-option { display:flex; align-items:center; gap:8px; min-height:44px; padding:8px 12px; border:1px solid var(--control-border); border-radius:var(--control-radius); background:var(--panel); cursor:pointer; font-weight:600; font-size:13px; }
+form .method-option:has(input:checked) { border-color:var(--brand); background:var(--surface-soft); }
+form .method-option:has(input:focus-visible) { outline:2px solid var(--control-focus-border); outline-offset:2px; }
+form .method-option:hover { border-color:var(--control-hover-border); }
+form .method-field .field-hint { display:block; margin-top:8px; }
+.method-option span { font-family:ui-monospace,monospace; }
+.auth-card .setup-form { margin-top:16px; }
+@media(max-width:600px) {form .method-option {flex:1 0 28%; justify-content:center;} }
+
+.setup-panel { margin-top:20px; padding-top:20px; border-top:1px solid var(--control-border); }
+.setup-panel summary { cursor:pointer; min-height:44px; display:flex; align-items:center; font-weight:600; color:var(--brand); }
+.setup-panel summary:focus-visible { outline:2px solid var(--control-focus-border); outline-offset:2px; }
+
+.method-auth-fields { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+.method-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(94px,1fr)); }
+form .method-option { justify-content:center; }
+.api-management-grid { grid-template-columns:minmax(0,1fr); }
+@media(min-width:1600px) { .api-management-grid { grid-template-columns:minmax(0,1.4fr) minmax(420px,1fr); } }
+@media(forced-colors:active) { form .method-option:has(input:checked) {outline:1px solid Highlight;} }
+@media(prefers-reduced-motion:reduce) { form .method-option {transition:none;} }
+
+/* Data tables must not lose action columns just to squeeze in a creation form. */
+@media(max-width:1599px) { .split {grid-template-columns:minmax(0,1fr);} }
+form.form-stack select {min-height:var(--control-height);appearance:none;padding-right:40px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2359677e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;}
+@media(forced-colors:active) {form.form-stack select {appearance:auto;background-image:none;}}
+.table-wrap td {vertical-align:middle;}
+.content>header button {min-height:44px;}
+
+@media(max-width:600px) {
+  form .method-option:last-child {grid-column:1/-1;}
+  .sidebar nav {scrollbar-width:thin;scrollbar-color:#465474 #172033;}
+  .sidebar .account-actions button {min-height:44px;}
+}
+.method-error {color:var(--danger);font-size:13px;line-height:1.5;margin:6px 0 0;}
+form .method-field[aria-invalid="true"] .method-options {outline:1px solid var(--danger);outline-offset:4px;border-radius:var(--control-radius);}

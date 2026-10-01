@@ -121,7 +121,7 @@ func main() {
 		logger.Error("initialize RBAC defaults failed", "error", err)
 		os.Exit(1)
 	}
-	if err := userService.EnsureInitialAdmin(cfg.AdminUsername, cfg.AdminPassword); err != nil {
+	if err := userService.ConfigureBootstrap(cfg.AdminBootstrapKey); err != nil {
 		logger.Error("initialize administrator failed", "error", err)
 		os.Exit(1)
 	}

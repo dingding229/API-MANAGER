@@ -120,38 +120,118 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 func (p *Postgres) CreateAPI(api model.API) error {
 	ctx, cancel := dbContext()
 	defer cancel()
+	methods, err := model.NormalizeMethods(api.Method, api.Methods)
+	if err != nil {
+		return err
+	}
+	api.Methods, api.Method = methods, methods[0]
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(71950320)`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT id,method,methods,path FROM apis WHERE id <> $1`, api.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var existing model.API
+		if err = rows.Scan(&existing.ID, &existing.Method, &existing.Methods, &existing.Path); err != nil {
+			rows.Close()
+			return err
+		}
+		if model.RoutesConflict(api, existing) {
+			rows.Close()
+			return ErrConflict
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
 	authConfig, err := json.Marshal(api.AuthConfig)
 	if err != nil {
 		return err
 	}
-	_, err = p.pool.Exec(ctx, `INSERT INTO apis
-		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
+	_, err = tx.Exec(ctx, `INSERT INTO apis
+		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory)
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods())
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
 		}
 		return fmt.Errorf("create api: %w", err)
 	}
-	return nil
+	if _, err = tx.Exec(ctx, `DELETE FROM api_routes WHERE api_id=$1`, api.ID); err != nil {
+		return err
+	}
+	for _, method := range api.HTTPMethods() {
+		if _, err = tx.Exec(ctx, `INSERT INTO api_routes(api_id,method,path) VALUES($1,$2,$3)`, api.ID, method, api.Path); err != nil {
+			return ErrConflict
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) UpdateAPI(api model.API) error {
 	ctx, cancel := dbContext()
 	defer cancel()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = p.updateAPI(ctx, tx, api); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+func (p *Postgres) updateAPI(ctx context.Context, tx pgx.Tx, api model.API) error {
+	methods, err := model.NormalizeMethods(api.Method, api.Methods)
+	if err != nil {
+		return err
+	}
+	api.Methods, api.Method = methods, methods[0]
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(71950320)`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT id,method,methods,path FROM apis WHERE id <> $1`, api.ID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var existing model.API
+		if err = rows.Scan(&existing.ID, &existing.Method, &existing.Methods, &existing.Path); err != nil {
+			rows.Close()
+			return err
+		}
+		if model.RoutesConflict(api, existing) {
+			rows.Close()
+			return ErrConflict
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
 	authConfig, err := json.Marshal(api.AuthConfig)
 	if err != nil {
 		return err
 	}
-	result, err := p.pool.Exec(ctx, `UPDATE apis SET
-		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27,public_visible=$28,public_title=$29,public_summary=$30,public_category=$31
+	result, err := tx.Exec(ctx, `UPDATE apis SET
+		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27,public_visible=$28,public_title=$29,public_summary=$30,public_category=$31,methods=$32
 		WHERE id=$1`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory)
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods())
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -161,10 +241,18 @@ func (p *Postgres) UpdateAPI(api model.API) error {
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	if _, err = tx.Exec(ctx, `DELETE FROM api_routes WHERE api_id=$1`, api.ID); err != nil {
+		return err
+	}
+	for _, method := range api.HTTPMethods() {
+		if _, err = tx.Exec(ctx, `INSERT INTO api_routes(api_id,method,path) VALUES($1,$2,$3)`, api.ID, method, api.Path); err != nil {
+			return ErrConflict
+		}
+	}
 	return nil
 }
 
-const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category FROM apis`
+const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods FROM apis`
 
 func scanAPI(row pgx.Row) (model.API, error) {
 	var api model.API
@@ -172,7 +260,7 @@ func scanAPI(row pgx.Row) (model.API, error) {
 	var pluginName string
 	if err := row.Scan(&api.ID, &api.Name, &api.Description, &api.Method, &api.Path, &api.AuthMode, &authConfig,
 		&api.RateLimitPerMinute, &api.DailyQuota, &api.MonthlyQuota, &api.ResponseStatus, &api.ResponseBody, &requestSchema, &responseSchema, &parametersSchema, &pluginName,
-		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory); err != nil {
+		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory, &api.Methods); err != nil {
 		return model.API{}, err
 	}
 	api.Plugin = pluginName
@@ -459,15 +547,46 @@ func (p *Postgres) CountUsersChecked() (int, error) {
 func (p *Postgres) CreateRelease(api model.API) (model.Release, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return model.Release{}, err
+	}
+	defer tx.Rollback(ctx)
+	release, err := createRelease(ctx, tx, api)
+	if err != nil {
+		return model.Release{}, err
+	}
+	return release, tx.Commit(ctx)
+}
+
+// UpdateAndRelease prevents failed version creation leaving a route live without a snapshot.
+func (p *Postgres) UpdateAndRelease(api model.API) (model.Release, error) {
+	ctx, cancel := dbContext()
+	defer cancel()
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return model.Release{}, err
+	}
+	defer tx.Rollback(ctx)
+	methods, err := model.NormalizeMethods(api.Method, api.Methods)
+	if err != nil {
+		return model.Release{}, err
+	}
+	api.Methods, api.Method = methods, methods[0]
+	if err = p.updateAPI(ctx, tx, api); err != nil {
+		return model.Release{}, err
+	}
+	release, err := createRelease(ctx, tx, api)
+	if err != nil {
+		return model.Release{}, err
+	}
+	return release, tx.Commit(ctx)
+}
+func createRelease(ctx context.Context, tx pgx.Tx, api model.API) (model.Release, error) {
 	snapshot, err := json.Marshal(api)
 	if err != nil {
 		return model.Release{}, fmt.Errorf("marshal release snapshot: %w", err)
 	}
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return model.Release{}, fmt.Errorf("begin release: %w", err)
-	}
-	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, api.ID); err != nil {
 		return model.Release{}, fmt.Errorf("lock release: %w", err)
 	}
@@ -480,9 +599,6 @@ func (p *Postgres) CreateRelease(api model.API) (model.Release, error) {
 	err = tx.QueryRow(ctx, `INSERT INTO api_releases(api_id,version,snapshot) VALUES($1,$2,$3) RETURNING id,published_at`, api.ID, version, snapshot).Scan(&result.ID, &result.PublishedAt)
 	if err != nil {
 		return model.Release{}, fmt.Errorf("insert release: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return model.Release{}, fmt.Errorf("commit release: %w", err)
 	}
 	return result, nil
 }
@@ -716,6 +832,9 @@ func (p *Postgres) AssignUserRoles(userID string, roles []string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = protectLastAdmin(ctx, tx, userID, !containsSuperAdmin(roles)); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id=$1`, userID); err != nil {
 		return err
 	}
@@ -811,6 +930,9 @@ func (p *Postgres) UpdateUserStatus(id, status string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err = protectLastAdmin(ctx, tx, id, status == "disabled"); err != nil {
+		return err
+	}
 	result, err := tx.Exec(ctx, `UPDATE users SET status=$2,updated_at=NOW() WHERE id=$1`, id, status)
 	if err != nil {
 		return err
@@ -1076,7 +1198,7 @@ func (p *Postgres) DeletePlugin(id string) error {
 func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT method,path,auth_mode,request_schema,parameters_schema,public_visible,public_title,public_summary,public_category,enabled,published_at FROM apis WHERE public_visible=true AND enabled=true AND published_at IS NOT NULL ORDER BY public_category,public_title LIMIT 200`)
+	rows, err := p.pool.Query(ctx, `SELECT method,methods,path,auth_mode,request_schema,parameters_schema,public_visible,public_title,public_summary,public_category,enabled,published_at FROM apis WHERE public_visible=true AND enabled=true AND published_at IS NOT NULL ORDER BY public_category,public_title LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -1085,7 +1207,7 @@ func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
 	for rows.Next() {
 		var a model.API
 		var request, parameters []byte
-		if err := rows.Scan(&a.Method, &a.Path, &a.AuthMode, &request, &parameters, &a.PublicVisible, &a.PublicTitle, &a.PublicSummary, &a.PublicCategory, &a.Enabled, &a.PublishedAt); err != nil {
+		if err := rows.Scan(&a.Method, &a.Methods, &a.Path, &a.AuthMode, &request, &parameters, &a.PublicVisible, &a.PublicTitle, &a.PublicSummary, &a.PublicCategory, &a.Enabled, &a.PublishedAt); err != nil {
 			return nil, err
 		}
 		a.RequestSchema = schemaRawMessage(request)
@@ -1093,4 +1215,66 @@ func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
 		result = append(result, a)
 	}
 	return result, rows.Err()
+}
+
+// RouteCandidatesChecked uses the concrete-route index and transfers only
+// parameter candidates for this method; it has no stale authorization cache.
+func (p *Postgres) RouteCandidatesChecked(method, path string) ([]model.API, error) {
+	ctx, cancel := dbContext()
+	defer cancel()
+	rows, err := p.pool.Query(ctx, apiSelect+` WHERE id IN (SELECT api_id FROM api_routes WHERE method=$1 AND path=$2) OR (methods @> ARRAY[$1]::TEXT[] AND position('{' in path)>0)`, method, path)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]model.API, 0)
+	for rows.Next() {
+		a, err := scanAPI(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, a)
+	}
+	return result, rows.Err()
+}
+
+func containsSuperAdmin(roles []string) bool {
+	for _, role := range roles {
+		if role == "super_admin" {
+			return true
+		}
+	}
+	return false
+}
+
+// The global lock closes the concurrent "each administrator disables the other"
+// race. Lock order matches session/profile mutations: account, then sessions.
+func protectLastAdmin(ctx context.Context, tx pgx.Tx, id string, removing bool) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(71950322)`); err != nil {
+		return err
+	}
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&status); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if !removing || status != "active" {
+		return nil
+	}
+	var isAdmin bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND r.name='super_admin')`, id).Scan(&isAdmin); err != nil {
+		return err
+	}
+	if !isAdmin {
+		return nil
+	}
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT u.id) FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE u.status='active' AND r.name='super_admin'`).Scan(&count); err != nil {
+		return err
+	}
+	if count <= 1 {
+		return ErrConflict
+	}
+	return nil
 }

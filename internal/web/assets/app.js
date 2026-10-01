@@ -1,3 +1,6 @@
+let pendingSetupKey = '';
+const setupFragment = location.hash.match(/^#setup=([0-9a-f]{64})$/);
+if (setupFragment) { pendingSetupKey = setupFragment[1]; history.replaceState(null, '', location.pathname + location.search); }
 sessionStorage.removeItem('api_manager_key');
 const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {}, recoveryEnabled: false };
 const $ = (selector) => document.querySelector(selector);
@@ -98,7 +101,7 @@ async function withSubmitting(form, pendingText, action) {
 }
 
 function authErrorMessage(error) {
-  return error?.message === 'invalid credentials' ? '用户名、邮箱或密码不正确' : (error?.message || '请求失败');
+  return error?.message === 'invalid credentials' ? '用户名或密码不正确' : (error?.message || '请求失败');
 }
 
 function showConsole() {
@@ -188,7 +191,7 @@ async function renderAPIs() {
   const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const apis = await api('/admin/v1/apis');
-    if (!page.isConnected) return; page.innerHTML = `<div class="split"><div class="table-wrap"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table><thead><tr><th>名称</th><th>路由</th><th>鉴权</th><th>状态</th><th>操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
+    if (!page.isConnected) return; page.innerHTML = `<div class="split api-management-grid"><div class="table-wrap"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table><thead><tr><th>名称</th><th>路由</th><th>鉴权</th><th>状态</th><th>操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
     $('#openapi').onclick = async () => { try { const document = await api('/admin/v1/openapi.json'); const blob = new Blob([JSON.stringify(document, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener,noreferrer'); setTimeout(() => URL.revokeObjectURL(url), 30000); } catch(error) { notice(error.message); } };
     $('#api-form').onsubmit = createAPI;
     $('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
@@ -201,7 +204,7 @@ async function renderAPIs() {
 function apiRow(item) {
   const action = item.enabled ? `<button class="secondary" data-action="unpublish" data-id="${esc(item.id)}">下线</button>` : `<button data-action="publish" data-id="${esc(item.id)}">发布</button>`;
   const source = item.plugin ? `插件：${esc(item.plugin)}` : item.upstream_url ? `上游：${esc(item.upstream_url)}` : '静态响应';
-  return `<tr><td><strong>${esc(item.name)}</strong><br><span class="small">${esc(source)}</span></td><td><code>${esc(item.method)} ${esc(item.path)}</code></td><td>${esc(item.auth_mode || 'api_key')}</td><td><span class="badge ${item.enabled?'':'off'}">${item.enabled?'已发布':'草稿'}</span></td><td><div class="actions">${can('api.write')?`<button class="secondary" data-edit-api="${esc(item.id)}">编辑</button>`:''}${can('api.publish')?action:''}${can('api.delete')?`<button class="danger" data-action="delete" data-id="${esc(item.id)}">删除</button>`:''}</div></td></tr>`;
+  return `<tr><td><strong>${esc(item.name)}</strong><br><span class="small">${esc(source)}</span></td><td><code>${esc((item.methods?.length ? item.methods : [item.method]).join(' / '))} ${esc(item.path)}</code></td><td>${esc(authLabel(item.auth_mode))}</td><td><span class="badge ${item.enabled?'':'off'}">${item.enabled?'已发布':'草稿'}</span></td><td><div class="actions">${can('api.write')?`<button class="secondary" data-edit-api="${esc(item.id)}">编辑</button>`:''}${can('api.publish')?action:''}${can('api.delete')?`<button class="danger" data-action="delete" data-id="${esc(item.id)}">删除</button>`:''}</div></td></tr>`;
 }
 
 function selected(value, expected) { return String(value ?? '') === String(expected) ? 'selected' : ''; }
@@ -216,9 +219,9 @@ function apiForm(item = {}) {
     <section class="form-section form-section-primary" aria-labelledby="api-basics-title">
       <div class="form-section-heading"><div><h3 id="api-basics-title">基础信息</h3><p>先定义公开路由和访问方式。</p></div><span class="required-note">带 * 为必填</span></div>
       <label class="field"><span class="field-label">名称 <span aria-hidden="true">*</span></span><input name="name" required placeholder="订单查询" value="${value('name')}"></label>
-      <div class="grid-2">
-        <label class="field"><span class="field-label">请求方法 <span aria-hidden="true">*</span></span><select name="method" required aria-describedby="method-hint"><option ${selected(item.method,'GET')}>GET</option><option ${selected(item.method,'POST')}>POST</option><option ${selected(item.method,'PUT')}>PUT</option><option ${selected(item.method,'DELETE')}>DELETE</option><option ${selected(item.method,'PATCH')}>PATCH</option><option ${selected(item.method,'HEAD')}>HEAD</option><option ${selected(item.method,'OPTIONS')}>OPTIONS</option>${item.method && !['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(item.method) ? `<option selected>${esc(item.method)}</option>` : ''}</select><span id="method-hint" class="field-hint">每条接口路由只绑定一种请求方法。</span></label>
-        <fieldset class="field auth-mode-field" aria-describedby="auth-hint"><legend class="field-label">鉴权方式</legend><div class="auth-mode-control" role="radiogroup" aria-label="鉴权方式"><label class="auth-mode-option"><input type="radio" name="auth_mode" value="api_key" ${item.auth_mode === 'none' ? '' : 'checked'}><span><strong>KEY</strong><small>需要调用凭证</small></span></label><label class="auth-mode-option"><input type="radio" name="auth_mode" value="none" ${item.auth_mode === 'none' ? 'checked' : ''}><span><strong>无需验证</strong><small>公开访问</small></span></label></div><span id="auth-hint" class="field-hint">KEY 保护访问；无需验证用于公开接口。</span></fieldset>
+      <div class="method-auth-fields">
+        <fieldset class="field method-field" aria-describedby="method-hint"><legend class="field-label">请求方法 <span aria-hidden="true">*</span></legend><div class="method-options">${['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(method=>`<label class="method-option"><input type="checkbox" name="methods" value="${method}" ${(item.methods?.length?item.methods:[item.method||'GET']).includes(method)?'checked':''}><span>${method}</span></label>`).join('')}</div><span id="method-hint" class="field-hint">支持多选；所选方法共享此接口的鉴权、配额和处理逻辑。</span><p class="method-error hidden" role="alert" data-method-error></p></fieldset>
+        <label class="field"><span class="field-label">鉴权方式</span><select name="auth_mode" aria-describedby="auth-hint"><option value="api_key" ${item.auth_mode==='none'?'':'selected'}>KEY · 需要调用凭证</option><option value="none" ${item.auth_mode==='none'?'selected':''}>无需验证 · 公开访问</option></select><span id="auth-hint" class="field-hint">选择无需验证时，任何人都可以调用此接口。</span></label>
       </div>
       <label class="field"><span class="field-label">访问路径 <span aria-hidden="true">*</span></span><input name="path" required placeholder="/api/example/v1/status" value="${value('path')}" aria-describedby="path-hint"><span id="path-hint" class="field-hint">必须以 / 开头；只填路径，不要填插件名、完整网址或连续斜线。</span></label>
       <label class="field"><span class="field-label">说明</span><input name="description" value="${value('description')}" placeholder="简短描述这个接口的用途"></label>
@@ -259,8 +262,14 @@ function apiForm(item = {}) {
 }
 function apiFormData(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  data.method = String(data.method || '').trim().toUpperCase();
-  if (!['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].includes(data.method)) throw new Error('请选择一个有效的请求方法');
+  data.methods = new FormData(form).getAll('methods');
+  const methodField=form.querySelector('.method-field'); const methodError=form.querySelector('[data-method-error]');
+  if (!data.methods.length) {
+    methodField.setAttribute('aria-invalid','true');methodError.textContent='请至少选择一种请求方法。';methodError.classList.remove('hidden');form.querySelector('[name="methods"]').focus();
+    throw new Error('请至少选择一种请求方法');
+  }
+  methodField.removeAttribute('aria-invalid');methodError.textContent='';methodError.classList.add('hidden');
+  data.method = data.methods[0];
   for (const key of ['request_schema', 'response_schema', 'parameters_schema']) { if (data[key]?.trim()) data[key] = JSON.parse(data[key]); else delete data[key]; }
   for (const key of ['rate_limit_per_minute', 'daily_quota', 'monthly_quota', 'response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
   data.strip_path = form.elements.strip_path.checked;
@@ -619,7 +628,7 @@ function traceRow(item) {
   const path = item.attributes?.['url.path'] || item.attributes?.['http.route'] || '—';
   const statusCode = item.attributes?.['http.response.status_code'] || '';
   const status = item.status === 'error' ? '错误' : '正常';
-  return `<tr><td>${new Date(item.started_at).toLocaleString()}</td><td><strong>${esc(item.name)}</strong><div class="small">${esc(path)}</div></td><td>${formatMetric(item.duration_ms, 1)} ms</td><td><span class="badge trace-${esc(item.status)}">${status}${statusCode ? ` · HTTP ${esc(statusCode)}` : ''}</span></td><td><code>${esc(item.trace_id)}</code></td></tr>`;
+  return `<tr><td>${new Date(item.started_at).toLocaleString()}</td><td><strong>${esc(item.name)}</strong><div class="small">${esc(path)}</div></td><td>${formatMetric(item.duration_ms, 1)} ms</td><td><span class="badge trace-${esc(item.status==='active'?'启用':item.status==='disabled'?'停用':item.status)}">${status}${statusCode ? ` · HTTP ${esc(statusCode)}` : ''}</span></td><td><code>${esc(item.trace_id)}</code></td></tr>`;
 }
 
 async function renderObservability() {
@@ -775,9 +784,8 @@ async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode =
   const form = $('#api-form');
   if (!form) return;
   form.elements.name.value = title || `${pluginName} · ${path.split('/').pop()}`;
-  form.elements.method.value = method;
-  const authOption = [...form.querySelectorAll('input[name="auth_mode"]')].find((input) => input.value === authMode) || form.querySelector('input[name="auth_mode"]');
-  if (authOption) authOption.checked = true;
+  form.querySelectorAll('input[name="methods"]').forEach(input => { input.checked = input.value === method; });
+  form.elements.auth_mode.value = authMode === 'none' ? 'none' : 'api_key';
   form.elements.path.value = path;
   form.elements.plugin.value = pluginName;
   form.scrollIntoView({behavior:'smooth', block:'start'});
@@ -803,12 +811,16 @@ function pluginUsage(item, apis) {
   const suggested = Array.isArray(manifest.routes) ? manifest.routes : [];
   // Declared endpoints stay visible after only some have been published; actual route settings take precedence.
   const listed = suggested.map(spec => {
-    const bound = routes.find(route => route.method === spec.method && route.path === spec.path);
-    const conflict = !bound && (apis || []).some(route => route.method === spec.method && route.path === spec.path);
+    const bound = routes.find(route => (route.methods?.length ? route.methods : [route.method]).includes(spec.method) && route.path === spec.path);
+    const conflict = !bound && (apis || []).some(route => (route.methods?.length ? route.methods : [route.method]).includes(spec.method) && route.path === spec.path);
     return {...spec, ...(bound || {unconfigured:true}), name:bound?.name || spec.name || spec.path.split('/').pop(),
-      auth_mode:bound?.auth_mode || spec.auth_mode, conflict};
+      auth_mode:bound?.auth_mode || spec.auth_mode, method:spec.method, conflict};
   });
-  listed.push(...routes.filter(route => !suggested.some(spec => route.method === spec.method && route.path === spec.path)));
+  for (const route of routes) {
+    for (const method of (route.methods?.length ? route.methods : [route.method])) {
+      if (!suggested.some(spec => method===spec.method && route.path===spec.path)) listed.push({...route,method});
+    }
+  }
   const count = routes.filter(route => route.enabled && route.published_at).length;
   const heading = `<div class="plugin-usage-heading"><div><h3>${esc(item.name)}</h3><span>${count} 条已发布接口${!item.enabled ? ' · 插件未启用' : ''}</span></div><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '已停用'}</span></div>`;
   const rows = listed.length ? listed.map(route => pluginRouteRow(item, route)).join('') : '<div class="plugin-empty">此插件未声明接口，也尚未绑定 API。请先参考插件文档，确认实际支持的路径，然后在“接口管理”手动创建并发布；控制台不会猜测接口。</div>';
@@ -948,3 +960,34 @@ async function initRecovery() {
 }
 
 initRecovery();
+
+async function initSetup() {
+  try {
+    const result = await api('/auth/v1/setup');
+    if (!result.available) { pendingSetupKey = ''; return; }
+    const card = $('#login-view .auth-card');
+    const section = document.createElement('section');
+    section.innerHTML = `<details class="setup-panel" ${pendingSetupKey?'open':''}><summary>首次部署 · 注册管理员</summary><p class="small">一次性密钥只用于创建首个管理员，注册成功后永久失效。用户名与邮箱独立设置。</p><form class="form-stack setup-form"><label class="field"><span class="field-label">一次性注册密钥</span><input name="key" type="password" required autocomplete="off" minlength="32" maxlength="128"></label><label class="field"><span class="field-label">用户名</span><input name="username" required autocomplete="username" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}" maxlength="64"></label><label class="field"><span class="field-label">邮箱</span><input name="email" type="email" required autocomplete="email" maxlength="254"></label><label class="field"><span class="field-label">密码</span><input name="password" type="password" required autocomplete="new-password" maxlength="72"></label><label class="field"><span class="field-label">确认密码</span><input name="confirm" type="password" required autocomplete="new-password" maxlength="72"></label><span class="field-hint">密码为 8–72 个 UTF-8 字节。</span><p class="message" role="status" aria-live="polite"></p><button type="submit">注册管理员</button></form></details>`;
+    card.append(section);
+    const form = section.querySelector('form');
+    form.elements.key.value = pendingSetupKey; pendingSetupKey = '';
+    form.querySelectorAll('input').forEach(input => { input.oninput = () => { form.elements.password.setCustomValidity(''); form.elements.confirm.setCustomValidity(''); }; });
+    form.onsubmit = async event => {
+      event.preventDefault(); if (form._saving) return;
+      const bytes = new TextEncoder().encode(form.elements.password.value).length;
+      form.elements.password.setCustomValidity(bytes<8||bytes>72?'密码必须为 8–72 个 UTF-8 字节。':'');
+      form.elements.confirm.setCustomValidity(form.elements.confirm.value===form.elements.password.value?'':'两次输入的密码不一致。');
+      if (!form.reportValidity()) return;
+      form._saving=true;
+      try {
+        await withSubmitting(form, '正在注册…', () => api('/auth/v1/setup', {method:'POST', body:JSON.stringify({key:form.elements.key.value,username:form.elements.username.value.trim(),email:form.elements.email.value.trim(),password:form.elements.password.value})}));
+        $('#username').value = form.elements.username.value.trim();
+        form.querySelectorAll('input').forEach(input=>{input.value='';}); section.remove();
+        notice('管理员注册成功，请使用设置的用户名和密码登录。',true,'auth'); $('#password').focus();
+      } catch(error) { section.querySelector('.message').textContent = error.status===429?'请求过于频繁，请稍后重试。':'注册失败：请检查密钥、账号格式，或确认注册链接是否已经使用。'; }
+      finally {form._saving=false;}
+    };
+    if (setupFragment) form.elements.username.focus();
+  } catch (_) { pendingSetupKey=''; }
+}
+initSetup();

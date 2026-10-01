@@ -492,8 +492,16 @@ func appendBounded[T any](items []T, item T, maximum int) []T {
 		return items
 	}
 	if len(items) >= maximum {
-		copy(items, items[len(items)-maximum+1:])
-		items = items[:maximum-1]
+		// Advance the retained window instead of shifting every entry on each
+		// request. Clear discarded references so old maps cannot retain secrets
+		// or prevent garbage collection. Append occasionally reallocates, giving
+		// amortized O(1) insertion without changing order or retention limits.
+		discarded := len(items) - maximum + 1
+		var zero T
+		for i := 0; i < discarded; i++ {
+			items[i] = zero
+		}
+		items = items[discarded:]
 	}
 	return append(items, item)
 }

@@ -74,13 +74,24 @@ FROM grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3
 FROM prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e AS prometheus
 
 # A fresh final filesystem: only the five monitoring binaries are copied in.
-FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime-base
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata passwd \
     && apt-get clean \
     && find /var/lib/apt/lists -type f -delete \
     && groupadd -g 65532 api-manager \
-    && useradd -u 65532 -g api-manager -M -s /usr/sbin/nologin api-manager
+    && useradd -u 65532 -g api-manager -M -s /usr/sbin/nologin api-manager \
+    && rm -rf /usr/share/doc /usr/share/man /usr/share/info /usr/share/lintian \
+       /usr/lib/apt /var/cache/apt /var/log/* \
+    && rm -f /usr/bin/apt /usr/bin/apt-* /usr/sbin/useradd /usr/sbin/userdel /usr/sbin/usermod \
+       /usr/sbin/groupadd /usr/sbin/groupdel /usr/sbin/groupmod \
+    && find /usr /bin /sbin -xdev -type f -perm /6000 -exec chmod a-s {} +
+
+# Flatten the prepared root filesystem so removed base packages do not remain in lower layers.
+# Preserve glibc, the POSIX shell, tar, CA roots and all timezones for monitoring/backup/Helm.
+FROM scratch AS runtime
+COPY --from=runtime-base / /
+ENV PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=loki /usr/bin/loki /usr/local/bin/loki
 COPY --from=patched-tempo /out/tempo /usr/local/bin/tempo
 COPY --from=prometheus /bin/prometheus /usr/local/bin/prometheus

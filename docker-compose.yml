@@ -22,7 +22,6 @@ services:
       PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
       PRODUCTION_MODE: "true"
       ALLOW_INTERNAL_PLAINTEXT: "true"
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_MODE: ${SMTP_MODE:-starttls}
@@ -30,7 +29,7 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD_FILE: /run/secrets/smtp_password
       PASSWORD_RESET_BASE_URL: ${PASSWORD_RESET_BASE_URL:-}
-      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      ADMIN_BOOTSTRAP_KEY_FILE: /run/secrets/admin_bootstrap_key
       CREDENTIAL_ENCRYPTION_KEY_FILE: /run/secrets/credential_encryption_key
       METRICS_TOKEN_FILE: /run/secrets/metrics_token
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
@@ -51,7 +50,7 @@ services:
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
       OTEL_EXPORTER_OTLP_INSECURE: "false"
     secrets:
-      - admin_password
+      - admin_bootstrap_key
       - smtp_password
       - credential_encryption_key
       - metrics_token
@@ -130,7 +129,7 @@ services:
 
 secrets:
   smtp_password: {file: "${SECRETS_DIR:-./secrets}/smtp_password"}
-  admin_password: {file: "${SECRETS_DIR:-./secrets}/admin_password"}
+  admin_bootstrap_key: {file: "${SECRETS_DIR:-./secrets}/admin_bootstrap_key"}
   credential_encryption_key: {file: "${SECRETS_DIR:-./secrets}/credential_encryption_key"}
   metrics_token: {file: "${SECRETS_DIR:-./secrets}/metrics_token"}
   postgres_password: {file: "${SECRETS_DIR:-./secrets}/postgres_password"}

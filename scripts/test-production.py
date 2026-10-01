@@ -51,7 +51,7 @@ class ProductionScriptTests(unittest.TestCase):
             self.assertTrue(preflight.validate(dict(self.env, API_MANAGER_IMAGE=image), ROOT))
 
     def test_duplicate_and_symlink_credentials_are_rejected(self):
-        source = self.folder / "admin_password"
+        source = self.folder / "admin_bootstrap_key"
         target = self.folder / "metrics_token"
         target.chmod(0o600)
         target.write_bytes(source.read_bytes())
@@ -61,9 +61,9 @@ class ProductionScriptTests(unittest.TestCase):
         target.symlink_to(source)
         self.assertTrue(preflight.validate(self.env, ROOT))
 
-    def test_admin_password_accepts_eight_utf8_bytes(self):
-        target = self.folder / "admin_password"
-        for password, valid in (("12345678", True), ("密码12", True), ("1234567", False), ("密1234", False), ("x" * 73, False)):
+    def test_bootstrap_key_requires_32_bytes(self):
+        target = self.folder / "admin_bootstrap_key"
+        for password, valid in (("x"*32, True), ("密"*11, True), ("x"*31, False), ("密"*10, False), ("x" * 73, True)):
             target.chmod(0o600)
             target.write_text(password)
             target.chmod(0o444)

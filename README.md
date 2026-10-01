@@ -21,19 +21,23 @@ python3 scripts/init-production-secrets.py
 docker compose up -d
 ```
 
-初始化脚本生成 `secrets/` 目录及五个相互独立的凭据，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
+初始化脚本生成 `secrets/` 目录及五个相互独立的凭据和可选 SMTP 密码文件，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
 
 访问 `http://127.0.0.1:8080/admin/`，使用用户名和密码登录。
 
-- **首次部署**：默认用户名 `admin`，初始密码在 `secrets/admin_password`；可通过 `ADMIN_USERNAME` 设置首次创建的用户名。
-- **已有部署**：继续使用原用户名（或邮箱）及密码。自动初始化不会覆盖已有也不会重置密码。
+- **首次部署**：使用 `secrets/admin_bootstrap_key` 中的一次性密钥进入管理员注册页，自行设置用户名、独立邮箱和密码；不再生成管理员密码。注册成功后密钥永久失效，重启或删除账号都不会重新开放注册。
+- **升级部署**：保留已有账号、密码、角色和会话；一次性注册入口自动关闭。
 - 管理控制台使用服务端会话，默认有效期 12 小时；退出登录会使会话失效。业务 KEY、指标 KEY 都不能代替账号登录。
 
 ```bash
-cat secrets/admin_password
+python3 - <<'PY'
+from pathlib import Path
+key = Path("secrets/admin_bootstrap_key").read_text().strip()
+print("http://127.0.0.1:8080/admin/#setup=" + key)
+PY
 ```
 
-请仅在可信终端读取密码，不要把密码放入 URL、聊天记录或源代码。
+请仅在可信终端读取一次性密钥，不要将密码或完整注册链接分享、提交到代码仓库或写入日志。
 
 ## API 验证方式
 
@@ -73,7 +77,7 @@ docker compose up -d --force-recreate api-manager
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `ADMIN_USERNAME` | `admin` | 仅用于首次自动创建管理员，不会修改已有用户 |
+| `ADMIN_BOOTSTRAP_KEY_FILE` | `/run/secrets/admin_bootstrap_key` | 首个管理员的一次性注册密钥；已有账号时不可使用 |
 | `API_MANAGER_IMAGE` | `docker.io/dingding229/api-manager:latest` | Docker Hub 镜像标签 |
 | `SECRETS_DIR` | `./secrets` | 只读凭据文件目录 |
 | `API_BIND_ADDR` | `127.0.0.1` | 统一入口的宿主机绑定地址 |
@@ -203,3 +207,13 @@ ADMIN_PATH=/operations
 ## 镜像构建
 
 `Dockerfile` 从不可变上游源码构建全部观测组件。`Dockerfile.release` 仅从已审核且摘要固定的发行镜像提取五个观测组件执行文件，最终镜像使用独立的干净系统基底，并重建主程序与静态前端；不会继承提取来源的其他程序、静态资源、镜像层或端口配置。发布前仍需扫描最终镜像。部署的运行镜像保持 Docker Hub `latest`，构建基底固定不影响部署更新。
+
+### 管理员注册与接口方法
+
+一次性注册链接中的密钥放在 URL 片段 `#setup=`，不会发送到 HTTP 访问日志；页面读取后立即清除地址栏片段。请将示例链接的地址和 `/admin/` 路径替换为实际 HTTPS 地址和自定义后台路径，不要分享注册链接。首次注册必填独立邮箱；升级不会覆盖旧账号。注册完成后使用用户名和密码登录，密码长度为 **8–72 个 UTF-8 字节**。
+
+每个接口可选择一种或多种请求方法，所选方法共用鉴权、配额、插件/上游和发布状态。鉴权下拉仅包含 **KEY** 和 **无需验证**。旧版单方法接口会自动迁移；OpenAPI 导出和公开接口文档分别为每种方法生成调用说明。
+
+生产环境必须通过可信 HTTPS 入口访问。Compose 默认只监听回环地址，示例中的 HTTP 仅用于本机连通性检查；如果直接暴露公网 HTTP 端口，密码、会话和调用密钥仍存在被窃听风险，不能视为完整的生产安全配置。SMTP 未配置时找回密码不可用，请配置邮件服务并实际验证送达。
+
+更新前先备份数据库、Secrets 和数据卷。不要运行全局 `docker system prune --volumes`；测试清理应只针对单独测试项目及其明确命名的卷，保留生产账号、接口、凭据、审计记录和观测数据。

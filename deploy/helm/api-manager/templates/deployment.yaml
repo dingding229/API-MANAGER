@@ -68,8 +68,8 @@ spec:
             - name: SMTP_PASSWORD_FILE
               value: /run/secrets/SMTP_PASSWORD
             {{- end }}
-            - name: ADMIN_PASSWORD_FILE
-              value: /run/secrets/ADMIN_PASSWORD
+            - name: ADMIN_BOOTSTRAP_KEY_FILE
+              value: /run/secrets/ADMIN_BOOTSTRAP_KEY
             - name: POSTGRES_DSN_FILE
               value: /run/secrets/POSTGRES_DSN
             - name: CREDENTIAL_ENCRYPTION_KEY_FILE

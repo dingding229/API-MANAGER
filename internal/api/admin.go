@@ -227,7 +227,7 @@ func requiredPermission(r *http.Request) string {
 		return "user.read"
 	case strings.HasPrefix(path, "/admin/v1/users/") && strings.HasSuffix(path, "/profile") && r.Method == http.MethodPut:
 		return "user.manage"
-	case path == "/admin/v1/users" && r.Method == http.MethodPost, strings.Contains(path, "/roles"), strings.Contains(path, "/status"):
+	case path == "/admin/v1/users" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/users/") && r.Method == http.MethodPut && (strings.HasSuffix(path, "/roles") || strings.HasSuffix(path, "/status")):
 		return "user.manage"
 	case path == "/admin/v1/roles" && r.Method == http.MethodGet, path == "/admin/v1/permissions":
 		return "user.read"
@@ -360,17 +360,15 @@ func (a *Admin) setPublished(w http.ResponseWriter, r *http.Request, published b
 	} else {
 		api.PublishedAt = nil
 	}
-	if err := a.store.UpdateAPI(api); err != nil {
-		writeStoreError(w, err)
-		return
-	}
 	var release model.Release
 	if published {
-		release, err = a.store.CreateRelease(api)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create release failed"})
-			return
-		}
+		release, err = a.updateAndRelease(api)
+	} else {
+		err = a.store.UpdateAPI(api)
+	}
+	if err != nil {
+		writeStoreError(w, err)
+		return
 	}
 	a.logger.Info("api publication changed", "api_id", api.ID, "published", published, "release_version", release.Version)
 	action := "api.unpublish"
@@ -442,13 +440,9 @@ func (a *Admin) rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	api.Enabled, api.PublishedAt, api.UpdatedAt = true, &now, now
-	if err := a.store.UpdateAPI(api); err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	newRelease, err := a.store.CreateRelease(api)
+	newRelease, err := a.updateAndRelease(api)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create rollback release failed"})
+		writeStoreError(w, err)
 		return
 	}
 	a.recordAudit(r, "api.rollback", "api", api.ID, http.StatusOK, map[string]any{"name": api.Name, "method": api.Method, "path": api.Path, "rolled_back_from": version, "release_version": newRelease.Version})
@@ -839,6 +833,10 @@ func (a *Admin) assignUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.userManager.AssignRoles(id, request.Roles); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeStoreError(w, err)
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1298,21 +1296,23 @@ func (a *Admin) exportOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	}
 	sort.Slice(apis, func(i, j int) bool { return apis[i].Path < apis[j].Path })
 	for _, api := range apis {
-		method := strings.ToLower(api.Method)
-		if paths[api.Path] == nil {
-			paths[api.Path] = map[string]any{}
+		for _, selectedMethod := range api.HTTPMethods() {
+			method := strings.ToLower(selectedMethod)
+			if paths[api.Path] == nil {
+				paths[api.Path] = map[string]any{}
+			}
+			operation := map[string]any{"operationId": api.ID + "_" + method, "summary": api.Name, "description": api.Description, "responses": map[string]any{fmt.Sprint(responseStatus(api)): map[string]any{"description": "Success"}}}
+			if len(api.RequestSchema) > 0 {
+				operation["requestBody"] = map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": json.RawMessage(api.RequestSchema)}}}
+			}
+			if len(api.ResponseSchema) > 0 {
+				operation["responses"] = map[string]any{fmt.Sprint(responseStatus(api)): map[string]any{"description": "Success", "content": map[string]any{"application/json": map[string]any{"schema": json.RawMessage(api.ResponseSchema)}}}}
+			}
+			if api.AuthMode == "api_key" {
+				operation["security"] = []map[string][]string{{"ApiKeyAuth": {}}}
+			}
+			paths[api.Path][method] = operation
 		}
-		operation := map[string]any{"operationId": api.ID, "summary": api.Name, "description": api.Description, "responses": map[string]any{fmt.Sprint(responseStatus(api)): map[string]any{"description": "Success"}}}
-		if len(api.RequestSchema) > 0 {
-			operation["requestBody"] = map[string]any{"required": true, "content": map[string]any{"application/json": map[string]any{"schema": json.RawMessage(api.RequestSchema)}}}
-		}
-		if len(api.ResponseSchema) > 0 {
-			operation["responses"] = map[string]any{fmt.Sprint(responseStatus(api)): map[string]any{"description": "Success", "content": map[string]any{"application/json": map[string]any{"schema": json.RawMessage(api.ResponseSchema)}}}}
-		}
-		if api.AuthMode == "api_key" {
-			operation["security"] = []map[string][]string{{"ApiKeyAuth": {}}}
-		}
-		paths[api.Path][method] = operation
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"openapi": "3.0.3",
@@ -1332,10 +1332,8 @@ func responseStatus(api model.API) int {
 }
 
 func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, updatedAt time.Time) model.API {
-	return model.API{PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return model.API{PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: primaryMethod(request), Methods: normalizedMethods(request), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
-
-var allowedAPIMethods = map[string]bool{"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}
 
 func normalizeAPIMethod(method string) string { return strings.ToUpper(strings.TrimSpace(method)) }
 
@@ -1356,8 +1354,8 @@ func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) err
 	if strings.TrimSpace(request.Name) == "" {
 		return errors.New("name is required")
 	}
-	if !allowedAPIMethods[normalizeAPIMethod(request.Method)] {
-		return errors.New("method must be exactly one of GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+	if _, err := model.NormalizeMethods(request.Method, request.Methods); err != nil {
+		return err
 	}
 	if !strings.HasPrefix(request.Path, "/") || strings.Contains(request.Path, "//") {
 		return errors.New("path must start with / and must not contain //")
@@ -1472,7 +1470,7 @@ func (a *Admin) checkRouteConflict(excludeID, method, path string) error {
 		return errors.New("API routes unavailable")
 	}
 	for _, existing := range apis {
-		if existing.ID == excludeID || !strings.EqualFold(existing.Method, method) || !strings.Contains(existing.Path, "{") {
+		if existing.ID == excludeID || !existing.AllowsMethod(method) || !strings.Contains(existing.Path, "{") {
 			continue
 		}
 		parts := strings.Split(strings.Trim(existing.Path, "/"), "/")
@@ -1515,4 +1513,28 @@ func defaultAuthMode(mode string) string {
 		return "none"
 	}
 	return "api_key"
+}
+
+func normalizedMethods(request model.CreateAPIRequest) []string {
+	methods, _ := model.NormalizeMethods(request.Method, request.Methods)
+	return methods
+}
+func primaryMethod(request model.CreateAPIRequest) string {
+	methods := normalizedMethods(request)
+	if len(methods) == 0 {
+		return ""
+	}
+	return methods[0]
+}
+
+func (a *Admin) updateAndRelease(api model.API) (model.Release, error) {
+	if atomic, ok := a.store.(interface {
+		UpdateAndRelease(model.API) (model.Release, error)
+	}); ok {
+		return atomic.UpdateAndRelease(api)
+	}
+	if err := a.store.UpdateAPI(api); err != nil {
+		return model.Release{}, err
+	}
+	return a.store.CreateRelease(api)
 }

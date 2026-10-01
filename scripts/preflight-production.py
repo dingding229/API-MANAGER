@@ -11,7 +11,7 @@ import stat
 DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
 IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
-FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
+FILES = ("admin_bootstrap_key", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
 
 
 def validate(environ, project_root):
@@ -45,8 +45,8 @@ def validate(environ, project_root):
             if any(c in value for c in ("\r", "\n", "\x00")):
                 errors.append("smtp_password must be a single-line optional secret")
             continue
-        if len(value.encode()) < (8 if name == "admin_password" else 32) or (name == "admin_password" and len(value.encode()) > 72) or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
-            errors.append(f"{name} must contain a single-line {'8..72' if name == 'admin_password' else '32+'} byte secret")
+        if len(value.encode()) < 32 or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
+            errors.append(f"{name} must contain a single-line 32+ byte secret")
         values.append(value)
     if len(set(values)) != len(values):
         errors.append("All credentials must be distinct")
@@ -67,7 +67,7 @@ def main():
         service = config["services"]["api-manager"]
         effective = dict(os.environ)
         effective["API_MANAGER_IMAGE"] = service["image"]
-        effective["SECRETS_DIR"] = str(Path(config["secrets"]["admin_password"]["file"]).parent)
+        effective["SECRETS_DIR"] = str(Path(config["secrets"]["admin_bootstrap_key"]["file"]).parent)
         effective["OBSERVABILITY_STACK_ENABLED"] = str(service["environment"]["OBSERVABILITY_STACK_ENABLED"])
         effective["API_MEMORY_LIMIT"] = str(service["mem_limit"])
         errors = validate(effective, project_root)

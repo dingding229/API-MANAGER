@@ -19,13 +19,24 @@ RUN npm run build
 FROM docker.io/dingding229/api-manager:0.3.2@sha256:c796dc9bea208b22183a768c0cbcd4cfe2489d4b1b5ab4f448ef999290bd4e40 AS monitoring-binaries
 
 # A fresh final filesystem: only the five monitoring binaries are copied in.
-FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime-base
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata passwd \
     && apt-get clean \
     && find /var/lib/apt/lists -type f -delete \
     && groupadd -g 65532 api-manager \
-    && useradd -u 65532 -g api-manager -M -s /usr/sbin/nologin api-manager
+    && useradd -u 65532 -g api-manager -M -s /usr/sbin/nologin api-manager \
+    && rm -rf /usr/share/doc /usr/share/man /usr/share/info /usr/share/lintian \
+       /usr/lib/apt /var/cache/apt /var/log/* \
+    && rm -f /usr/bin/apt /usr/bin/apt-* /usr/sbin/useradd /usr/sbin/userdel /usr/sbin/usermod \
+       /usr/sbin/groupadd /usr/sbin/groupdel /usr/sbin/groupmod \
+    && find /usr /bin /sbin -xdev -type f -perm /6000 -exec chmod a-s {} +
+
+# Flatten the prepared root filesystem so removed base packages do not remain in lower layers.
+# Preserve glibc, the POSIX shell, tar, CA roots and all timezones for monitoring/backup/Helm.
+FROM scratch AS runtime
+COPY --from=runtime-base / /
+ENV PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=monitoring-binaries /usr/local/bin/loki /usr/local/bin/loki
 COPY --from=monitoring-binaries /usr/local/bin/tempo /usr/local/bin/tempo
 COPY --from=monitoring-binaries /usr/local/bin/prometheus /usr/local/bin/prometheus

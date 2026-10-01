@@ -36,7 +36,6 @@ env:
   HTTP_ADDR: ":8080"
   ADMIN_PATH: /admin
   PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
-  ADMIN_USERNAME: admin
   SMTP_HOST: ""
   SMTP_PORT: "587"
   SMTP_MODE: starttls
@@ -57,7 +56,7 @@ env:
 existingSecret: "" # use a pre-created Secret instead of chart-managed values
 
 secrets:
-  ADMIN_PASSWORD: ""
+  ADMIN_BOOTSTRAP_KEY: ""
   SMTP_PASSWORD: ""
   REDIS_PASSWORD: ""
   CREDENTIAL_ENCRYPTION_KEY: ""

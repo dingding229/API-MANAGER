@@ -10,7 +10,7 @@ import (
 func setValidTestEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "USER_SESSION_TTL", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE", "SMTP_HOST", "SMTP_PORT", "SMTP_MODE", "SMTP_FROM", "SMTP_USERNAME", "PASSWORD_RESET_BASE_URL",
+		"ADMIN_BOOTSTRAP_KEY", "ADMIN_BOOTSTRAP_KEY_FILE", "ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "USER_SESSION_TTL", "SMTP_PASSWORD", "SMTP_PASSWORD_FILE", "SMTP_HOST", "SMTP_PORT", "SMTP_MODE", "SMTP_FROM", "SMTP_USERNAME", "PASSWORD_RESET_BASE_URL",
 		"CREDENTIAL_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY_FILE", "POSTGRES_DSN", "POSTGRES_DSN_FILE",
 		"REDIS_PASSWORD", "REDIS_PASSWORD_FILE", "API_UPSTREAM_CREDENTIALS", "API_UPSTREAM_CREDENTIALS_FILE",
 		"METRICS_TOKEN", "METRICS_TOKEN_FILE",
@@ -115,21 +115,19 @@ func TestPrivateComposeDatastoresAreTheOnlyPlaintextException(t *testing.T) {
 	}
 }
 
-func TestAdminPasswordUsesEightByteMinimum(t *testing.T) {
+func TestBootstrapKeyHasIndependent32ByteMinimum(t *testing.T) {
 	setValidTestEnvironment(t)
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		password string
-		valid    bool
-	}{
-		{"12345678", true}, {"密码12", true}, {"1234567", false}, {"密1234", false}, {strings.Repeat("a", 73), false},
-	} {
-		cfg.AdminPassword = tc.password
+		key   string
+		valid bool
+	}{{strings.Repeat("b", 32), true}, {strings.Repeat("b", 31), false}, {cfg.CredentialEncryptionKey, false}} {
+		cfg.AdminBootstrapKey = tc.key
 		if err := cfg.Validate(); (err == nil) != tc.valid {
-			t.Errorf("%d-byte password: %v", len(tc.password), err)
+			t.Errorf("bootstrap key validation: %v", err)
 		}
 	}
 }
@@ -156,8 +154,8 @@ func TestOptionalSMTPPasswordFileMayBeEmpty(t *testing.T) {
 	if cfg.SMTPPassword != "" {
 		t.Fatal("empty SMTP secret altered")
 	}
-	t.Setenv("ADMIN_PASSWORD_FILE", file)
+	t.Setenv("ADMIN_BOOTSTRAP_KEY_FILE", file)
 	if _, err := Load(); err == nil {
-		t.Fatal("empty mandatory admin password secret accepted")
+		t.Fatal("empty mandatory bootstrap key secret accepted")
 	}
 }

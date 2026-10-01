@@ -22,6 +22,38 @@ func sessionToken(r *http.Request) string {
 }
 func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/setup":
+		available, err := h.service.SetupAvailable()
+		if err != nil {
+			writeJSON(w, 503, map[string]string{"error": "registration unavailable"})
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"available": available})
+	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/setup":
+		var request struct {
+			Key      string `json:"key"`
+			Username string `json:"username"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&request) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			writeJSON(w, 400, map[string]string{"error": "invalid JSON body"})
+			return
+		}
+		u, err := h.service.RegisterInitialAdmin(request.Key, request.Username, request.Email, request.Password)
+		if err != nil {
+			status := 403
+			if errors.Is(err, ErrInvalidProfile) {
+				status = 400
+			}
+			writeJSON(w, status, map[string]string{"error": "registration unavailable, invalid key or invalid profile"})
+			return
+		}
+		h.service.RecordAudit(audit.Actor{ID: u.ID, Type: "user", Email: u.Username}, r, "auth.setup", "user", u.ID, 201, nil)
+		writeJSON(w, 201, map[string]any{"user": u})
+
 	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/recovery":
 		h.recoveryStatus(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/forgot-password":

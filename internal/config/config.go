@@ -20,8 +20,7 @@ type Config struct {
 	PublicAPIBaseURL                                                               string
 	AdminPath                                                                      string
 	PublicUIDir                                                                    string
-	AdminUsername                                                                  string
-	AdminPassword                                                                  string
+	AdminBootstrapKey                                                              string
 	SMTPHost, SMTPUsername, SMTPPassword, SMTPFrom, SMTPMode, PasswordResetBaseURL string
 	SMTPPort                                                                       int
 	UserSessionTTL                                                                 time.Duration
@@ -57,7 +56,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD"} {
+	for _, name := range []string{"ADMIN_BOOTSTRAP_KEY", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -154,8 +153,7 @@ func Load() (Config, error) {
 		PublicAPIBaseURL:    env("PUBLIC_API_BASE_URL", ""),
 		AdminPath:           env("ADMIN_PATH", "/admin"),
 		PublicUIDir:         env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
-		AdminUsername:       env("ADMIN_USERNAME", "admin"),
-		AdminPassword:       secrets["ADMIN_PASSWORD"],
+		AdminBootstrapKey:   secrets["ADMIN_BOOTSTRAP_KEY"],
 		SMTPHost:            env("SMTP_HOST", ""), SMTPUsername: env("SMTP_USERNAME", ""), SMTPPassword: secrets["SMTP_PASSWORD"], SMTPFrom: env("SMTP_FROM", ""), SMTPMode: env("SMTP_MODE", "starttls"), PasswordResetBaseURL: env("PASSWORD_RESET_BASE_URL", ""), SMTPPort: smtpPort,
 		UserSessionTTL:            userSessionTTL,
 		ProductionMode:            productionMode,
@@ -289,8 +287,8 @@ func (c Config) Validate() error {
 	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {
 		return errors.New("USER_SESSION_TTL must be between 1 second and 24 hours")
 	}
-	if c.AdminPassword != "" && (len(c.AdminPassword) < 8 || len(c.AdminPassword) > 72 || c.AdminPassword == c.CredentialEncryptionKey || c.AdminPassword == c.RedisPassword || c.AdminPassword == c.MetricsToken) {
-		return errors.New("ADMIN_PASSWORD must be a distinct 8..72 byte password")
+	if c.AdminBootstrapKey != "" && (len(c.AdminBootstrapKey) < 32 || c.AdminBootstrapKey == c.CredentialEncryptionKey || c.AdminBootstrapKey == c.RedisPassword || c.AdminBootstrapKey == c.MetricsToken) {
+		return errors.New("ADMIN_BOOTSTRAP_KEY must be a distinct secret of at least 32 bytes")
 	}
 
 	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 5*time.Minute {

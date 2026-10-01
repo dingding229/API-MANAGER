@@ -14,6 +14,7 @@ type API struct {
 	Name               string            `json:"name"`
 	Description        string            `json:"description,omitempty"`
 	Method             string            `json:"method"`
+	Methods            []string          `json:"methods,omitempty"`
 	Path               string            `json:"path"`
 	AuthMode           string            `json:"auth_mode"`
 	AuthConfig         map[string]string `json:"auth_config,omitempty"`
@@ -48,6 +49,7 @@ type CreateAPIRequest struct {
 	Name               string            `json:"name"`
 	Description        string            `json:"description"`
 	Method             string            `json:"method"`
+	Methods            []string          `json:"methods,omitempty"`
 	Path               string            `json:"path"`
 	AuthMode           string            `json:"auth_mode"`
 	AuthConfig         map[string]string `json:"auth_config"`
