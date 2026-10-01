@@ -6,6 +6,10 @@ import (
 )
 
 type API struct {
+	PublicVisible      bool              `json:"public_visible"`
+	PublicTitle        string            `json:"public_title"`
+	PublicSummary      string            `json:"public_summary"`
+	PublicCategory     string            `json:"public_category"`
 	ID                 string            `json:"id"`
 	Name               string            `json:"name"`
 	Description        string            `json:"description,omitempty"`
@@ -37,6 +41,10 @@ type API struct {
 }
 
 type CreateAPIRequest struct {
+	PublicVisible      bool              `json:"public_visible"`
+	PublicTitle        string            `json:"public_title"`
+	PublicSummary      string            `json:"public_summary"`
+	PublicCategory     string            `json:"public_category"`
 	Name               string            `json:"name"`
 	Description        string            `json:"description"`
 	Method             string            `json:"method"`
@@ -109,6 +117,7 @@ type CreateUserRequest struct {
 }
 
 type LoginRequest struct {
+	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -203,4 +212,10 @@ type AuditLogPage struct {
 	Page     int        `json:"page"`
 	PageSize int        `json:"page_size"`
 	Total    int64      `json:"total"`
+}
+
+type Session struct {
+	Hash      string    `json:"-"`
+	UserID    string    `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
 }

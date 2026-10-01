@@ -12,9 +12,10 @@
       <div class="auth-card">
         <p class="eyebrow">API MANAGER</p>
         <h1>管理控制台</h1>
-        <p class="muted">使用管理员 KEY 登录，无需账号密码或首次初始化。</p>
+        <p class="muted">使用用户名和密码登录，业务 API 可选择 KEY 或无需验证。</p>
         <form id="login-form" class="form-stack">
-          <label class="field" for="admin-key"><span class="field-label">管理员 KEY</span><input id="admin-key" type="password" required autocomplete="current-password" minlength="32" placeholder="管理员 KEY" aria-describedby="key-hint"><span id="key-hint" class="field-hint">使用 secrets/admin_token 中的 KEY。KEY 仅保存在当前浏览器会话中。</span></label>
+          <label class="field" for="username"><span class="field-label">用户名</span><input id="username" name="username" type="text" required autocomplete="username" placeholder="用户名或原有邮箱"></label>
+          <label class="field" for="password"><span class="field-label">密码</span><input id="password" name="password" type="password" required autocomplete="current-password" minlength="12" maxlength="72" placeholder="密码"><span class="field-hint">首次部署默认用户名 admin；初始密码保存在 secrets/admin_password。</span></label>
           <button type="submit">登录</button>
         </form>
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
@@ -28,6 +29,8 @@
           <button data-page="overview" class="active">总览</button>
           <button data-page="apis" data-permission="api.read">接口管理</button>
           <button data-page="credentials" data-permission="credential.read">调用凭证</button>
+          <button data-page="users" data-permission="user.read">用户管理</button>
+          <button data-page="roles" data-permission="user.read">角色与权限</button>
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>

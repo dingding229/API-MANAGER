@@ -13,8 +13,8 @@ func ThrottleAdmin(limiter ratelimit.Limiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit, scope := 0, ""
 		switch {
-		case r.URL.Path == "/auth/v1/me":
-			limit, scope = 30, "key-login"
+		case r.URL.Path == "/auth/v1/login":
+			limit, scope = 10, "login"
 		case len(r.URL.Path) >= 7 && r.URL.Path[:7] == "/admin/":
 			limit, scope = 120, "admin"
 		}

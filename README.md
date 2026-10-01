@@ -21,33 +21,40 @@ python3 scripts/init-production-secrets.py
 docker compose up -d
 ```
 
-初始化脚本生成 `secrets/` 目录及六个相互独立的凭据，不会显示或覆盖已有值。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
+初始化脚本生成 `secrets/` 目录及六个相互独立的凭据，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
 
-访问 `http://127.0.0.1:8080/console/`，输入 `secrets/admin_token` 中的**管理员 KEY**即可登录，无需创建账号或初始化管理员：
+访问 `http://127.0.0.1:8080/console/`，使用用户名和密码登录。
+
+- **首次部署**：默认用户名 `admin`，初始密码在 `secrets/admin_password`；可通过 `ADMIN_USERNAME` 设置首次创建的用户名。
+- **已有部署**：继续使用原用户名（或邮箱）及密码。自动初始化不会覆盖已有账号，也不会重置密码。
+- 管理控制台使用服务端会话，默认有效期 12 小时；退出登录会使会话失效。业务 KEY、指标 KEY 都不能代替账号登录。
 
 ```bash
-cat secrets/admin_token
+cat secrets/admin_password
 ```
 
-请仅在可信终端读取 KEY，不要把 KEY 放入 URL、工单、聊天记录或源代码。
+请仅在可信终端读取密码，不要把密码放入 URL、聊天记录或源代码。
 
-## KEY 认证
+## API 验证方式
 
-API Manager 仅使用 KEY 认证。
+业务 API 仅提供两种方式：
 
-| KEY | 用途 | 来源 |
-| --- | --- | --- |
-| 管理员 KEY | 控制台及管理 API，拥有全部管理权限 | `secrets/admin_token` |
-| 调用 KEY | 已发布的业务 API；可设置有效期、吊销或轮换 | 控制台“调用凭证” |
-| 指标 KEY | `/metrics` 抓取；不能访问管理 API | `secrets/metrics_token` |
+| 方式 | 说明 |
+| --- | --- |
+| **KEY**（默认） | 必须携带有效、未过期且未吊销的调用 KEY |
+| **无需验证** | 显式配置为 `none`，允许匿名调用；仍执行限流及参数校验 |
 
-业务请求使用：
+KEY 请求示例：
 
 ```bash
 curl -H 'X-API-Key: <调用 KEY>' http://127.0.0.1:8080/api/example
 ```
 
-也支持 `Authorization: Bearer <KEY>` 作为 KEY 的传输格式。不要同时提供两个认证头。所有业务接口默认要求 KEY，不能设置免认证或其他认证模式。
+也支持 `Authorization: Bearer <KEY>` 作为业务 KEY 的传输格式。不要同时提供两个认证头。调用 KEY 在控制台“调用凭证”中创建、轮换和吊销。
+
+无需验证的接口应仅用于公开数据。将接口的“鉴权”设置为“无需验证”后保存、发布，即可不带 KEY 调用。
+
+控制台用户名密码会话、业务调用 KEY 和独立指标 KEY 相互隔离。`secrets/metrics_token` 仅用于 `/metrics` 抓取，不能登录控制台或访问管理 API。
 
 客户端认证头不会转发到上游。需要调用上游 KEY 时，使用服务端托管且绑定目标 Origin 的 `upstream_auth_ref`，不要把上游秘密写入接口定义。
 
@@ -66,6 +73,7 @@ docker compose up -d --force-recreate api-manager
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
+| `ADMIN_USERNAME` | `admin` | 仅用于首次自动创建管理员，不会修改已有用户 |
 | `API_MANAGER_IMAGE` | `docker.io/dingding229/api-manager:latest` | Docker Hub 镜像标签 |
 | `SECRETS_DIR` | `./secrets` | 只读凭据文件目录 |
 | `API_BIND_ADDR` | `127.0.0.1` | API 与 Grafana 的宿主机绑定地址 |
@@ -126,12 +134,40 @@ docker compose up -d redis api-manager
 - 数据库和 Redis 不向宿主机开放端口，仅连接 Compose 的内部网络，并启用独立密码认证。
 - 内部数据库连接通过显式配置允许私有 Docker 网络内的明文链路；这不等于端到端加密。需要抵御宿主机或网络管理员读取流量时，应使用外部 TLS 数据库。
 - 外部 PostgreSQL 必须使用 `sslmode=verify-full`，外部 Redis 和上游 API 必须使用 TLS。TLS 使用系统信任根，不提供私有 CA 注入或跳过证书验证。
-- 公网访问必须使用 HTTPS 反向代理，不要直接暴露明文管理端口。管理员 KEY 不应交给业务调用方。
-- 控制台 KEY 只保存在当前浏览器会话中，退出会清除缓存；轮换管理员 KEY 后需重新创建 API 容器。
-- 更新旧部署前先备份，保留原管理员 KEY、凭据加密密钥及 PostgreSQL 密码。外部数据库中的数据需要先迁移到新 PostgreSQL，不能仅启动一个空数据库替代。
-- 已有接口会转换为 KEY 保护；旧认证快照不能直接回滚为其他模式。旧插件清单中的认证声明需更新为 `api_key`。
+- 公网访问必须使用 HTTPS 反向代理，不要直接暴露明文管理端口。管理账号和密码不应交给业务调用方。
+- 控制台会话只保存在当前浏览器会话中；退出会清除缓存并使服务端会话失效。用户被禁用后，其已有会话立即失效。
+- 更新旧部署前先备份，保留原账号密码、凭据加密密钥及 PostgreSQL 密码。外部数据库中的数据需要先迁移到新 PostgreSQL，不能仅启动一个空数据库替代。
+- 已有 KEY 接口不会自动降级为公开接口；需要公开时请在控制台显式改为“无需验证”。旧插件认证声明只允许 `api_key` 或 `none`。
 - 单实例及同容器观测栈不提供组件级隔离或高可用。上线前完成容量测试和备份恢复验证。
 
 ## Kubernetes
 
-`deploy/helm/api-manager` 为可选 Helm Chart，同样使用 Docker Hub `latest` 和 KEY 认证。Kubernetes 模式需要现有 PostgreSQL、Redis、Secret、持久卷及明确的 NetworkPolicy 放行规则；外部数据库默认要求 TLS。常规部署优先使用上面的单文件 Compose。
+`deploy/helm/api-manager` 为可选 Helm Chart，同样使用 Docker Hub `latest` 、用户名密码登录及业务 API KEY/无需验证。Kubernetes 模式需要现有 PostgreSQL、Redis、Secret、持久卷及明确的 NetworkPolicy 放行规则；外部数据库默认要求 TLS。常规部署优先使用上面的单文件 Compose。
+
+## 公开接口文档
+
+主程序镜像同时包含管理后台、Fumadocs 公开前端和观测组件。生产部署只运行三个服务及镜像：`api-manager`、`postgres`、`redis`，不需要单独的前端容器或 Node.js 运行环境。
+
+- 管理后台：`http://127.0.0.1:8080/console/`
+- 公开文档：`http://127.0.0.1:8081/`
+- Grafana（启用观测栈时）：`http://127.0.0.1:3000/`
+
+公开端口独立于管理端口，仅提供静态文档和 GET `/catalog.json`，不暴露 `/admin/`、`/auth/`、`/console/` 或业务代理路由。浏览器不共享后台会话、存储或管理接口；目录响应不接收浏览器的 Cookie、会话、KEY 或目标地址。
+
+### 发布公开接口
+
+在后台编辑接口时填写独立的公开标题、分类和说明，并开启“在公开前端展示此接口”。接口必须同时满足：已启用、已发布、明确开启公开开关，且认证方式为 `KEY` 或“无需验证”。默认隐藏；关闭公开开关后，目录输出即移除对应接口。
+
+目录只包含公开标题、说明、分类、方法、路径、认证方式和参数名称/位置/类型/必填标记。不输出数据库 ID、私有说明、上游地址、插件信息、凭据、管理 KEY、Schema 示例/默认值或真实响应。页面不提供登录、KEY 输入或在线调用功能。
+
+`PUBLIC_API_BASE_URL=https://api.example.com` 设置示例使用的业务域名；不设置时使用占位域名。公网访问应使用独立 HTTPS 域名，只将公开文档端口转发给公众；管理端口限定可信网络，业务入口仅转发 `/api/`。
+
+公开前端源码位于 `public-ui/`，构建时通过 Next.js 静态导出写入主程序镜像，Fumadocs MIT 许可证保留在 `public-ui/LICENSE.fumadocs`。更新主程序镜像会同时更新两套页面。
+
+## 用户与权限扩展
+
+后台登录使用用户名（兼容邮箱）和密码，密码仅保存 bcrypt 哈希。登录返回服务端随机会话，数据库只保存会话哈希；会话不是 JWT 或业务 KEY。退出、过期和禁用用户会使会话失效，角色权限在每次管理请求时重新检查。
+
+已保留用户、角色、权限、用户角色关系和会话表，以及用户创建、状态修改、角色分配和自定义角色接口，便于后续增加多用户能力。当前采用共享 API 资源的 RBAC；这不等于租户级数据隔离。后续增加独立租户时，应同时实现资源归属与查询过滤。
+
+旧版本遗留的 `admin_token` 文件不再用于认证或挂载；升级时不删除已有凭据文件，也不重置已有账号密码。

@@ -19,3 +19,11 @@ integrations
 # Local mounted credentials are never source/build artifacts.
 secrets/
 .env.*
+
+.remote-test-secrets/
+
+public-ui/node_modules
+public-ui/.next
+**/*.tsbuildinfo
+
+public-ui/out

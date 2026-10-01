@@ -21,7 +21,7 @@ func TestOnlyKeysAuthorizeBusinessRoutes(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "http://example.com/api/test", nil)
 		r.Header.Set("X-API-Key", key)
 		err := Authorize(model.API{AuthMode: mode}, s, r)
-		if (err == nil) != (mode == "api_key") {
+		if (err == nil) != (mode == "api_key" || mode == "none") {
 			t.Fatalf("mode=%q error=%v", mode, err)
 		}
 	}
@@ -50,5 +50,12 @@ func TestExpiredAndRevokedKeysAreRejected(t *testing.T) {
 		if _, valid := ValidateAPIKey(keyStore{c}, key); valid {
 			t.Fatal("invalid key accepted")
 		}
+	}
+}
+
+func TestExplicitPublicAPIRequiresNoKey(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.com/api/public", nil)
+	if err := Authorize(model.API{AuthMode: "none"}, keyStore{}, r); err != nil {
+		t.Fatal(err)
 	}
 }

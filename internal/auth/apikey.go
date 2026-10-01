@@ -66,7 +66,10 @@ func ValidateAPIKey(s interface {
 func Authorize(api model.API, s interface {
 	FindCredentialByHash(string) (model.Credential, bool)
 }, r *http.Request) error {
-	// Legacy modes never become anonymous access after an upgrade.
+	// Only explicitly public routes bypass authentication.
+	if api.AuthMode == "none" {
+		return nil
+	}
 	if api.AuthMode != "api_key" {
 		return ErrUnauthorized
 	}

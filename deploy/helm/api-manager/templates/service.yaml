@@ -14,3 +14,7 @@ spec:
       port: {{ .Values.service.port }}
       targetPort: http
       protocol: TCP
+    - name: public-http
+      port: {{ .Values.service.publicPort }}
+      targetPort: public-http
+      protocol: TCP

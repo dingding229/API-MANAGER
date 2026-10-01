@@ -1,3 +1,11 @@
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS public-ui-build
+WORKDIR /ui
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY public-ui/package.json public-ui/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
+COPY public-ui ./
+RUN npm run build
+
 FROM --platform=$BUILDPLATFORM golang:1.26.7-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -46,11 +54,20 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund && npm run 
 
 FROM alloy-source AS patched-alloy
 WORKDIR /src
-RUN --mount=type=cache,target=/go/pkg/mod go get google.golang.org/grpc@v1.83.2 && cd collector && go get google.golang.org/grpc@v1.83.2
+RUN --mount=type=cache,target=/go/pkg/mod set -e; \
+    for attempt in 1 2 3; do \
+      if go get google.golang.org/grpc@v1.83.2 && (cd collector && go get google.golang.org/grpc@v1.83.2); then break; fi; \
+      if [ "$attempt" = 3 ]; then exit 1; fi; \
+      sleep 5; \
+    done
 COPY --from=alloy-ui /ui/dist /src/internal/web/ui/dist
 WORKDIR /src/collector
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod GOFLAGS=-mod=mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -buildvcs=false -trimpath -tags='netgo embedalloyui' -ldflags='-s -w' -o /out/alloy .
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod set -e; \
+    for attempt in 1 2 3; do \
+      if GOFLAGS=-mod=mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -buildvcs=false -trimpath -tags='netgo embedalloyui' -ldflags='-s -w' -o /out/alloy .; then break; fi; \
+      if [ "$attempt" = 3 ]; then exit 1; fi; \
+      sleep 5; \
+    done
 
 FROM patched-base AS patched-grafana
 COPY --from=patched-alloy /out/alloy /tmp/build-order/alloy
@@ -93,7 +110,11 @@ COPY --from=builder --chown=65532:65532 /out/api-manager /api-manager
 COPY --from=builder --chown=65532:65532 /out/plugins /data/plugins
 COPY --from=builder --chown=65532:65532 /out/plugin-library /data/plugin-library
 COPY --from=builder --chown=65532:65532 /out/observability /data/observability
+COPY --from=public-ui-build /ui/out /usr/share/api-manager/public-ui
+COPY public-ui/LICENSE.fumadocs /usr/share/api-manager/LICENSE.fumadocs
+ENV PUBLIC_HTTP_ADDR=:8081
+ENV PUBLIC_UI_DIR=/usr/share/api-manager/public-ui
 USER 65532:65532
-EXPOSE 8080 3000
+EXPOSE 8080 8081 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s CMD ["/api-manager", "--healthcheck"]
 ENTRYPOINT ["/api-manager"]

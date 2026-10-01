@@ -57,6 +57,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: public-http
+              containerPort: 8081
           env:
             {{- range $key, $value := .Values.env }}
             - name: {{ $key }}
@@ -64,8 +66,8 @@ spec:
             {{- end }}
             - name: PRODUCTION_MODE
               value: {{ .Values.productionMode | quote }}
-            - name: ADMIN_TOKEN_FILE
-              value: /run/secrets/ADMIN_TOKEN
+            - name: ADMIN_PASSWORD_FILE
+              value: /run/secrets/ADMIN_PASSWORD
             - name: POSTGRES_DSN_FILE
               value: /run/secrets/POSTGRES_DSN
             - name: CREDENTIAL_ENCRYPTION_KEY_FILE

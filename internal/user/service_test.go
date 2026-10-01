@@ -1,8 +1,10 @@
 package user
 
 import (
+	"api-manager/internal/auth"
 	"strings"
 	"testing"
+	"time"
 
 	"api-manager/internal/store"
 	"golang.org/x/crypto/bcrypt"
@@ -27,5 +29,84 @@ func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	}
 	if _, err := service.Create("long@example.com", strings.Repeat("x", 73), "viewer"); err == nil {
 		t.Fatal("73-byte password was accepted")
+	}
+}
+
+func TestExistingAccountsAreNotResetAndSessionHashesArePersisted(t *testing.T) {
+	m := store.NewMemory()
+	s := NewService(m)
+	if err := s.EnsureInitialAdmin("admin", "original-password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnsureInitialAdmin("another-admin", "replacement-password"); err != nil {
+		t.Fatal(err)
+	}
+	u, token, err := s.Authenticate("admin", "original-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := m.GetSession(auth.HashAPIKey(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Hash == token || persisted.UserID != u.ID {
+		t.Fatal("session stored incorrectly")
+	}
+	if _, _, err = s.Authenticate("admin", "replacement-password"); err == nil {
+		t.Fatal("initial password reset existing account")
+	}
+	// A fresh Service instance validates the same persisted session.
+	if _, err = NewService(m).ValidateSession(token); err != nil {
+		t.Fatal(err)
+	}
+	expired := persisted
+	expired.ExpiresAt = time.Now().Add(-time.Second)
+	if err = m.CreateSession(expired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ValidateSession(token); err == nil {
+		t.Fatal("expired session accepted")
+	}
+}
+func TestDisabledUserSessionIsImmediatelyRejected(t *testing.T) {
+	m := store.NewMemory()
+	s := NewService(m)
+	user, err := s.Create("viewer", "viewer-password", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Authenticate("viewer", "viewer-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetStatus(user.ID, "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ValidateSession(token); err == nil {
+		t.Fatal("disabled user session accepted")
+	}
+}
+
+func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
+	s := NewService(store.NewMemory())
+	u, err := s.Create("viewer-two", "viewer-password", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Authenticate("viewer-two", "viewer-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetStatus(u.ID, "disabled"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SetStatus(u.ID, "active"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ValidateSession(token); err == nil {
+		t.Fatal("disabled/re-enabled account revived a revoked session")
+	}
+	if _, _, err = s.Authenticate("viewer-two", "viewer-password"); err != nil {
+		t.Fatal("re-enabled user cannot log in")
 	}
 }

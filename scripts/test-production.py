@@ -36,7 +36,7 @@ class ProductionScriptTests(unittest.TestCase):
         self.assertEqual(set(before), set(preflight.FILES))
         self.assertEqual(len(set(before.values())), 6)
         result = subprocess.run([sys.executable, str(ROOT / "scripts/init-production-secrets.py"), "--dir", str(self.folder)], capture_output=True)
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 0)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.folder.iterdir()})
 
     def test_latest_and_version_tag_are_accepted(self):
@@ -51,7 +51,7 @@ class ProductionScriptTests(unittest.TestCase):
             self.assertTrue(preflight.validate(dict(self.env, API_MANAGER_IMAGE=image), ROOT))
 
     def test_duplicate_and_symlink_credentials_are_rejected(self):
-        source = self.folder / "admin_token"
+        source = self.folder / "admin_password"
         target = self.folder / "metrics_token"
         target.chmod(0o600)
         target.write_bytes(source.read_bytes())

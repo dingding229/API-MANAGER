@@ -16,7 +16,12 @@ import (
 type Config struct {
 	UpstreamCredentials       string
 	HTTPAddr                  string
-	AdminToken                string
+	PublicAPIBaseURL          string
+	PublicHTTPAddr            string
+	PublicUIDir               string
+	AdminUsername             string
+	AdminPassword             string
+	UserSessionTTL            time.Duration
 	ProductionMode            bool
 	AllowInternalPlaintext    bool
 	MetricsToken              string
@@ -50,7 +55,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_TOKEN", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
+	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -132,10 +137,20 @@ func Load() (Config, error) {
 		postgresDSN = u.String()
 	}
 
+	userSessionTTL, err := envDuration("USER_SESSION_TTL", 12*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
-		AdminToken:                secrets["ADMIN_TOKEN"],
+		PublicAPIBaseURL:          env("PUBLIC_API_BASE_URL", ""),
+		PublicHTTPAddr:            env("PUBLIC_HTTP_ADDR", ""),
+		PublicUIDir:               env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
+		AdminUsername:             env("ADMIN_USERNAME", "admin"),
+		AdminPassword:             secrets["ADMIN_PASSWORD"],
+		UserSessionTTL:            userSessionTTL,
 		ProductionMode:            productionMode,
 		AllowInternalPlaintext:    allowInternalPlaintext,
 		MetricsToken:              secrets["METRICS_TOKEN"],
@@ -211,13 +226,10 @@ func secret(name string) (string, error) {
 
 func (c Config) Validate() error {
 	forbidden := map[string]bool{"change-me-in-production": true, "change-me": true, "replace-with-a-long-random-secret": true}
-	for _, item := range []struct{ name, value string }{{"ADMIN_TOKEN", c.AdminToken}, {"CREDENTIAL_ENCRYPTION_KEY", c.CredentialEncryptionKey}} {
+	for _, item := range []struct{ name, value string }{{"CREDENTIAL_ENCRYPTION_KEY", c.CredentialEncryptionKey}} {
 		if len(strings.TrimSpace(item.value)) < 32 || forbidden[item.value] || strings.HasPrefix(item.value, "generate-") || strings.HasPrefix(item.value, "replace-") {
 			return errors.New(item.name + " must be a distinct random secret of at least 32 characters")
 		}
-	}
-	if c.AdminToken == c.CredentialEncryptionKey {
-		return errors.New("admin KEY and credential encryption secrets must be distinct")
 	}
 	if c.ProductionMode {
 		if c.OTELEnabled && (c.OTLPEndpoint == "" || (c.OTLPInsecure && !(c.ObservabilityStackEnabled && c.OTLPEndpoint == "127.0.0.1:4317"))) {
@@ -245,7 +257,7 @@ func (c Config) Validate() error {
 		if (!c.RedisTLS && !internalRedis) || len(c.RedisPassword) < 32 {
 			return errors.New("Redis requires a 32-byte password and TLS unless it is the private Compose redis service")
 		}
-		if c.RedisPassword == c.AdminToken || c.RedisPassword == c.CredentialEncryptionKey {
+		if c.RedisPassword == c.CredentialEncryptionKey {
 			return errors.New("Redis password must be distinct from application secrets")
 		}
 		for _, origin := range strings.Split(c.CORSOrigins, ",") {
@@ -253,13 +265,29 @@ func (c Config) Validate() error {
 				return errors.New("production CORS_ORIGINS cannot include a wildcard")
 			}
 		}
-		if len(c.MetricsToken) < 32 || c.MetricsToken == c.RedisPassword || c.MetricsToken == c.AdminToken || c.MetricsToken == c.CredentialEncryptionKey {
+		if len(c.MetricsToken) < 32 || c.MetricsToken == c.RedisPassword || c.MetricsToken == c.CredentialEncryptionKey {
 			return errors.New("production requires a distinct METRICS_TOKEN of at least 32 characters")
 		}
 	}
-	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.AdminToken || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
+	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
 		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
 	}
+	if c.PublicHTTPAddr != "" {
+		host, port, err := net.SplitHostPort(c.PublicHTTPAddr)
+		if err != nil || (host != "" && net.ParseIP(host) == nil && !strings.Contains(host, ".")) || port == "" {
+			return errors.New("PUBLIC_HTTP_ADDR must be a valid host:port address")
+		}
+		if c.PublicUIDir == "" || filepath.IsAbs(c.PublicUIDir) == false {
+			return errors.New("PUBLIC_UI_DIR must be an absolute directory")
+		}
+	}
+	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {
+		return errors.New("USER_SESSION_TTL must be between 1 second and 24 hours")
+	}
+	if c.AdminPassword != "" && (len(c.AdminPassword) < 12 || len(c.AdminPassword) > 72 || c.AdminPassword == c.CredentialEncryptionKey || c.AdminPassword == c.RedisPassword || c.AdminPassword == c.MetricsToken) {
+		return errors.New("ADMIN_PASSWORD must be a distinct 12..72 byte password")
+	}
+
 	if c.ShutdownTimeout < time.Second || c.ShutdownTimeout > 5*time.Minute {
 		return errors.New("SHUTDOWN_TIMEOUT must be between 1 second and 5 minutes")
 	}

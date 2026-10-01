@@ -16,11 +16,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"api-manager/internal/api"
+	"api-manager/internal/catalog"
 	"api-manager/internal/config"
 	"api-manager/internal/gateway"
 	"api-manager/internal/httpx"
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
+	"api-manager/internal/publicweb"
 	"api-manager/internal/ratelimit"
 	"api-manager/internal/stack"
 	"api-manager/internal/store"
@@ -114,16 +116,21 @@ func main() {
 		logger.Error("some managed WASM plugins failed to load", "error", err)
 	}
 	userService := user.NewService(activeStore)
+	userService.SetSessionTTL(cfg.UserSessionTTL)
 	if err := userService.EnsureDefaults(); err != nil {
 		logger.Error("initialize RBAC defaults failed", "error", err)
 		os.Exit(1)
 	}
-	admin := api.NewAdminWithUserManagementAndPluginManager(activeStore, plugins, cfg.AdminToken, userService, pluginManager, logger)
+	if err := userService.EnsureInitialAdmin(cfg.AdminUsername, cfg.AdminPassword); err != nil {
+		logger.Error("initialize administrator failed", "error", err)
+		os.Exit(1)
+	}
+	admin := api.NewAdminWithUserManagementAndPluginManager(activeStore, plugins, userService, pluginManager, logger)
 	admin.SetCredentialEncryptionKey(cfg.CredentialEncryptionKey)
 	admin.SetProductionMode(cfg.ProductionMode)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)
-	authHandler := user.NewHTTP(cfg.AdminToken)
+	authHandler := user.NewHTTP(userService)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
 	gatewayHandler.SetProductionMode(cfg.ProductionMode)
@@ -147,6 +154,8 @@ func main() {
 	mux.Handle("/auth/", authHandler)
 	mux.Handle("/console/", web.Console())
 	mux.Handle("/api/", gatewayHandler)
+	publicExport := catalog.New(activeStore, cfg.PublicAPIBaseURL)
+	mux.Handle("/public/v1/catalog", publicExport)
 	mux.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeHealth(w, http.StatusOK, `{"status":"ok"}`)
 	})
@@ -182,7 +191,24 @@ func main() {
 		MaxHeaderBytes:    64 << 10,
 	}
 
-	serverErr := make(chan error, 1)
+	serverErr := make(chan error, 2)
+	var publicServer *http.Server
+	if cfg.PublicHTTPAddr != "" {
+		publicHandler, err := publicweb.New(cfg.PublicUIDir, publicExport)
+		if err != nil {
+			logger.Error("load public documentation failed", "error", err)
+			os.Exit(1)
+		}
+		publicServer = &http.Server{Addr: cfg.PublicHTTPAddr, Handler: httpx.Recover(logger, publicHandler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+		go func() {
+			logger.Info("public documentation starting", "addr", cfg.PublicHTTPAddr)
+			if err := publicServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serverErr <- err
+				stop()
+			}
+		}()
+	}
+
 	go func() {
 		logger.Info("server starting", "addr", cfg.HTTPAddr, "store", storeName(activeStore), "limiter", limiterName(limiter))
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -206,6 +232,11 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
+	if publicServer != nil {
+		if err := publicServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("public documentation shutdown failed", "error", err)
+		}
+	}
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)

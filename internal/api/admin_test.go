@@ -25,14 +25,14 @@ func TestValidateAPIRequestOnlyAcceptsKeys(t *testing.T) {
 	for _, mode := range []string{"", "api_key", "none", "jwt", "hmac", "other"} {
 		r := model.CreateAPIRequest{Name: "secured", Method: "POST", Path: "/api/secured", AuthMode: mode, ResponseBody: `{}`}
 		err := validateAPIRequest(r, true)
-		if (err == nil) != (mode == "" || mode == "api_key") {
+		if (err == nil) != (mode == "" || mode == "api_key" || mode == "none") {
 			t.Fatalf("mode %q: %v", mode, err)
 		}
 	}
 }
 
 func TestRollbackRejectsLegacyModesBeforeChangingRoutes(t *testing.T) {
-	for _, mode := range []string{"none", "jwt", "hmac", ""} {
+	for _, mode := range []string{"jwt", "hmac", ""} {
 		err := validateStoredAPI(model.API{Name: "legacy", Method: "GET", Path: "/api/legacy", AuthMode: mode}, true)
 		if err == nil {
 			t.Fatalf("legacy mode %q accepted", mode)

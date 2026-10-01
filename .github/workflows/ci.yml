@@ -55,6 +55,21 @@ jobs:
         with:
           go-version: '1.26.7'
           cache: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: public-ui/package-lock.json
+      - name: Validate Fumadocs frontend and public data boundary
+        working-directory: public-ui
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run typecheck
+          npm run build
+          npm audit --omit=dev --audit-level=high
       - name: Test with race detector
         run: go test -race ./...
       - name: Static and vulnerability analysis
@@ -85,11 +100,11 @@ jobs:
       - name: Lint Helm chart
         run: |
           helm lint deploy/helm/api-manager \
-            --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
+            --set secrets.ADMIN_PASSWORD=ci-only-admin-password-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci
           helm template api-manager deploy/helm/api-manager \
-            --set secrets.ADMIN_TOKEN=ci-only-admin-token-at-least-thirty-two-characters \
+            --set secrets.ADMIN_PASSWORD=ci-only-admin-password-at-least-thirty-two-characters \
             --set secrets.CREDENTIAL_ENCRYPTION_KEY=ci-only-credential-key-at-least-thirty-two-characters \
             --set secrets.POSTGRES_DSN=postgres://ci:ci@localhost/ci >/dev/null
           helm lint deploy/helm/api-manager \
@@ -179,7 +194,7 @@ jobs:
           fi
 
 
-      - name: Test single Compose deployment and KEY-only authentication
+      - name: Test Compose username-password login and API authentication modes
         shell: bash
         run: |
           set -euo pipefail
@@ -205,11 +220,11 @@ jobs:
           from urllib.request import Request, urlopen
           from urllib.error import HTTPError
           root=pathlib.Path(os.environ['SECRETS_DIR'])
-          admin=(root/'admin_token').read_text().strip()
-          metrics=(root/'metrics_token').read_text().strip()
-          def call(method,path,key=None,data=None):
+          password=(root/'admin_password').read_text().strip()
+          def call(method,path,key=None,data=None,session=None):
               headers={'Content-Type':'application/json'}
               if key: headers['X-API-Key']=key
+              if session: headers['Authorization']='Bearer '+session
               payload=None if data is None else json.dumps(data).encode()
               try:
                   with urlopen(Request('http://127.0.0.1:8080'+path,data=payload,headers=headers,method=method),timeout=5) as response:
@@ -217,27 +232,36 @@ jobs:
                       return response.status,(json.loads(body) if body else {})
               except HTTPError as error:
                   error.close(); return error.code,{}
-          for path in ('/auth/v1/login','/auth/v1/bootstrap'):
-              assert call('POST',path,admin,{})[0]==404
-          for mode in ('none','jwt','hmac'):
-              assert call('POST','/admin/v1/apis',admin,{'name':'rejected','method':'GET','path':'/api/rejected','auth_mode':mode})[0]==400
-          status,route=call('POST','/admin/v1/apis',admin,{'name':'integration','method':'GET','path':'/api/integration','response_body':'{"ok":true}'})
+          status,login=call('POST','/auth/v1/login',data={'username':'admin','password':password})
+          assert status==200
+          session=login['token']
+          assert call('GET','/auth/v1/me',session=session)[0]==200
+          assert call('GET','/admin/v1/apis',key='ak_invalid_business_key')[0]==401
+          for mode in ('jwt','hmac'):
+              assert call('POST','/admin/v1/apis',session=session,data={'name':'rejected','method':'GET','path':'/api/rejected','auth_mode':mode})[0]==400
+          status,route=call('POST','/admin/v1/apis',session=session,data={'name':'protected','method':'GET','path':'/api/protected','response_body':'{"ok":true}'})
           assert status==201 and route['auth_mode']=='api_key'
-          assert call('POST','/admin/v1/apis/'+route['id']+'/publish',admin)[0]==200
-          assert call('GET','/api/integration')[0]==401
-          assert call('GET','/api/integration',admin)[0]==401
-          status,credential=call('POST','/admin/v1/credentials',admin,{'name':'integration'})
+          assert call('POST','/admin/v1/apis/'+route['id']+'/publish',session=session)[0]==200
+          assert call('GET','/api/protected')[0]==401
+          assert call('GET','/api/protected',session=session)[0]==401
+          status,credential=call('POST','/admin/v1/credentials',session=session,data={'name':'integration'})
           assert status==201
           key=credential['api_key']
-          assert call('GET','/api/integration',key)[0]==200
-          assert call('GET','/admin/v1/apis',key)[0]==401
-          assert call('GET','/metrics',key)[0]==401
-          status,audits=call('GET','/admin/v1/audit-logs',admin)
-          assert status==200 and audits['items'], 'KEY operations must persist audit records'
-          assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',admin)[0]==200
-          assert call('GET','/api/integration',key)[0]==401
-          assert call('DELETE','/admin/v1/apis/'+route['id'],admin)[0]==204
-          print('PASS: databases ready, KEY scopes/revocation/audits validated; no credentials displayed')
+          assert call('GET','/api/protected',key=key)[0]==200
+          assert call('GET','/admin/v1/apis',key=key)[0]==401
+          status,public=call('POST','/admin/v1/apis',session=session,data={'name':'public','method':'GET','path':'/api/public','auth_mode':'none','response_body':'{"public":true}'})
+          assert status==201 and public['auth_mode']=='none'
+          assert call('POST','/admin/v1/apis/'+public['id']+'/publish',session=session)[0]==200
+          assert call('GET','/api/public')[0]==200
+          status,audits=call('GET','/admin/v1/audit-logs',session=session)
+          assert status==200 and audits['items']
+          assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',session=session)[0]==200
+          assert call('GET','/api/protected',key=key)[0]==401
+          for item in (route,public):
+              assert call('DELETE','/admin/v1/apis/'+item['id'],session=session)[0]==204
+          assert call('POST','/auth/v1/logout',session=session)[0]==204
+          assert call('GET','/auth/v1/me',session=session)[0]==401
+          print('PASS: password login, session revocation, API KEY/public modes and scopes validated')
           PYTEST
 
   publish-amd64:

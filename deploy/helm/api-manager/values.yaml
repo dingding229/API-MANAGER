@@ -12,6 +12,7 @@ imagePullSecrets: []
 service:
   type: ClusterIP
   port: 8080
+  publicPort: 8081
 
 ingress:
   enabled: false
@@ -34,6 +35,9 @@ resources:
 
 env:
   HTTP_ADDR: ":8080"
+  PUBLIC_HTTP_ADDR: ":8081"
+  PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
+  ADMIN_USERNAME: admin
   LOG_LEVEL: info
   USE_REDIS: "true"
   REDIS_ADDR: redis:6379
@@ -48,7 +52,7 @@ env:
 existingSecret: "" # use a pre-created Secret instead of chart-managed values
 
 secrets:
-  ADMIN_TOKEN: ""
+  ADMIN_PASSWORD: ""
   REDIS_PASSWORD: ""
   CREDENTIAL_ENCRYPTION_KEY: ""
   POSTGRES_DSN: ""

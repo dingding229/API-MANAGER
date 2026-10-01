@@ -160,6 +160,6 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 @media(max-width:1050px){.observability-charts{grid-template-columns:1fr}.observation-filter{grid-template-columns:1fr 2fr 1fr}.observation-filter button{width:100%}}
 @media(max-width:700px){.observability-intro{align-items:flex-start;flex-direction:column;padding:18px}.storage-state{width:100%;min-width:0}.observability-charts{gap:12px}.section-heading{flex-direction:column;padding:16px}.alert-list{padding:12px}.alert-card{grid-template-columns:5px minmax(0,1fr)}.alert-ack{grid-column:2;width:100%}.observation-filter{grid-template-columns:1fr;padding:14px}.metric-chart svg{height:135px}}
 
-#login-form button,#admin-key{min-height:44px}#admin-key{font-size:16px}#admin-key:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+#login-form button,#username,#password{min-height:44px}#password{font-size:16px}#password:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
 
 @media(max-width:850px){.sidebar{flex-wrap:wrap;overflow:visible}.sidebar nav{flex-basis:100%;order:3;overflow-x:auto;padding-top:8px}.account{display:flex;align-items:center;gap:8px;margin:0 0 0 auto;padding:0}.account span{display:none}.account button{min-height:44px;padding:8px}}

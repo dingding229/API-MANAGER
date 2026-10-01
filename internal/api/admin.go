@@ -29,6 +29,7 @@ import (
 )
 
 type UserManager interface {
+	ValidateSession(string) (model.User, error)
 	Create(string, string, string) (model.User, error)
 	CreateWithRoles(string, string, []string) (model.User, error)
 	Can(string, string) bool
@@ -40,8 +41,6 @@ type UserManager interface {
 type Admin struct {
 	store                   store.Store
 	plugins                 *plugin.Registry
-	adminToken              string
-	adminTokenAPIEnabled    bool
 	userManager             UserManager
 	logger                  *slog.Logger
 	auditor                 *audit.Service
@@ -53,19 +52,18 @@ type Admin struct {
 	productionMode          bool
 }
 
-func NewAdmin(s store.Store, plugins *plugin.Registry, adminToken string, logger *slog.Logger) *Admin {
-	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, logger: logger, auditor: audit.New(s, logger)}
+func NewAdmin(s store.Store, plugins *plugin.Registry, logger *slog.Logger) *Admin {
+	return &Admin{store: s, plugins: plugins, logger: logger, auditor: audit.New(s, logger)}
 }
 
-func NewAdminWithUserManagement(s store.Store, plugins *plugin.Registry, adminToken string, userManager UserManager, logger *slog.Logger) *Admin {
-	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userManager: userManager, logger: logger, auditor: audit.New(s, logger)}
+func NewAdminWithUserManagement(s store.Store, plugins *plugin.Registry, userManager UserManager, logger *slog.Logger) *Admin {
+	return &Admin{store: s, plugins: plugins, userManager: userManager, logger: logger, auditor: audit.New(s, logger)}
 }
 
-func NewAdminWithUserManagementAndPluginManager(s store.Store, plugins *plugin.Registry, adminToken string, userManager UserManager, pluginManager *plugin.Manager, logger *slog.Logger) *Admin {
-	return &Admin{store: s, plugins: plugins, adminToken: adminToken, adminTokenAPIEnabled: true, userManager: userManager, pluginManager: pluginManager, logger: logger, auditor: audit.New(s, logger)}
+func NewAdminWithUserManagementAndPluginManager(s store.Store, plugins *plugin.Registry, userManager UserManager, pluginManager *plugin.Manager, logger *slog.Logger) *Admin {
+	return &Admin{store: s, plugins: plugins, userManager: userManager, pluginManager: pluginManager, logger: logger, auditor: audit.New(s, logger)}
 }
-func (a *Admin) SetAdminTokenAPIEnabled(enabled bool) { a.adminTokenAPIEnabled = enabled }
-func (a *Admin) SetProductionMode(enabled bool)       { a.productionMode = enabled }
+func (a *Admin) SetProductionMode(enabled bool) { a.productionMode = enabled }
 
 func (a *Admin) SetCredentialEncryptionKey(secret string) {
 	if strings.TrimSpace(secret) != "" {
@@ -172,15 +170,22 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type auditActorContextKey struct{}
 
 func (a *Admin) requestActor(r *http.Request) (audit.Actor, bool) {
-	if a.adminTokenAPIEnabled && auth.MatchesKey(a.adminToken, auth.RequestKey(r)) {
-		return audit.Actor{Type: "api_key"}, true
+	if a.userManager == nil {
+		return audit.Actor{}, false
 	}
-	return audit.Actor{}, false
+	authorization := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authorization, "Bearer ") || len(r.Header.Values("Authorization")) != 1 || r.Header.Get("X-API-Key") != "" {
+		return audit.Actor{}, false
+	}
+	user, err := a.userManager.ValidateSession(auth.ExtractAPIKey(authorization))
+	if err != nil {
+		return audit.Actor{}, false
+	}
+	return audit.Actor{ID: user.ID, Type: "user", Email: user.Email}, true
 }
-
 func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 	actor, ok := r.Context().Value(auditActorContextKey{}).(audit.Actor)
-	return ok && actor.Type == "api_key"
+	return ok && actor.Type == "user" && a.userManager != nil && a.userManager.Can(actor.ID, permission)
 }
 
 func requiredPermission(r *http.Request) string {
@@ -1313,10 +1318,17 @@ func responseStatus(api model.API) int {
 }
 
 func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, updatedAt time.Time) model.API {
-	return model.API{ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: "api_key", AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return model.API{PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: strings.ToUpper(request.Method), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
 func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) error {
+	if len(request.PublicTitle) > 120 || len(request.PublicSummary) > 600 || len(request.PublicCategory) > 48 {
+		return errors.New("public documentation fields exceed their size limits")
+	}
+	if request.PublicVisible && strings.TrimSpace(request.PublicTitle) == "" {
+		return errors.New("a public title is required before showing an API in the public catalog")
+	}
+
 	if err := upstream.ValidatePath(request.Path, request.UpstreamPath); err != nil {
 		return err
 	}
@@ -1332,8 +1344,8 @@ func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) err
 	if !strings.HasPrefix(request.Path, "/") || strings.Contains(request.Path, "//") {
 		return errors.New("path must start with / and must not contain //")
 	}
-	if request.AuthMode != "" && request.AuthMode != "api_key" {
-		return errors.New("auth_mode must be api_key")
+	if request.AuthMode != "" && request.AuthMode != "api_key" && request.AuthMode != "none" {
+		return errors.New("auth_mode must be api_key or none")
 	}
 	if len(request.AuthConfig) != 0 {
 		return errors.New("KEY authentication does not accept auth_config")
@@ -1466,8 +1478,8 @@ func (a *Admin) checkRouteConflict(excludeID, method, path string) error {
 }
 
 func validateStoredAPI(api model.API, productionMode bool) error {
-	if api.AuthMode != "api_key" {
-		return errors.New("stored routes must use KEY authentication")
+	if api.AuthMode != "api_key" && api.AuthMode != "none" {
+		return errors.New("stored routes must use KEY authentication or no authentication")
 	}
 	payload, err := json.Marshal(api)
 	if err != nil {
@@ -1478,4 +1490,11 @@ func validateStoredAPI(api model.API, productionMode bool) error {
 		return err
 	}
 	return validateAPIRequest(request, productionMode)
+}
+
+func defaultAuthMode(mode string) string {
+	if mode == "none" {
+		return "none"
+	}
+	return "api_key"
 }

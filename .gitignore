@@ -17,3 +17,12 @@ __pycache__/
 # Local mounted credentials are never source/build artifacts.
 secrets/
 .env.*
+
+public-ui/node_modules/
+public-ui/.next/
+public-ui/tsconfig.tsbuildinfo
+
+dist/
+.remote-test-secrets/
+
+public-ui/out/

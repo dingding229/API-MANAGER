@@ -125,11 +125,11 @@ func (p *Postgres) CreateAPI(api model.API) error {
 		return err
 	}
 	_, err = p.pool.Exec(ctx, `INSERT INTO apis
-		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef)
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -147,11 +147,11 @@ func (p *Postgres) UpdateAPI(api model.API) error {
 		return err
 	}
 	result, err := p.pool.Exec(ctx, `UPDATE apis SET
-		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27
+		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27,public_visible=$28,public_title=$29,public_summary=$30,public_category=$31
 		WHERE id=$1`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef)
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -164,7 +164,7 @@ func (p *Postgres) UpdateAPI(api model.API) error {
 	return nil
 }
 
-const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref FROM apis`
+const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category FROM apis`
 
 func scanAPI(row pgx.Row) (model.API, error) {
 	var api model.API
@@ -172,7 +172,7 @@ func scanAPI(row pgx.Row) (model.API, error) {
 	var pluginName string
 	if err := row.Scan(&api.ID, &api.Name, &api.Description, &api.Method, &api.Path, &api.AuthMode, &authConfig,
 		&api.RateLimitPerMinute, &api.DailyQuota, &api.MonthlyQuota, &api.ResponseStatus, &api.ResponseBody, &requestSchema, &responseSchema, &parametersSchema, &pluginName,
-		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef); err != nil {
+		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory); err != nil {
 		return model.API{}, err
 	}
 	api.Plugin = pluginName
@@ -784,14 +784,24 @@ func (p *Postgres) GetUserByID(id string) (model.User, error) {
 func (p *Postgres) UpdateUserStatus(id, status string) error {
 	ctx, cancel := dbContext()
 	defer cancel()
-	result, err := p.pool.Exec(ctx, `UPDATE users SET status=$2,updated_at=NOW() WHERE id=$1`, id, status)
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `UPDATE users SET status=$2,updated_at=NOW() WHERE id=$1`, id, status)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if status == "disabled" {
+		if _, err := tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1`, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func dedupeCodes(values []string) []string {
@@ -1035,4 +1045,27 @@ func (p *Postgres) DeletePlugin(id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ListPublicAPIsChecked reads only documentation data, never credentials or upstreams.
+func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
+	ctx, cancel := dbContext()
+	defer cancel()
+	rows, err := p.pool.Query(ctx, `SELECT method,path,auth_mode,request_schema,parameters_schema,public_visible,public_title,public_summary,public_category,enabled,published_at FROM apis WHERE public_visible=true AND enabled=true AND published_at IS NOT NULL ORDER BY public_category,public_title LIMIT 200`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]model.API, 0)
+	for rows.Next() {
+		var a model.API
+		var request, parameters []byte
+		if err := rows.Scan(&a.Method, &a.Path, &a.AuthMode, &request, &parameters, &a.PublicVisible, &a.PublicTitle, &a.PublicSummary, &a.PublicCategory, &a.Enabled, &a.PublishedAt); err != nil {
+			return nil, err
+		}
+		a.RequestSchema = schemaRawMessage(request)
+		a.ParametersSchema = schemaRawMessage(parameters)
+		result = append(result, a)
+	}
+	return result, rows.Err()
 }

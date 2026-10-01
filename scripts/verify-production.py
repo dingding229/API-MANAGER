@@ -46,15 +46,15 @@ def main():
 
     try:
         metrics = (args.secret_dir / "metrics_token").read_text().rstrip("\r\n")
-        admin = (args.secret_dir / "admin_token").read_text().rstrip("\r\n")
+        fake_business_key = "ak_" + "invalid-key-for-auth-isolation-check"
         checks = {
             "readiness": (request(base, "/health/ready"), 200),
             "anonymous metrics denied": (request(base, "/metrics"), 401),
             "metrics KEY accepted": (request(base, "/metrics", metrics), 200),
             "anonymous management denied": (request(base, "/admin/v1/apis"), 401),
-            "admin KEY accepted": (request(base, "/admin/v1/apis", admin), 200),
+            "management rejects API KEY": (request(base, "/admin/v1/apis", fake_business_key), 401),
             "metrics KEY cannot administer": (request(base, "/admin/v1/apis", metrics), 401),
-            "console KEY accepted": (request(base, "/auth/v1/me", admin), 200),
+            "console rejects API KEY": (request(base, "/auth/v1/me", fake_business_key), 401),
         }
     except (OSError, URLError, ValueError):
         print("FAIL: API connection or Secret read failed; credentials are not displayed")

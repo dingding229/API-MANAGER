@@ -1,10 +1,14 @@
 package user
 
 import (
+	"api-manager/internal/auth"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,9 +40,23 @@ type Store interface {
 	GetUserPermissions(string) []string
 }
 
-type Service struct{ store Store }
+type Service struct {
+	store Store
+	ttl   time.Duration
+}
+type sessionStore interface {
+	CreateSession(model.Session) error
+	GetSession(string) (model.Session, error)
+	DeleteSession(string) error
+}
 
-func NewService(store Store) *Service { return &Service{store: store} }
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}$`)
+var dummyPasswordHash = func() []byte {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-check"), passwordHashCost)
+	return hash
+}()
+
+func NewService(store Store) *Service { return &Service{store: store, ttl: 12 * time.Hour} }
 
 func (s *Service) EnsureDefaults() error { return s.store.EnsureRBAC() }
 func (s *Service) Count() int            { return s.store.CountUsers() }
@@ -64,9 +82,10 @@ func (s *Service) Create(email, password, role string) (model.User, error) {
 
 func (s *Service) CreateWithRoles(email, password string, roles []string) (model.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email || len(email) > 254 || len(password) < 12 || len(password) > 72 {
-		return model.User{}, errors.New("valid email and password with 12 to 72 bytes are required")
+	address, mailErr := mail.ParseAddress(email)
+	validName := usernamePattern.MatchString(email) || (mailErr == nil && address.Address == email && len(email) <= 254)
+	if !validName || len(password) < 12 || len(password) > 72 {
+		return model.User{}, errors.New("valid username or email and password with 12 to 72 bytes are required")
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
@@ -152,4 +171,71 @@ func normalizeRoles(values []string) []string {
 		}
 	}
 	return result
+}
+
+func (s *Service) SetSessionTTL(ttl time.Duration) { s.ttl = ttl }
+
+func (s *Service) EnsureInitialAdmin(username, password string) error {
+	count, err := s.CountChecked()
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	if password == "" {
+		return errors.New("first startup requires ADMIN_PASSWORD or ADMIN_PASSWORD_FILE")
+	}
+	_, err = s.Create(username, password, "super_admin")
+	return err
+}
+
+func (s *Service) Authenticate(username, password string) (model.User, string, error) {
+	user, lookupErr := s.store.GetUserByEmail(strings.ToLower(strings.TrimSpace(username)))
+	hash := []byte(user.PasswordHash)
+	if lookupErr != nil || len(hash) == 0 {
+		hash = dummyPasswordHash
+	}
+	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(password))
+	if lookupErr != nil || user.Status != "active" || passwordErr != nil {
+		return model.User{}, "", ErrInvalidCredentials
+	}
+	sessions, ok := s.store.(sessionStore)
+	if !ok {
+		return model.User{}, "", errors.New("session storage unavailable")
+	}
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err != nil {
+		return model.User{}, "", err
+	}
+	token := "us_" + hex.EncodeToString(random)
+	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl)}); err != nil {
+		return model.User{}, "", err
+	}
+	return user, token, nil
+}
+func (s *Service) ValidateSession(token string) (model.User, error) {
+	if len(token) != 67 || !strings.HasPrefix(token, "us_") {
+		return model.User{}, ErrInvalidCredentials
+	}
+	sessions, ok := s.store.(sessionStore)
+	if !ok {
+		return model.User{}, ErrInvalidCredentials
+	}
+	session, err := sessions.GetSession(auth.HashAPIKey(token))
+	if err != nil || !time.Now().Before(session.ExpiresAt) {
+		return model.User{}, ErrInvalidCredentials
+	}
+	user, err := s.store.GetUserByID(session.UserID)
+	if err != nil || user.Status != "active" {
+		return model.User{}, ErrInvalidCredentials
+	}
+	return user, nil
+}
+func (s *Service) Logout(token string) error {
+	sessions, ok := s.store.(sessionStore)
+	if !ok {
+		return errors.New("session storage unavailable")
+	}
+	return sessions.DeleteSession(auth.HashAPIKey(token))
 }

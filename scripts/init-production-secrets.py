@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create six independent deployment secrets without displaying or overwriting them."""
+"""Create missing deployment credentials without displaying or replacing existing files."""
 import argparse
 import json
 import subprocess
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import secrets
 
-FILES = ("admin_token", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
+FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
 
 
 def main():
@@ -18,22 +18,28 @@ def main():
         root = Path(__file__).resolve().parents[1]
         try:
             result = subprocess.run(["docker", "compose", "--project-directory", str(root), "-f", str(root / "docker-compose.yml"), "config", "--format", "json"], check=True, capture_output=True, text=True)
-            args.dir = Path(json.loads(result.stdout)["secrets"]["admin_token"]["file"]).parent
+            args.dir = Path(json.loads(result.stdout)["secrets"]["admin_password"]["file"]).parent
         except (OSError, subprocess.CalledProcessError, ValueError, KeyError):
             parser.error("install Docker Compose or explicitly supply --dir")
     target = args.dir.expanduser()
-    if target.is_symlink() or target.exists():
-        parser.error("directory already exists; keep existing credentials for upgrades (nothing overwritten)")
-    target.mkdir(mode=0o700, parents=True, exist_ok=False)
-    target.chmod(0o700)
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        parser.error("Secret path must be a real directory")
+    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if target.stat().st_mode & 0o077:
+        parser.error("Secret directory must have mode 0700")
+    created = 0
     for name in FILES:
-        fd = os.open(target / name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        path = target / name
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or not path.is_file():
+                parser.error("existing credentials must be regular files")
+            continue
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "w") as output:
             output.write(secrets.token_hex(32) + "\n")
-        # The private host directory protects file-backed Compose secrets. The
-        # individual mounts must be readable by the non-root container users.
-        (target / name).chmod(0o444)
-    print(f"Created six independent credentials in {target}. No values displayed.")
+        path.chmod(0o444)
+        created += 1
+    print(f"Created {created} missing credential files in {target}; existing values kept, no values displayed.")
     print("Start with: docker compose up -d")
 
 

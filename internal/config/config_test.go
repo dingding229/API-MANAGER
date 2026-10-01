@@ -10,7 +10,7 @@ import (
 func setValidTestEnvironment(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
-		"ADMIN_TOKEN", "ADMIN_TOKEN_FILE",
+		"ADMIN_PASSWORD", "ADMIN_PASSWORD_FILE", "USER_SESSION_TTL",
 		"CREDENTIAL_ENCRYPTION_KEY", "CREDENTIAL_ENCRYPTION_KEY_FILE", "POSTGRES_DSN", "POSTGRES_DSN_FILE",
 		"REDIS_PASSWORD", "REDIS_PASSWORD_FILE", "API_UPSTREAM_CREDENTIALS", "API_UPSTREAM_CREDENTIALS_FILE",
 		"METRICS_TOKEN", "METRICS_TOKEN_FILE", "GRAFANA_ADMIN_PASSWORD", "GRAFANA_ADMIN_PASSWORD_FILE",
@@ -22,7 +22,6 @@ func setValidTestEnvironment(t *testing.T) {
 	} {
 		t.Setenv(name, "")
 	}
-	t.Setenv("ADMIN_TOKEN", strings.Repeat("a", 32))
 	t.Setenv("CREDENTIAL_ENCRYPTION_KEY", strings.Repeat("c", 32))
 }
 
@@ -63,18 +62,18 @@ func TestSecretReadsKubernetesStyleRelativeSymlinks(t *testing.T) {
 	if err := os.Mkdir(version, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(version, "ADMIN_TOKEN"), []byte(strings.Repeat("k", 32)+"\n"), 0o400); err != nil {
+	if err := os.WriteFile(filepath.Join(version, "METRICS_TOKEN"), []byte(strings.Repeat("k", 32)+"\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Base(version), filepath.Join(root, "..data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink("..data/ADMIN_TOKEN", filepath.Join(root, "ADMIN_TOKEN")); err != nil {
+	if err := os.Symlink("..data/METRICS_TOKEN", filepath.Join(root, "METRICS_TOKEN")); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("ADMIN_TOKEN", "")
-	t.Setenv("ADMIN_TOKEN_FILE", filepath.Join(root, "ADMIN_TOKEN"))
-	value, err := secret("ADMIN_TOKEN")
+	t.Setenv("METRICS_TOKEN", "")
+	t.Setenv("METRICS_TOKEN_FILE", filepath.Join(root, "METRICS_TOKEN"))
+	value, err := secret("METRICS_TOKEN")
 	if err != nil {
 		t.Fatalf("read projected secret: %v", err)
 	}

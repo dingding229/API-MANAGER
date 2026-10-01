@@ -1,5 +1,5 @@
-sessionStorage.removeItem('api_manager_token');
-const state = { key: sessionStorage.getItem('api_manager_key') || '', user: null, permissions: [], page: 'overview', cache: {} };
+sessionStorage.removeItem('api_manager_key');
+const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {} };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -21,12 +21,48 @@ const permissionLabels = {
   'observability.read': '查看运行指标、日志、链路与告警',
   'observability.manage': '确认和管理运行告警',
 };
+const roleLabels = {
+  super_admin: '超级管理员',
+  tenant_admin: '平台管理员（单租户）',
+  operator: '运维人员',
+  api_developer: '接口开发者',
+  viewer: '只读用户',
+};
+const roleDescriptions = {
+  super_admin: '完整管理权限',
+  tenant_admin: '平台管理权限（当前仅支持单租户）',
+  operator: '接口运维权限',
+  api_developer: '接口开发权限',
+  viewer: '只读权限',
+};
+const permissionLabel = (code) => permissionLabels[code] || code;
+const roleLabel = (name) => roleLabels[name] || name;
+const roleDescription = (role) => roleDescriptions[role.name] || role.description || '';
+function permissionChecklist(permissions, selected = []) {
+  const selectedCodes = new Set(selected);
+  const categories = {api: '接口管理', credential: '调用凭证', plugin: '插件管理', user: '用户管理', audit: '审计日志', observability: '运行观测'};
+  const groups = new Map();
+  for (const permission of permissions) {
+    const category = permission.code.split('.')[0];
+    const name = categories[category] || '其他权限';
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(permission);
+  }
+  return `<div class="permission-groups" role="group" aria-label="选择权限">${[...groups].map(([name, entries]) => `<fieldset class="permission-group"><legend>${esc(name)}</legend><div class="permission-options">${entries.map(p => `<label class="permission-option" title="${esc(p.code)}"><input type="checkbox" name="permission" value="${esc(p.code)}" ${selectedCodes.has(p.code) ? 'checked' : ''}><span>${esc(permissionLabel(p.code))}</span></label>`).join('')}</div></fieldset>`).join('')}</div>`;
+}
+
+function rolePermissionsSummary(codes = []) {
+  if (!codes.length) return '<span class="role-permission-count">未分配权限</span>';
+  if (codes.includes('*')) return '<span class="badge">全部权限</span>';
+  return `<details class="role-permission-details"><summary>${codes.length} 项权限 <span>查看详情</span></summary><div class="role-permission-list">${codes.map(code => `<span class="badge" title="${esc(code)}">${esc(permissionLabel(code))}</span>`).join('')}</div></details>`;
+}
+
 async function api(path, options = {}) {
   const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
-  if (state.key) headers['X-API-Key'] = state.key;
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(path, {...options, headers});
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401 && state.key) { logout(); throw new Error('管理员 KEY 无效，请重新输入'); }
+  if (response.status === 401 && state.token) { clearSession(); throw new Error('登录已过期，请重新登录'); }
   if (!response.ok) throw new Error(body.error || `请求失败：${response.status}`);
   return body;
 }
@@ -49,7 +85,7 @@ async function withSubmitting(form, pendingText, action) {
 }
 
 function authErrorMessage(error) {
-  return error?.message === 'invalid API Key' ? '管理员 KEY 不正确' : (error?.message || '请求失败');
+  return error?.message === 'invalid credentials' ? '用户名或密码不正确' : (error?.message || '请求失败');
 }
 
 function showConsole() {
@@ -65,35 +101,37 @@ function showLogin() {
   $('#console-view').classList.add('hidden');
 }
 
-function logout() {
-  state.key = ''; state.user = null; state.permissions = [];
-  sessionStorage.removeItem('api_manager_key');
+function clearSession() {
+  state.token = ''; state.user = null; state.permissions = [];
+  sessionStorage.removeItem('api_manager_session');
   showLogin();
 }
-
-async function login(key) {
-  const candidate = key.trim();
-  if (candidate.length < 32) throw new Error('请输入至少 32 字符的管理员 KEY');
-  const response = await fetch('/auth/v1/me', {headers: {'X-API-Key': candidate}, cache:'no-store'});
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(result.error || 'KEY 验证失败');
-  state.key = candidate; state.user = result.user; state.permissions = result.permissions || [];
-  sessionStorage.setItem('api_manager_key', state.key);
-  $('#admin-key').value = '';
-  showConsole();
+async function logout() {
+  const token=state.token;
+  try {
+    if(token) await fetch('/auth/v1/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}});
+  } finally { clearSession(); }
+}
+async function login(username,password) {
+  const response=await fetch('/auth/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),cache:'no-store'});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(result.error||'登录失败');
+  state.token=result.token;state.user=result.user;state.permissions=result.permissions||[];
+  sessionStorage.setItem('api_manager_session',state.token);
+  $('#password').value='';showConsole();
 }
 
 async function hydrateSession() {
-  if (!state.key) return showLogin();
+  if (!state.token) return showLogin();
   try { const result = await api('/auth/v1/me'); state.user = result.user; state.permissions = result.permissions || []; showConsole(); }
   catch (_) { showLogin(); }
 }
 
 function renderPage() {
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', plugins:'插件', observability:'运行观测', audit:'审计日志'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => button.classList.toggle('active', button.dataset.page === state.page));
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
   return renderers[state.page]();
 }
 
@@ -114,8 +152,8 @@ async function renderOverview() {
       <div class="stat"><span class="small">服务状态</span><div class="number">${esc(ready.status)}</div></div>
     </div>
     <div class="split spaced-split">
-      <div class="card"><h2>快速开始</h2><p class="muted">先创建调用凭证，再创建接口并发布。管理操作使用管理员 KEY，业务接口使用独立调用 KEY。</p><div class="actions"><button data-go="apis">管理接口</button><button class="secondary" data-go="credentials">创建凭证</button></div></div>
-      <div class="card"><h2>当前认证</h2><p>${esc(state.user?.email)}</p><p class="small">角色：${esc((state.user?.roles || [state.user?.role]).filter(Boolean).join(', '))}</p><p class="small">权限：${state.permissions.length} 项</p></div>
+      <div class="card"><h2>快速开始</h2><p class="muted">先创建调用凭证，再创建接口并发布。管理操作使用用户名和密码登录后的会话，并按用户角色校验权限。</p><div class="actions"><button data-go="apis">管理接口</button><button class="secondary" data-go="credentials">创建凭证</button></div></div>
+      <div class="card"><h2>当前账号</h2><p>${esc(state.user?.email)}</p><p class="small">角色：${esc((state.user?.roles || [state.user?.role]).filter(Boolean).join(', '))}</p><p class="small">权限：${state.permissions.length} 项</p></div>
     </div>`;
     $$('[data-go]').forEach((button) => button.onclick = () => { state.page = button.dataset.go; renderPage(); });
   } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
@@ -155,7 +193,7 @@ function apiForm(item = {}) {
       <label class="field"><span class="field-label">名称 <span aria-hidden="true">*</span></span><input name="name" required placeholder="订单查询" value="${value('name')}"></label>
       <div class="grid-2">
         <label class="field"><span class="field-label">方法 <span aria-hidden="true">*</span></span><select name="method"><option ${selected(item.method,'GET')}>GET</option><option ${selected(item.method,'POST')}>POST</option><option ${selected(item.method,'PUT')}>PUT</option><option ${selected(item.method,'DELETE')}>DELETE</option><option ${selected(item.method,'PATCH')}>PATCH</option><option ${selected(item.method,'HEAD')}>HEAD</option><option ${selected(item.method,'OPTIONS')}>OPTIONS</option>${item.method && !['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS'].includes(item.method) ? `<option selected>${esc(item.method)}</option>` : ''}</select></label>
-        <label class="field"><span class="field-label">鉴权</span><select name="auth_mode"><option value="api_key">KEY</option></select></label>
+        <label class="field"><span class="field-label">鉴权</span><select name="auth_mode"><option value="api_key" ${selected(item.auth_mode,"api_key")}>KEY</option><option value="none" ${selected(item.auth_mode,"none")}>无需验证</option></select></label>
       </div>
       <label class="field"><span class="field-label">访问路径 <span aria-hidden="true">*</span></span><input name="path" required placeholder="/api/example/v1/status" value="${value('path')}" aria-describedby="path-hint"><span id="path-hint" class="field-hint">必须以 / 开头；只填路径，不要填插件名、完整网址或连续斜线。</span></label>
       <label class="field"><span class="field-label">说明</span><input name="description" value="${value('description')}" placeholder="简短描述这个接口的用途"></label>
@@ -177,6 +215,16 @@ function apiForm(item = {}) {
       <summary><span><strong>响应与校验</strong><small>静态响应和 JSON Schema 均为可选</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body"><label class="field"><span class="field-label">响应状态码</span><input type="number" min="0" max="599" name="response_status" value="${value('response_status',item.response_body ? '200' : '0')}"><span class="field-hint">填 0 使用默认行为。</span></label><label class="field"><span class="field-label">静态响应 JSON</span><textarea name="response_body" placeholder='{"message":"ok"}'>${value('response_body')}</textarea></label><div class="grid-2"><label class="field"><span class="field-label">请求 JSON Schema</span><textarea name="request_schema" class="schema-input" placeholder='{"type":"object"}'>${jsonValue('request_schema')}</textarea></label><label class="field"><span class="field-label">响应 JSON Schema</span><textarea name="response_schema" class="schema-input" placeholder='{"type":"object"}'>${jsonValue('response_schema')}</textarea></label></div><label class="field"><span class="field-label">参数 JSON Schema</span><textarea name="parameters_schema" class="schema-input" placeholder='{"type":"object","properties":{"query":{"type":"object"}}}'>${jsonValue('parameters_schema')}</textarea><span class="field-hint">根对象可包含 query、path、header。</span></label></div>
     </details>
+    <details class="form-section form-section-collapsible" ${item.public_visible ? 'open' : ''}>
+      <summary><span><strong>公开目录</strong><small>默认隐藏，只输出独立的公开调用资料</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="form-section-body">
+        <label class="checklist"><input type="checkbox" name="public_visible" ${item.public_visible ? 'checked' : ''}>在公开前端展示此接口</label>
+        <label class="field"><span class="field-label">公开标题</span><input name="public_title" maxlength="120" value="${value('public_title')}" placeholder="面向调用方的接口名称"></label>
+        <label class="field"><span class="field-label">公开分类</span><input name="public_category" maxlength="48" value="${value('public_category')}" placeholder="例如：数据查询"></label>
+        <label class="field"><span class="field-label">公开说明</span><textarea name="public_summary" maxlength="600" placeholder="仅填写可公开的用途说明，不要写内部地址、密码或 KEY">${value('public_summary')}</textarea></label>
+        <p class="small">只有已发布、已启用且打开此开关的接口才会显示。私有说明、上游配置、真实响应及凭据不会输出。隐藏目录不等于关闭接口。</p>
+      </div>
+    </details>
     <details class="form-section form-section-collapsible" ${hasQuota ? 'open' : ''}>
       <summary><span><strong>限流与配额</strong><small>按接口控制调用频率和周期配额</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body"><div class="grid-2"><label class="field"><span class="field-label">每分钟限制</span><input type="number" min="0" name="rate_limit_per_minute" value="${value('rate_limit_per_minute','0')}"></label><label class="field"><span class="field-label">每日配额</span><input type="number" min="0" name="daily_quota" value="${value('daily_quota','0')}"></label></div><label class="field"><span class="field-label">每月配额</span><input type="number" min="0" name="monthly_quota" value="${value('monthly_quota','0')}"></label></div>
@@ -189,6 +237,7 @@ function apiFormData(form) {
   for (const key of ['request_schema', 'response_schema', 'parameters_schema']) { if (data[key]?.trim()) data[key] = JSON.parse(data[key]); else delete data[key]; }
   for (const key of ['rate_limit_per_minute', 'daily_quota', 'monthly_quota', 'response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
   data.strip_path = form.elements.strip_path.checked;
+  data.public_visible = form.elements.public_visible.checked;
   return data;
 }
 
@@ -300,6 +349,50 @@ function showCredentialKey(key, title) {
   };
   $('#hide-credential-key').onclick = () => { input.value = ''; panel.remove(); };
 }
+
+async function renderUsers() {
+  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
+  try { const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]); page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td>${esc(u.email)}</td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ')}</td><td><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>邮箱<input name="email" type="text" required></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required></label><label>角色<select name="role">${roles.filter(r=>can('*') || (r.name !== 'super_admin' && r.name !== 'tenant_admin' && !(r.permissions || []).some(p=>p==='*'||p==='user.manage'))).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</select></label><button>创建用户</button></form></div></div>`; $('#user-form').onsubmit=async(e)=>{e.preventDefault();try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))});notice('用户创建成功',true);renderUsers()}catch(err){notice(err.message)}}; $$('#page [data-user-status]').forEach(b=>b.onclick=async()=>{try{await api(`/admin/v1/users/${b.dataset.userStatus}/status`,{method:'PUT',body:JSON.stringify({status:b.dataset.status})});renderUsers()}catch(e){notice(e.message)}}); $$('#page [data-user-roles]').forEach(b=>b.onclick=async()=>{const value=prompt('输入角色，多个角色用英文逗号分隔');if(value===null)return;try{await api(`/admin/v1/users/${b.dataset.userRoles}/roles`,{method:'PUT',body:JSON.stringify({roles:value.split(',').map(x=>x.trim()).filter(Boolean)})});renderUsers()}catch(e){notice(e.message)}}); } catch(error){page.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+}
+
+async function renderRoles() {
+  const page = $('#page');
+  page.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const [roles, permissions] = await Promise.all([api('/admin/v1/roles'), api('/admin/v1/permissions')]);
+    page.innerHTML = `<div class="roles-page">
+      <div class="table-wrap roles-table-wrap"><table class="roles-table"><thead><tr><th scope="col">角色</th><th scope="col">说明</th><th scope="col">权限</th><th scope="col">操作</th></tr></thead><tbody>
+      ${roles.map(r => `<tr><td><strong title="${esc(r.name)}">${esc(roleLabel(r.name))}</strong>${roleLabels[r.name] ? `<br><span class="small">${esc(r.name)}</span>` : ''}</td><td>${esc(roleDescription(r))}</td><td>${rolePermissionsSummary(r.permissions || [])}</td><td>${can('*') && r.name !== 'super_admin' ? `<button class="secondary" data-role="${esc(r.name)}">编辑权限</button>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${can('*') ? `<section class="card role-editor" id="role-editor"><h2>创建角色</h2><p class="small">设置角色信息，并选择该角色可以执行的操作。</p><form id="role-form" class="form-stack"><div class="role-fields"><label>名称<input name="name" required placeholder="例如 support"></label><label>说明<input name="description" placeholder="简述角色用途"></label></div>${permissionChecklist(permissions)}<div class="role-form-actions"><button type="submit">创建角色</button></div></form></section>` : ''}
+    </div>`;
+    const createForm = $('#role-form');
+    if (createForm) createForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      try {
+        await api('/admin/v1/roles', {method:'POST', body:JSON.stringify({name:form.get('name'), description:form.get('description'), permissions:form.getAll('permission')})});
+        notice('角色创建成功', true); renderRoles();
+      } catch (error) { notice(error.message); }
+    };
+    $$('#page [data-role]').forEach(button => button.onclick = () => {
+      const role = roles.find(item => item.name === button.dataset.role);
+      if (!role) return;
+      const editor = $('#role-editor');
+      editor.innerHTML = `<h2>编辑权限：${esc(roleLabel(role.name))}</h2><p class="small">${esc(role.name)} · 勾选要授予的权限，保存后立即生效。</p><form id="role-permissions-form" class="form-stack">${permissionChecklist(permissions, role.permissions || [])}<div class="role-form-actions"><button type="button" class="secondary" id="cancel-role-edit">取消</button><button type="submit">保存权限</button></div></form>`;
+      $('#cancel-role-edit').onclick = () => renderRoles();
+      $('#role-permissions-form').onsubmit = async (event) => {
+        event.preventDefault();
+        const codes = new FormData(event.currentTarget).getAll('permission');
+        try {
+          await api(`/admin/v1/roles/${encodeURIComponent(role.name)}/permissions`, {method:'PUT', body:JSON.stringify({permissions:codes})});
+          notice('权限保存成功', true); renderRoles();
+        } catch (error) { notice(error.message); }
+      };
+    });
+  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+}
+
 
 function formatMetric(value, digits = 0) {
   const number = Number(value || 0);
@@ -568,7 +661,7 @@ function pluginRouteRow(item, route) {
 }
 
 function authLabel(mode) {
-  return mode === 'api_key' ? 'KEY' : '请更新为 KEY';
+  return mode === 'none' ? '无需验证' : 'KEY';
 }
 
 function renderPluginLibrary(entries) {
@@ -596,11 +689,11 @@ function pluginRow(item, library = []) {
 async function uploadPlugin(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const headers = {}; if (state.key) headers['X-API-Key'] = state.key;
+  const headers = {}; if (state.token) headers.Authorization = `Bearer ${state.token}`;
   try {
     const response = await fetch('/admin/v1/plugins', {method:'POST', headers, body:new FormData(form)});
     const body = await response.json().catch(() => ({}));
-    if (response.status === 401) { logout(); throw new Error('管理员 KEY 无效，请重新输入'); }
+    if (response.status === 401) { clearSession(); throw new Error('登录已过期，请重新登录'); }
     if (!response.ok) throw new Error(body.error || `请求失败：${response.status}`);
     notice(`插件 ${body.name || body.id || ''} 上传成功，请启用后使用`, true); renderPlugins();
   } catch (error) { notice(error.message); }
@@ -634,7 +727,7 @@ $('#login-form').onsubmit = async (event) => {
   const form = event.currentTarget;
   notice('', false, 'auth');
   try {
-    await withSubmitting(form, '登录中…', () => login($('#admin-key').value));
+    await withSubmitting(form, '登录中…', () => login($('#username').value,$('#password').value));
   } catch (error) { notice(authErrorMessage(error), false, 'auth'); }
 };
 $('#logout').onclick = logout;

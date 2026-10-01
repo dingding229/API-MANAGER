@@ -11,7 +11,7 @@ import stat
 DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
 IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
-FILES = ("admin_token", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
+FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
 
 
 def validate(environ, project_root):
@@ -41,11 +41,11 @@ def validate(environ, project_root):
         except (OSError, UnicodeError):
             errors.append(f"{name} is not readable text")
             continue
-        if len(value.encode()) < 32 or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
+        if len(value.encode()) < (12 if name == "admin_password" else 32) or (name == "admin_password" and len(value.encode()) > 72) or value != value.strip() or any(c in value for c in ("\r", "\n", "\x00")):
             errors.append(f"{name} must contain a single-line 32+ byte secret")
         values.append(value)
     if len(set(values)) != len(values):
-        errors.append("All six credentials must be distinct")
+        errors.append("All credentials must be distinct")
     if environ.get("OBSERVABILITY_STACK_ENABLED", "false").lower() in ("1", "true", "yes"):
         match = SIZE.fullmatch(environ.get("API_MEMORY_LIMIT") or "2g")
         multipliers = {"": 1, "b": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}
@@ -63,7 +63,7 @@ def main():
         service = config["services"]["api-manager"]
         effective = dict(os.environ)
         effective["API_MANAGER_IMAGE"] = service["image"]
-        effective["SECRETS_DIR"] = str(Path(config["secrets"]["admin_token"]["file"]).parent)
+        effective["SECRETS_DIR"] = str(Path(config["secrets"]["admin_password"]["file"]).parent)
         effective["OBSERVABILITY_STACK_ENABLED"] = str(service["environment"]["OBSERVABILITY_STACK_ENABLED"])
         effective["API_MEMORY_LIMIT"] = str(service["mem_limit"])
         errors = validate(effective, project_root)

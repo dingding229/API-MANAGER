@@ -20,6 +20,7 @@ type Memory struct {
 	apis        map[string]model.API
 	credentials map[string]model.Credential
 	users       map[string]model.User
+	sessions    map[string]model.Session
 	releases    map[string][]model.Release
 	permissions map[string]model.Permission
 	roles       map[string]model.Role
@@ -31,7 +32,7 @@ type Memory struct {
 }
 
 func NewMemory() *Memory {
-	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
+	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), sessions: make(map[string]model.Session), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
 	memory.seedRBAC()
 	return memory
 }
@@ -292,6 +293,13 @@ func (m *Memory) UpdateUserStatus(id, status string) error {
 	user.Status = status
 	user.UpdatedAt = time.Now().UTC()
 	m.users[id] = user
+	if status == "disabled" {
+		for hash, session := range m.sessions {
+			if session.UserID == id {
+				delete(m.sessions, hash)
+			}
+		}
+	}
 	return nil
 }
 

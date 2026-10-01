@@ -43,8 +43,8 @@ func validRoute(r Route) error {
 	if !routeMethod[r.Method] || !strings.HasPrefix(r.Path, "/api/") || strings.Contains(r.Path, "//") || strings.ContainsAny(r.Path, "?#\\ \t\r\n") || len(r.Path) > 512 {
 		return errors.New("route requires a supported uppercase method and a clean /api/ path")
 	}
-	if r.AuthMode != "api_key" {
-		return errors.New("route auth_mode must be api_key")
+	if r.AuthMode != "api_key" && r.AuthMode != "none" {
+		return errors.New("route auth_mode must be api_key or none")
 	}
 	params := make(map[string]bool)
 	parts := strings.Split(r.Path, "/")
