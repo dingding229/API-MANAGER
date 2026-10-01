@@ -21,7 +21,7 @@ func validUsername(value string) bool {
 	address, err := mail.ParseAddress(value)
 	return usernamePattern.MatchString(value) || (err == nil && address.Address == value && len(value) <= 254)
 }
-func validPassword(value string) bool { return len(value) >= 12 && len(value) <= 72 }
+func validPassword(value string) bool { return len(value) >= 8 && len(value) <= 72 }
 
 // UpdateProfile separates self-service reauthentication from delegated user management.
 // Credential changes and revocation of all target sessions are a single storage operation.
@@ -54,7 +54,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	passwordHash := target.PasswordHash
 	if request.Password != nil {
 		if !validPassword(*request.Password) {
-			return model.User{}, false, fmt.Errorf("%w: password must contain 12 to 72 bytes", ErrInvalidProfile)
+			return model.User{}, false, fmt.Errorf("%w: password must contain 8 to 72 bytes", ErrInvalidProfile)
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*request.Password), passwordHashCost)
 		if err != nil {

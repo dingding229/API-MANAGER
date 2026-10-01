@@ -15,8 +15,11 @@ import (
 func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	memory := store.NewMemory()
 	service := NewService(memory)
-	if _, err := service.Create("short@example.com", "12345678901", "viewer"); err == nil {
-		t.Fatal("11-byte password was accepted")
+	if _, err := service.Create("short@example.com", "1234567", "viewer"); err == nil {
+		t.Fatal("7-byte password was accepted")
+	}
+	if _, err := service.Create("eight-byte-user", "12345678", "viewer"); err != nil {
+		t.Fatalf("8-byte password was rejected: %v", err)
 	}
 	created, err := service.Create("valid@example.com", "123456789012", "viewer")
 	if err != nil {
