@@ -1,0 +1,128 @@
+/* Loaded after page styles: the single source of truth for native form controls.
+   Native select/input semantics are retained for keyboard and screen readers. */
+:root {
+  --control-height: 44px;
+  --control-radius: 8px;
+  --control-border: #cbd4e2;
+  --control-hover-border: #8b9dbb;
+  --control-focus-border: #365cff;
+  --control-focus-ring: rgba(54, 92, 255, .2);
+  --control-muted: #59677e;
+  --control-selected: #f0f3ff;
+}
+
+form .field,
+.form-stack label:not(.permission-option):not(.role-select-option):not(.checkbox-field) {
+  align-self: start;
+  align-content: start;
+  min-width: 0;
+}
+form .grid-2 { align-items: start; }
+.form-section-primary { display: grid; gap: 16px; }
+.form-section-primary .form-section-heading { margin-bottom: 0; }
+
+form select,
+form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]) {
+  height: var(--control-height);
+  min-height: var(--control-height);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  align-self: start;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background-color: var(--panel);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 22px;
+  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+form select {
+  appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2359677e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+form textarea { border-color: var(--control-border); border-radius: var(--control-radius); }
+form select:hover:not(:disabled), form input:hover:not(:disabled), form textarea:hover:not(:disabled) { border-color: var(--control-hover-border); }
+form select:focus-visible, form input:focus-visible, form textarea:focus-visible {
+  border-color: var(--control-focus-border);
+  outline: 2px solid var(--control-focus-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--control-focus-ring);
+}
+form select:disabled, form input:disabled, form textarea:disabled {
+  cursor: not-allowed;
+  color: var(--control-muted);
+  background-color: var(--surface-soft);
+  opacity: .7;
+}
+form .field-label { color: var(--ink); line-height: 20px; }
+form .field-hint { margin: 0; color: var(--control-muted); line-height: 18px; font-size: 12px; font-weight: 400; }
+form select + .field-hint { max-width: none; }
+
+/* The glyph stays compact, but its associated label is the full touch target. */
+form input[type="checkbox"] {
+  appearance: none;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  align-self: center;
+  box-sizing: border-box;
+  border: 1.5px solid #8b9bb2;
+  border-radius: 4px;
+  background-color: var(--panel);
+  cursor: pointer;
+  accent-color: var(--brand);
+  transition: border-color .16s ease, background-color .16s ease;
+}
+form input[type="checkbox"]:checked {
+  border-color: var(--brand);
+  background-color: var(--brand);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m3.2 8.2 3.1 3.1 6.4-6.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: center;
+  background-size: 14px;
+  background-repeat: no-repeat;
+}
+form .checkbox-field, form .permission-option, form .role-select-option {
+  display: flex;
+  align-items: center;
+  align-self: start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 9px 10px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 20px;
+  font-weight: 500;
+  transition: background-color .16s ease, border-color .16s ease;
+}
+form .checkbox-field:hover, form .permission-option:hover, form .role-select-option:hover { background-color: var(--surface-muted); }
+form .checkbox-field:has(input:checked), form .permission-option:has(input:checked), form .role-select-option:has(input:checked) {
+  border-color: #d4ddfb;
+  background-color: var(--control-selected);
+}
+form .checkbox-field > span, form .permission-option > span, form .role-select-option > span { min-width: 0; overflow-wrap: anywhere; }
+form .permission-options, form .role-select-list { gap: 8px; }
+.permission-picker-actions .link { padding: 4px 8px; min-height: 44px; color: var(--brand-strong); }
+
+@media (max-width: 600px) {
+  form select,
+  form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]) { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  form input, form select, form textarea, form .checkbox-field, form .permission-option, form .role-select-option { transition: none; }
+}
+@media (forced-colors: active) {
+  form select, form input[type="checkbox"] { appearance: auto; background-image: none; }
+  form input[type="checkbox"]:checked { background-color: Canvas; border-color: ButtonText; }
+}

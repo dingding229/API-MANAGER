@@ -23,7 +23,7 @@ func ConsoleAt(base string) http.Handler {
 		if r.URL.Path == base || path == "" || path == "index.html" {
 			path = "index.html"
 		}
-		if path != "index.html" && path != "app.css" && path != "app.js" {
+		if path != "index.html" && path != "app.css" && path != "app.js" && path != "controls.css" {
 			http.NotFound(w, r)
 			return
 		}

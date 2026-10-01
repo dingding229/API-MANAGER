@@ -15,7 +15,7 @@ func TestConfigurableAdminRouting(t *testing.T) {
 		for _, tc := range []struct {
 			path   string
 			status int
-		}{{base + "/", 200}, {base + "/app.js", 200}, {base + "/app.css", 200}, {"/admin/v1/apis", 401}, {base + "/unsupported/", 404}} {
+		}{{base + "/", 200}, {base + "/app.js", 200}, {base + "/app.css", 200}, {base + "/controls.css", 200}, {"/admin/v1/apis", 401}, {base + "/unsupported/", 404}} {
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, httptest.NewRequest("GET", tc.path, nil))
 			if w.Code != tc.status {
@@ -46,5 +46,21 @@ func TestConsoleNavigationContainsOnlyApplicationFeatures(t *testing.T) {
 	}
 	if strings.Count(html, "data-page=") != 8 {
 		t.Fatal("unexpected extra navigation entry")
+	}
+}
+
+func TestConsoleLoadsCanonicalControlsAfterPageStyles(t *testing.T) {
+	w := httptest.NewRecorder()
+	Console().ServeHTTP(w, httptest.NewRequest("GET", "/admin/", nil))
+	html := w.Body.String()
+	base := strings.Index(html, "/admin/app.css")
+	controls := strings.Index(html, "/admin/controls.css")
+	if base < 0 || controls <= base {
+		t.Fatal("canonical control stylesheet must load after page styles")
+	}
+	css := httptest.NewRecorder()
+	Console().ServeHTTP(css, httptest.NewRequest("GET", "/admin/controls.css", nil))
+	if css.Code != 200 || !strings.Contains(css.Body.String(), "--control-height: 44px") {
+		t.Fatal("shared control styles missing")
 	}
 }
