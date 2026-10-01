@@ -25,11 +25,9 @@ var configuration embed.FS
 var safePath = regexp.MustCompile(`^/[a-zA-Z0-9_./-]+$`)
 
 type Options struct {
-	Directory       string
-	APIPort         string
-	MetricsToken    string
-	GrafanaPassword string
-	GrafanaRootURL  string
+	Directory    string
+	APIPort      string
+	MetricsToken string
 	// BinaryDir is primarily for testing; the image installs upstream binaries here.
 	BinaryDir string
 }
@@ -46,11 +44,9 @@ type Stack struct {
 func (s *Stack) Errors() <-chan error { return s.errs }
 
 // Start writes the embedded configuration to a writable data volume, then starts
-// the six independent upstream processes. All upstream processes listen on loopback; Grafana is exposed only via the authenticated management proxy.
+// the five independent upstream processes. All upstream processes listen on loopback.
 func Start(ctx context.Context, options Options) (*Stack, error) {
-	if options.GrafanaPassword == "" {
-		return nil, errors.New("GRAFANA_ADMIN_PASSWORD (or GRAFANA_ADMIN_PASSWORD_FILE) is required when the full stack is enabled")
-	}
+
 	if !safePath.MatchString(options.Directory) || strings.Contains(options.Directory, "..") {
 		return nil, errors.New("OBSERVABILITY_DIR must be an absolute path with safe characters")
 	}
@@ -63,7 +59,7 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 	if !safePath.MatchString(options.BinaryDir) || strings.Contains(options.BinaryDir, "..") {
 		return nil, errors.New("observability binary directory must be an absolute safe path")
 	}
-	for _, name := range []string{"loki", "tempo", "alertmanager", "prometheus", "alloy", "grafana"} {
+	for _, name := range []string{"loki", "tempo", "alertmanager", "prometheus", "alloy"} {
 		if _, err := os.Stat(filepath.Join(options.BinaryDir, name)); err != nil {
 			return nil, fmt.Errorf("%s not installed in image: %w", name, err)
 		}
@@ -78,13 +74,8 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 			_ = os.RemoveAll(configDir)
 		}
 	}()
-	for _, dir := range []string{filepath.Join(options.Directory, "loki"), filepath.Join(options.Directory, "tempo"), filepath.Join(options.Directory, "prometheus"), filepath.Join(options.Directory, "alertmanager"), filepath.Join(options.Directory, "alloy"), filepath.Join(options.Directory, "grafana"), filepath.Join(options.Directory, "grafana", "plugins"), filepath.Join(options.Directory, "grafana", "log")} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return nil, fmt.Errorf("create stack directory %s: %w", dir, err)
-		}
-	}
-	for _, subdir := range []string{"grafana/provisioning/plugins", "grafana/provisioning/alerting"} {
-		if err := os.MkdirAll(filepath.Join(configDir, subdir), 0700); err != nil {
+	for _, name := range []string{"loki", "tempo", "prometheus", "alertmanager", "alloy"} {
+		if err := os.MkdirAll(filepath.Join(options.Directory, name), 0700); err != nil {
 			return nil, err
 		}
 	}
@@ -96,7 +87,7 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 			return nil, err
 		}
 	}
-	s := &Stack{errs: make(chan error, 6), configDir: configDir}
+	s := &Stack{errs: make(chan error, 5), configDir: configDir}
 	cleanupConfig = false
 	type service struct {
 		name string
@@ -109,15 +100,6 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 		{"alertmanager", []string{"--config.file=" + filepath.Join(configDir, "alertmanager.yml"), "--storage.path=" + filepath.Join(options.Directory, "alertmanager"), "--web.listen-address=127.0.0.1:9093", "--cluster.listen-address="}, nil},
 		{"prometheus", []string{"--config.file=" + filepath.Join(configDir, "prometheus.yml"), "--storage.tsdb.path=" + filepath.Join(options.Directory, "prometheus"), "--web.listen-address=127.0.0.1:9090"}, nil},
 		{"alloy", []string{"run", filepath.Join(configDir, "alloy.alloy"), "--storage.path=" + filepath.Join(options.Directory, "alloy"), "--server.http.listen-addr=127.0.0.1:12345"}, nil},
-		{"grafana", []string{"server", "--homepath=/usr/share/grafana", "--config=/etc/grafana/grafana.ini"}, []string{
-			"GF_PATHS_HOME=/usr/share/grafana", "GF_PATHS_CONFIG=/etc/grafana/grafana.ini", "GF_PATHS_DATA=" + filepath.Join(options.Directory, "grafana"),
-			"GF_PATHS_LOGS=" + filepath.Join(options.Directory, "grafana", "log"), "GF_PATHS_PLUGINS=" + filepath.Join(options.Directory, "grafana", "plugins"),
-			"GF_PATHS_PROVISIONING=" + filepath.Join(configDir, "grafana", "provisioning"),
-			"GF_SERVER_HTTP_ADDR=127.0.0.1", "GF_SERVER_HTTP_PORT=3000", "GF_SECURITY_ADMIN_PASSWORD=" + options.GrafanaPassword,
-			"GF_SERVER_ROOT_URL=" + options.GrafanaRootURL, "GF_SERVER_SERVE_FROM_SUB_PATH=true", "GF_SECURITY_ALLOW_EMBEDDING=true",
-			"GF_AUTH_PROXY_ENABLED=true", "GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER", "GF_AUTH_PROXY_HEADER_PROPERTY=username", "GF_AUTH_PROXY_AUTO_SIGN_UP=true", "GF_AUTH_PROXY_HEADERS=Name:X-WEBAUTH-NAME Role:X-WEBAUTH-ROLE", "GF_AUTH_PROXY_WHITELIST=127.0.0.1", "GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false", "GF_AUTH_DISABLE_LOGIN_FORM=true", "GF_AUTH_BASIC_ENABLED=false", "GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer", "GF_AUTH_PROXY_SYNC_TTL=0", "GF_AUTH_DISABLE_SIGNOUT_MENU=true",
-			"GF_USERS_ALLOW_SIGN_UP=false", "GF_AUTH_ANONYMOUS_ENABLED=false", "GF_PLUGINS_PREINSTALL_DISABLED=true",
-		}},
 	}
 	for _, item := range services {
 		// #nosec G204 -- executable names are from the fixed service table and BinaryDir is validated above.

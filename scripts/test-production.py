@@ -34,7 +34,7 @@ class ProductionScriptTests(unittest.TestCase):
     def test_initialization_is_complete_and_never_overwrites(self):
         before = {p.name: p.read_bytes() for p in self.folder.iterdir()}
         self.assertEqual(set(before), set(preflight.FILES))
-        self.assertEqual(len(set(before.values())), 6)
+        self.assertEqual(len(set(before.values())), 5)
         result = subprocess.run([sys.executable, str(ROOT / "scripts/init-production-secrets.py"), "--dir", str(self.folder)], capture_output=True)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.folder.iterdir()})

@@ -19,7 +19,6 @@ import (
 	"api-manager/internal/catalog"
 	"api-manager/internal/config"
 	"api-manager/internal/gateway"
-	"api-manager/internal/grafanaproxy"
 	"api-manager/internal/httpx"
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
@@ -90,7 +89,7 @@ func main() {
 			logger.Error("full observability stack requires HTTP_ADDR with a numeric port", "error", splitErr)
 			os.Exit(1)
 		}
-		bundledStack, err = stack.Start(rootCtx, stack.Options{Directory: cfg.ObservabilityDir, APIPort: port, MetricsToken: cfg.MetricsToken, GrafanaPassword: cfg.GrafanaAdminPassword, GrafanaRootURL: strings.TrimRight(cfg.PublicBaseURL, "/") + cfg.AdminPath + "/grafana/"})
+		bundledStack, err = stack.Start(rootCtx, stack.Options{Directory: cfg.ObservabilityDir, APIPort: port, MetricsToken: cfg.MetricsToken})
 		if err != nil {
 			logger.Error("start bundled observability stack failed", "error", err)
 			os.Exit(1)
@@ -151,9 +150,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	grafana := grafanaproxy.New(userService, cfg.AdminPath, cfg.ObservabilityStackEnabled, logger)
-	grafana.SetSecureCookies(strings.HasPrefix(cfg.PublicBaseURL, "https://"))
-	web.MountAdministration(mux, cfg.AdminPath, admin, authHandler, grafana, http.HandlerFunc(grafana.Grant))
+	web.MountAdministration(mux, cfg.AdminPath, admin, authHandler)
 	mux.Handle("/api/", gatewayHandler)
 	publicExport := catalog.New(activeStore, cfg.PublicAPIBaseURL)
 	mux.Handle("/public/v1/catalog", publicExport)

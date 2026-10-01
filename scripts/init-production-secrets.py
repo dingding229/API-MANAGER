@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import secrets
 
-FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
+FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password")
 
 
 def main():

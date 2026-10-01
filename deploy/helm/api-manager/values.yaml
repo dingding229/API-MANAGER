@@ -35,7 +35,6 @@ resources:
 env:
   HTTP_ADDR: ":8080"
   ADMIN_PATH: /admin
-  PUBLIC_BASE_URL: http://localhost:8080
   PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
   ADMIN_USERNAME: admin
   LOG_LEVEL: info
@@ -57,7 +56,6 @@ secrets:
   CREDENTIAL_ENCRYPTION_KEY: ""
   POSTGRES_DSN: ""
   METRICS_TOKEN: ""
-  GRAFANA_ADMIN_PASSWORD: ""
 
 persistence:
   enabled: true

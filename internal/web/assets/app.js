@@ -1,4 +1,3 @@
-const adminPath = document.body.dataset.adminPath || "/admin";
 sessionStorage.removeItem('api_manager_key');
 const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {} };
 const $ = (selector) => document.querySelector(selector);
@@ -134,10 +133,10 @@ function renderPage() {
   const oldPage = $('#page');
   const newPage = document.createElement('div'); newPage.id = 'page';
   oldPage.replaceWith(newPage);
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', grafana:'Grafana 仪表盘', audit:'审计日志'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => button.classList.toggle('active', button.dataset.page === state.page));
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, grafana: renderGrafana, audit: renderAuditLogs};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
   return renderers[state.page]();
 }
 
@@ -748,27 +747,3 @@ $('#logout').onclick = logout;
 $('#refresh').onclick = renderPage;
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
 hydrateSession();
-
-
-async function renderGrafana() {
-  if (state.page !== 'grafana') return;
- const page = $('#page');
- if (!page.isConnected) return; page.innerHTML = `<section class="card grafana-panel"><div class="grafana-heading"><div><h2>Grafana 仪表盘</h2><p class="small">使用当前账号权限访问，无需单独登录或开放其他端口。</p></div><button id="grafana-reconnect" class="secondary">重新连接</button></div><p id="grafana-status" role="status">正在连接 Grafana…</p><div id="grafana-content"></div></section>`;
- const connect = async () => {
-  const status = page.querySelector('#grafana-status'); const content = page.querySelector('#grafana-content');
-  if (!status || !content) return;
-  status.textContent = '正在连接 Grafana…'; content.replaceChildren();
-  try {
-   await api(`${adminPath}/grafana-session`, {method:'POST'});
-   if (state.page !== 'grafana' || !page.isConnected) return;
-   const frame = document.createElement('iframe');
-   frame.title = 'Grafana 运行监控仪表盘';
-   frame.src = `${adminPath}/grafana/d/api-manager-overview/api-manager-overview?orgId=1&kiosk`;
-   frame.className = 'grafana-frame'; frame.referrerPolicy = 'same-origin';
-   frame.addEventListener('load', () => { if(status.isConnected) status.textContent='已连接。连接权限每次请求重新校验；过期时请重新连接。'; });
-   content.appendChild(frame);
-  } catch(error) { if(status.isConnected) status.textContent = `无法连接 Grafana：${error.message}`; }
- };
- $('#grafana-reconnect').onclick = connect;
- await connect();
-}

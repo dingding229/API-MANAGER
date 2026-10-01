@@ -94,8 +94,6 @@ jobs:
           SECRETS_DIR="$secret_dir" docker compose --env-file /dev/null -f docker-compose.yml config -q
           SECRETS_DIR="$secret_dir" docker compose --env-file /dev/null -f docker-compose.yml config --images \
             | grep -Fx 'docker.io/dingding229/api-manager:latest'
-      - name: Validate bundled Grafana dashboard
-        run: python3 -m json.tool internal/stack/config/grafana/dashboards/api-manager.json >/dev/null
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - name: Lint Helm chart
         run: |
@@ -182,7 +180,7 @@ jobs:
           container_id=$(docker create api-manager:scan)
           trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
           docker export "$container_id" | tar -tf - > /tmp/api-manager-files.txt
-          for component in loki tempo prometheus alertmanager alloy grafana; do
+          for component in loki tempo prometheus alertmanager alloy; do
             grep -Fx "usr/local/bin/$component" /tmp/api-manager-files.txt >/dev/null || {
               echo "Bundled observability executable missing: $component" >&2
               exit 1
@@ -236,13 +234,11 @@ jobs:
           assert status==200
           session=login['token']
           assert call('GET','/auth/v1/me',session=session)[0]==200
-          # The front page and admin UI share the API listener. Grafana is
-          # disabled for this small integration run, but its route must require login.
+          # The front page and admin UI share the API listener.
           for path in ('/', '/admin/', '/admin/app.js'):
               with urlopen('http://127.0.0.1:8080'+path,timeout=10) as response:
                   assert response.status==200
           assert call('GET','/catalog.json')[0]==200
-          assert call('GET','/admin/grafana/api/health')[0]==401
           assert call('GET','/admin/v1/apis',key='ak_invalid_business_key')[0]==401
           for mode in ('jwt','hmac'):
               assert call('POST','/admin/v1/apis',session=session,data={'name':'rejected','method':'GET','path':'/api/rejected','auth_mode':mode})[0]==400

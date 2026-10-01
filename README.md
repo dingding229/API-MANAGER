@@ -21,7 +21,7 @@ python3 scripts/init-production-secrets.py
 docker compose up -d
 ```
 
-初始化脚本生成 `secrets/` 目录及六个相互独立的凭据，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
+初始化脚本生成 `secrets/` 目录及五个相互独立的凭据，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
 
 访问 `http://127.0.0.1:8080/admin/`，使用用户名和密码登录。
 
@@ -77,9 +77,8 @@ docker compose up -d --force-recreate api-manager
 | `API_MANAGER_IMAGE` | `docker.io/dingding229/api-manager:latest` | Docker Hub 镜像标签 |
 | `SECRETS_DIR` | `./secrets` | 只读凭据文件目录 |
 | `API_BIND_ADDR` | `127.0.0.1` | 统一入口的宿主机绑定地址 |
-| `API_PORT` | `8080` | 前台、管理后台、Grafana 和业务 API 的统一端口 |
+| `API_PORT` | `8080` | 前台、管理后台和业务 API 的统一端口 |
 | `ADMIN_PATH` | `/admin` | 管理后台路径，可自定义 |
-| `PUBLIC_BASE_URL` | `http://localhost:8080` | 用户实际访问的 Origin，用于 Grafana 子路径和 HTTPS Cookie |
 | `OBSERVABILITY_STACK_ENABLED` | `false` | 启动完整观测栈 |
 | `API_MEMORY_LIMIT` | `2g` | API Manager 容器内存上限 |
 | `API_CPUS` | `2.0` | API Manager CPU 上限 |
@@ -88,9 +87,9 @@ docker compose up -d --force-recreate api-manager
 
 ### 观测
 
-API Manager 内置日志、指标、Trace、告警和 Dashboard。镜像还包含 Loki、Alloy、Tempo、Prometheus、Alertmanager、Grafana。
+API Manager 内置日志、指标、Trace、告警和 Dashboard。镜像还包含 Loki、Alloy、Tempo、Prometheus、Alertmanager。
 
-启用六组件观测栈：
+启用五组件观测栈：
 
 ```bash
 OBSERVABILITY_STACK_ENABLED=true docker compose up -d api-manager
@@ -153,27 +152,23 @@ docker compose up -d redis api-manager
 | 公开接口文档 | `/` |
 | 公开目录数据（只读） | `/catalog.json` |
 | 管理后台 | `/admin/` |
-| 后台嵌入的 Grafana | `/admin/grafana/` |
 | 业务 API | `/api/` |
 
-例如将 `API_PORT=8081`、`API_BIND_ADDR=0.0.0.0` 写入服务器 `.env` 后，前台和后台分别访问 `http://服务器IP:8081/` 和 `http://服务器IP:8081/admin/`，不再开放第二个前端或 Grafana 端口。
+例如将 `API_PORT=8081`、`API_BIND_ADDR=0.0.0.0` 写入服务器 `.env` 后，前台和后台分别访问 `http://服务器IP:8081/` 和 `http://服务器IP:8081/admin/`，前后台共用同一个入口。
 
 ### 自定义管理路径
 
 ```env
 ADMIN_PATH=/operations
-PUBLIC_BASE_URL=https://api.example.com
 ```
 
-执行 `docker compose up -d --force-recreate api-manager` 后，后台路径为 `/operations/`，Grafana 路径为 `/operations/grafana/`。`ADMIN_PATH` 必须是非保留的绝对路径，不可包含查询字符串、路径穿越或结尾斜杠；自定义路径不是认证措施。管理 API 保持 `/admin/v1/`，仍强制用户名密码会话和角色权限。
+执行 `docker compose up -d --force-recreate api-manager` 后，后台路径为 `/operations/`。`ADMIN_PATH` 必须是非保留的绝对路径，不可包含查询字符串、路径穿越或结尾斜杠；自定义路径不是认证措施。管理 API 保持 `/admin/v1/`，仍强制用户名密码会话和角色权限。
 
-`PUBLIC_BASE_URL` 设置用户实际访问的 HTTP(S) Origin，用于 Grafana 子路径和 HTTPS Cookie。应与反向代理外部域名一致，不可包含凭据、路径、查询字符串或片段。正式公网登录应使用 HTTPS。
+### 运行观测
 
-### 后台 Grafana
+后台“运行观测”由主程序提供指标、日志、链路、基础告警与 Dashboard。开启 `OBSERVABILITY_STACK_ENABLED=true` 可同时运行 Loki、Alloy、Tempo、Prometheus、Alertmanager 五个组件，增强日志、链路和指标的采集与持久化；不启用时，自研观测页面仍然可用。
 
-启用 `OBSERVABILITY_STACK_ENABLED=true` 后，后台“Grafana 仪表盘”通过同源 iframe 展示内置监控，不需要第二次登录。Grafana 仅在容器内回环地址监听，主程序的认证代理逐请求验证登录会话和 `observability.read` 权限，阻止匿名访问、业务 KEY、身份头伪造和跨站请求。退出登录、用户禁用或撤销权限后，Grafana 访问随即失效。
-
-全栈建议宿主机至少提供 4 GiB 内存，主程序容器至少配置 `API_MEMORY_LIMIT=2g`。不启用完整栈时，后台的基础运行观测仍可使用，Grafana 页面会提示需要启用完整栈。
+完整栈建议宿主机至少提供 4 GiB 内存，主程序容器配置 `API_MEMORY_LIMIT=2g` 或更高。所有观测组件仅监听容器回环地址，不增加宿主机公开端口。正式公网登录应使用 HTTPS。
 
 ### 发布公开接口
 
@@ -193,4 +188,4 @@ PUBLIC_BASE_URL=https://api.example.com
 
 ## 镜像构建
 
-`Dockerfile` 从不可变上游源码构建全部观测组件。`Dockerfile.release` 使用已审核且摘要固定的观测栈基底，仅重建主程序与静态前端，适用于应用版本发布；发布前仍需扫描最终镜像。部署的运行镜像保持 Docker Hub `latest`，构建基底固定不影响部署更新。
+`Dockerfile` 从不可变上游源码构建全部观测组件。`Dockerfile.release` 仅从已审核且摘要固定的发行镜像提取五个观测组件执行文件，最终镜像使用独立的干净系统基底，并重建主程序与静态前端；不会继承提取来源的其他程序、静态资源、镜像层或端口配置。发布前仍需扫描最终镜像。部署的运行镜像保持 Docker Hub `latest`，构建基底固定不影响部署更新。

@@ -21,15 +21,11 @@ func ValidAdminPath(value string) bool {
 }
 
 // MountAdministration separates the fixed authenticated API routes from the
-// configurable UI and Grafana paths, including the default /admin prefix.
-func MountAdministration(mux *http.ServeMux, path string, admin, auth, grafana, grant http.Handler) {
+// configurable UI path, including the default /admin prefix.
+func MountAdministration(mux *http.ServeMux, path string, admin, auth http.Handler) {
 	mux.Handle("/admin/v1/", admin)
 	mux.Handle("/auth/", auth)
-	mux.Handle(path+"/grafana-session", grant)
-	mux.Handle(path+"/grafana/", grafana)
-	mux.Handle(path+"/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, path+"/grafana/", http.StatusTemporaryRedirect)
-	}))
+
 	console := ConsoleAt(path)
 	mux.Handle(path+"/", console)
 	mux.Handle(path, console)

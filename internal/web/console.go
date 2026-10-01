@@ -15,6 +15,18 @@ var assets embed.FS
 func Console() http.Handler { return ConsoleAt("/admin") }
 func ConsoleAt(base string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
+			http.NotFound(w, r)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, base+"/")
+		if r.URL.Path == base || path == "" || path == "index.html" {
+			path = "index.html"
+		}
+		if path != "index.html" && path != "app.css" && path != "app.js" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != "GET" && r.Method != "HEAD" {
 			w.Header().Set("Allow", "GET, HEAD")
 			w.WriteHeader(405)
@@ -24,14 +36,7 @@ func ConsoleAt(base string) http.Handler {
 			http.Redirect(w, r, base+"/", http.StatusPermanentRedirect)
 			return
 		}
-		path := strings.TrimPrefix(r.URL.Path, base+"/")
-		if path == "" || path == "index.html" {
-			path = "index.html"
-		}
-		if path != "index.html" && path != "app.css" && path != "app.js" {
-			http.NotFound(w, r)
-			return
-		}
+
 		contents, err := assets.ReadFile("assets/" + path)
 		if err != nil {
 			http.NotFound(w, r)

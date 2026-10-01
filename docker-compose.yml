@@ -19,7 +19,6 @@ services:
     environment:
       HTTP_ADDR: ":8080"
       ADMIN_PATH: ${ADMIN_PATH:-/admin}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
       PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
       PRODUCTION_MODE: "true"
       ALLOW_INTERNAL_PLAINTEXT: "true"
@@ -43,7 +42,6 @@ services:
       OBSERVABILITY_DIR: /data/observability
       OBSERVABILITY_STACK_ENABLED: ${OBSERVABILITY_STACK_ENABLED:-false}
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
-      GRAFANA_ADMIN_PASSWORD_FILE: /run/secrets/grafana_admin_password
       OTEL_EXPORTER_OTLP_INSECURE: "false"
     secrets:
       - admin_password
@@ -51,7 +49,6 @@ services:
       - metrics_token
       - postgres_password
       - redis_password
-      - grafana_admin_password
     volumes:
       - plugin_data:/data/plugins
       - plugin_library:/data/plugin-library
@@ -129,7 +126,6 @@ secrets:
   metrics_token: {file: "${SECRETS_DIR:-./secrets}/metrics_token"}
   postgres_password: {file: "${SECRETS_DIR:-./secrets}/postgres_password"}
   redis_password: {file: "${SECRETS_DIR:-./secrets}/redis_password"}
-  grafana_admin_password: {file: "${SECRETS_DIR:-./secrets}/grafana_admin_password"}
 
 networks:
   frontend: {}

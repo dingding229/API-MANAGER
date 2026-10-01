@@ -70,10 +70,6 @@ spec:
               value: /run/secrets/POSTGRES_DSN
             - name: CREDENTIAL_ENCRYPTION_KEY_FILE
               value: /run/secrets/CREDENTIAL_ENCRYPTION_KEY
-            {{- if $stackEnabled }}
-            - name: GRAFANA_ADMIN_PASSWORD_FILE
-              value: /run/secrets/GRAFANA_ADMIN_PASSWORD
-            {{- end }}
             {{- if .Values.productionMode }}
             - name: REDIS_PASSWORD_FILE
               value: /run/secrets/REDIS_PASSWORD

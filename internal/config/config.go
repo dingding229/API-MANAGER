@@ -19,7 +19,6 @@ type Config struct {
 	HTTPAddr                  string
 	PublicAPIBaseURL          string
 	AdminPath                 string
-	PublicBaseURL             string
 	PublicUIDir               string
 	AdminUsername             string
 	AdminPassword             string
@@ -49,7 +48,6 @@ type Config struct {
 	OTLPInsecure              bool
 	ObservabilityDir          string
 	ObservabilityStackEnabled bool
-	GrafanaAdminPassword      string
 	ObservabilityMaxLogs      int
 	ObservabilityMaxTraces    int
 	ObservabilityFileBytes    int64
@@ -57,7 +55,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "GRAFANA_ADMIN_PASSWORD"} {
+	for _, name := range []string{"ADMIN_PASSWORD", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -149,7 +147,6 @@ func Load() (Config, error) {
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
 		PublicAPIBaseURL:          env("PUBLIC_API_BASE_URL", ""),
 		AdminPath:                 env("ADMIN_PATH", "/admin"),
-		PublicBaseURL:             env("PUBLIC_BASE_URL", "http://localhost:8080"),
 		PublicUIDir:               env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
 		AdminUsername:             env("ADMIN_USERNAME", "admin"),
 		AdminPassword:             secrets["ADMIN_PASSWORD"],
@@ -179,7 +176,6 @@ func Load() (Config, error) {
 		OTLPInsecure:              otlpInsecure,
 		ObservabilityDir:          env("OBSERVABILITY_DIR", "data/observability"),
 		ObservabilityStackEnabled: stackEnabled,
-		GrafanaAdminPassword:      secrets["GRAFANA_ADMIN_PASSWORD"],
 		ObservabilityMaxLogs:      observabilityMaxLogs,
 		ObservabilityMaxTraces:    observabilityMaxTraces,
 		ObservabilityFileBytes:    observabilityFileBytes,
@@ -272,19 +268,12 @@ func (c Config) Validate() error {
 			return errors.New("production requires a distinct METRICS_TOKEN of at least 32 characters")
 		}
 	}
-	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
-		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
-	}
 
 	if !web.ValidAdminPath(c.AdminPath) {
 		return errors.New("ADMIN_PATH must be a safe, non-reserved absolute path without a trailing slash")
 	}
 	if !filepath.IsAbs(c.PublicUIDir) {
 		return errors.New("PUBLIC_UI_DIR must be an absolute directory")
-	}
-	u, err := url.Parse(c.PublicBaseURL)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") {
-		return errors.New("PUBLIC_BASE_URL must be an HTTP(S) origin without credentials, path, query or fragment")
 	}
 
 	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {

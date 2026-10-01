@@ -11,7 +11,7 @@ import stat
 DEFAULT_IMAGE = "docker.io/dingding229/api-manager:latest"
 IMAGE = re.compile(r"^docker\.io/dingding229/api-manager:[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SIZE = re.compile(r"^(\d+)([bkmg])?$", re.IGNORECASE)
-FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "grafana_admin_password")
+FILES = ("admin_password", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password")
 
 
 def validate(environ, project_root):
