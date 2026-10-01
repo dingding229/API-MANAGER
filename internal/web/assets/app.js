@@ -369,10 +369,57 @@ function showCredentialKey(key, title) {
   $('#hide-credential-key').onclick = () => { input.value = ''; panel.remove(); };
 }
 
+function roleCanBeGranted(role) {
+  return can('*') || (role.name !== 'super_admin' && role.name !== 'tenant_admin' && !(role.permissions || []).some(permission => permission === '*' || permission === 'user.manage'));
+}
+
+function closeRoleModal() {
+  const modal = $('#role-edit-modal');
+  if (!modal) return;
+  const previous = modal._previousFocus;
+  modal.remove();
+  previous?.focus?.();
+}
+
+function openRoleModal(user, roles) {
+  closeRoleModal();
+  const currentRoles = new Set(user.roles || [user.role].filter(Boolean));
+  const options = roles.filter(role => roleCanBeGranted(role) || currentRoles.has(role.name));
+  const modal = document.createElement('div');
+  modal.id = 'role-edit-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
+  modal._previousFocus = document.activeElement;
+  modal.innerHTML = `<section class="modal-card role-modal" role="dialog" aria-modal="true" aria-labelledby="role-modal-title"><div class="modal-heading"><div><p class="eyebrow">USER ACCESS</p><h2 id="role-modal-title">编辑角色</h2><p class="small">${esc(user.email)} · 选择该用户要拥有的角色。</p></div><button type="button" class="modal-close" aria-label="关闭角色编辑">×</button></div><form id="role-edit-form" class="form-stack"><fieldset class="role-select-fieldset"><legend>用户角色</legend><div class="role-select-list">${options.map(role => `<label class="role-select-option"><input type="checkbox" name="role" value="${esc(role.name)}" ${currentRoles.has(role.name) ? 'checked' : ''}><span><strong>${esc(roleLabel(role.name))}</strong><small>${esc(roleDescription(role))}</small></span></label>`).join('')}</div></fieldset><p id="role-edit-error" class="message" role="alert" aria-live="polite"></p><div class="modal-actions"><button type="button" class="secondary" data-role-modal-cancel>取消</button><button type="submit">保存角色</button></div></form></section>`;
+  document.body.appendChild(modal);
+  const close = () => closeRoleModal();
+  modal.querySelector('.modal-close').onclick = close;
+  modal.querySelector('[data-role-modal-cancel]').onclick = close;
+  modal.addEventListener('click', event => { if (event.target === modal) close(); });
+  modal.querySelector('#role-edit-form').onsubmit = async event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const selected = form.getAll('role'); const error = modal.querySelector('#role-edit-error');
+    if (!selected.length) { error.textContent = '至少保留一个角色，否则用户将无法访问管理功能。'; return; }
+    error.textContent = '';
+    await withSubmitting(event.currentTarget, '保存中…', async () => {
+      try { await api(`/admin/v1/users/${encodeURIComponent(user.id)}/roles`, {method:'PUT', body:JSON.stringify({roles:selected})}); close(); notice('角色已更新', true); renderUsers(); }
+      catch (caught) { error.textContent = caught.message; }
+    });
+  };
+  const first = modal.querySelector('input[name="role"]') || modal.querySelector('.modal-close'); first.focus();
+  modal.onkeydown = event => { if (event.key === 'Escape') close(); };
+}
+
 async function renderUsers() {
   if (state.page !== 'users') return;
   const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
-  try { const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]); if (!page.isConnected) return; page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td>${esc(u.email)}</td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ')}</td><td><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>邮箱<input name="email" type="text" required></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required></label><label>角色<select name="role">${roles.filter(r=>can('*') || (r.name !== 'super_admin' && r.name !== 'tenant_admin' && !(r.permissions || []).some(p=>p==='*'||p==='user.manage'))).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</select></label><button>创建用户</button></form></div></div>`; $('#user-form').onsubmit=async(e)=>{e.preventDefault();try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))});notice('用户创建成功',true);renderUsers()}catch(err){notice(err.message)}}; $$('#page [data-user-status]').forEach(b=>b.onclick=async()=>{try{await api(`/admin/v1/users/${b.dataset.userStatus}/status`,{method:'PUT',body:JSON.stringify({status:b.dataset.status})});renderUsers()}catch(e){notice(e.message)}}); $$('#page [data-user-roles]').forEach(b=>b.onclick=async()=>{const value=prompt('输入角色，多个角色用英文逗号分隔');if(value===null)return;try{await api(`/admin/v1/users/${b.dataset.userRoles}/roles`,{method:'PUT',body:JSON.stringify({roles:value.split(',').map(x=>x.trim()).filter(Boolean)})});renderUsers()}catch(e){notice(e.message)}}); } catch(error){if (!page.isConnected) return; page.innerHTML =`<div class="empty">${esc(error.message)}</div>`}
+  try {
+    const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
+    if (!page.isConnected) return;
+    page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><strong>${esc(u.email)}</strong></td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</td><td><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
+    $('#user-form').onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries()))});notice('用户创建成功',true);renderUsers()}catch(error){notice(error.message)}})};
+    $$('#page [data-user-status]').forEach(button=>button.onclick=async()=>{await withSubmitting(button.closest('.actions'),'处理中…',async()=>{try{await api(`/admin/v1/users/${encodeURIComponent(button.dataset.userStatus)}/status`,{method:'PUT',body:JSON.stringify({status:button.dataset.status})});notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})});
+    $$('#page [data-user-roles]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userRoles);if(user)openRoleModal(user,roles)});
+  } catch(error) { if(!page.isConnected)return; page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`; }
 }
 
 async function renderRoles() {
