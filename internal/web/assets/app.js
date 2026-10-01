@@ -72,7 +72,11 @@ async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers});
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 && state.token) { clearSession(); throw new Error('登录已过期，请重新登录'); }
-  if (!response.ok) throw new Error(body.error || `请求失败：${response.status}`);
+  if (!response.ok) {
+    const error = new Error(body.error || `请求失败：${response.status}`);
+    error.code = body.code || ''; error.status = response.status;
+    throw error;
+  }
   return body;
 }
 
@@ -111,6 +115,7 @@ function showLogin() {
 }
 
 function clearSession() {
+  closeProfileModal(true); closeRoleModal();
   state.token = ''; state.user = null; state.permissions = [];
   sessionStorage.removeItem('api_manager_session');
   showLogin();
@@ -409,57 +414,94 @@ function openRoleModal(user, roles) {
   modal.onkeydown = event => { if (event.key === 'Escape') close(); };
 }
 
-function closeProfileModal() {
+function closeProfileModal(force = false) {
   const modal = $('#user-profile-modal');
-  if (!modal) return;
+  if (!modal || (modal._saving && !force)) return;
   const previous = modal._previousFocus;
+  modal.querySelectorAll('input[type="password"], input[data-password-field]').forEach(input => { input.value = ''; });
+  const app = $('#app'); if (app) app.inert = modal._previousInert;
+  document.body.style.overflow = modal._previousOverflow;
   modal.remove();
-  previous?.focus?.();
+  if (previous?.isConnected) previous.focus();
+}
+
+function profileErrorMessage(error) {
+  return ({current_password_invalid: '当前密码不正确，请重新输入。', profile_forbidden: '没有权限修改此账号。', invalid_profile: '请检查用户名格式与密码长度后重试。', profile_conflict: '用户名已被使用，或账号信息已被修改。请刷新后重试。', user_not_found: '该用户已不存在，请刷新用户列表。', profile_unavailable: '暂时无法保存，请稍后重试。'})[error.code] || error.message;
 }
 
 function openProfileModal(user) {
-  closeProfileModal();
+  if (!user || !state.token || $('#user-profile-modal')?._saving) return;
+  closeRoleModal(); closeProfileModal();
   const isSelf = user.id === state.user?.id;
   const modal = document.createElement('div');
   modal.id = 'user-profile-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
-  modal._previousFocus = document.activeElement;
-  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title"><div class="modal-heading"><div><p class="eyebrow">ACCOUNT DETAILS</p><h2 id="profile-modal-title">编辑基本信息</h2><p class="small">${esc(user.email)} · ${isSelf ? '修改自己的用户名或密码。' : '修改该用户的用户名或密码。'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field"><span class="field-label">用户名或邮箱 <span aria-hidden="true">*</span></span><input name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.email)}" autocomplete="username"><span class="field-hint">支持 3–64 位用户名，或有效邮箱地址。</span></label>${isSelf ? '<label class="field"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input name="current_password" type="password" required minlength="12" maxlength="72" autocomplete="current-password"><span class="field-hint">修改自己的信息时需要确认当前密码。</span></label>' : ''}<label class="field"><span class="field-label">新密码</span><span class="password-input-row"><input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password"><button type="button" class="secondary" data-toggle-password>显示</button></span><span class="field-hint">留空表示不修改密码；填写时需要 12–72 位。</span></label><label class="field"><span class="field-label">确认新密码</span><input name="password_confirm" type="password" minlength="12" maxlength="72" autocomplete="new-password"></label><p id="profile-edit-error" class="message" role="alert" aria-live="polite"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
+  modal._previousFocus = document.activeElement; modal._previousInert = $('#app')?.inert || false;
+  modal._previousOverflow = document.body.style.overflow;
+  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" aria-describedby="profile-impact" tabindex="-1"><div class="modal-heading"><div><h2 id="profile-modal-title">${isSelf ? '账号设置' : '编辑基本信息'}</h2><p class="small">${esc(user.email)} · ${isSelf ? '修改自己的登录信息' : '修改该用户的登录信息'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field" for="profile-username"><span class="field-label">用户名或邮箱 <span aria-hidden="true">*</span></span><input id="profile-username" name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.email)}" autocomplete="username" spellcheck="false" aria-describedby="profile-username-hint"><span id="profile-username-hint" class="field-hint">用户名为 3–64 位字母、数字、点、下划线或短横线，也可使用有效邮箱；保存时统一为小写。</span></label>${isSelf ? '<label class="field" for="profile-current-password"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input id="profile-current-password" name="current_password" type="password" required maxlength="72" autocomplete="current-password"><span class="field-hint">修改自己的用户名或密码均需确认当前密码。</span></label>' : ''}<div class="field"><label class="field-label" for="profile-new-password">新密码（可选）</label><div class="password-input-row"><input id="profile-new-password" name="password" data-password-field type="password" maxlength="72" autocomplete="new-password" aria-describedby="profile-password-hint"><button type="button" class="secondary" data-toggle-password aria-label="显示新密码和确认密码" aria-pressed="false">显示</button></div><span id="profile-password-hint" class="field-hint">留空保留现有密码。新密码要求 12–72 个 UTF-8 字节；英文、数字和符号通常每个占 1 字节。</span></div><label class="field" for="profile-password-confirm"><span class="field-label">确认新密码</span><input id="profile-password-confirm" name="password_confirm" data-password-field type="password" maxlength="72" autocomplete="new-password"></label><p id="profile-impact" class="profile-impact">${isSelf ? '用户名或密码变更成功后，当前账号的全部会话将失效，请使用新信息重新登录。' : '用户名或密码变更成功后，该用户的全部已有会话将失效。角色和账号状态保持不变。'}</p><p id="profile-edit-error" class="message" role="alert" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
   document.body.appendChild(modal);
+  $('#app').inert = true; document.body.style.overflow = 'hidden';
   const close = () => closeProfileModal();
   modal.querySelector('.modal-close').onclick = close;
   modal.querySelector('[data-profile-modal-cancel]').onclick = close;
   modal.addEventListener('click', event => { if (event.target === modal) close(); });
+  const form = modal.querySelector('#profile-edit-form');
+  [...form.elements].filter(element => element.tagName === 'INPUT').forEach(input => input.addEventListener('input', () => {
+    input.setCustomValidity('');
+    form.elements.password_confirm.setCustomValidity('');
+    modal.querySelector('#profile-edit-error').textContent = '';
+  }));
   modal.querySelector('[data-toggle-password]').onclick = event => {
-    const input = modal.querySelector('input[name="password"]');
-    const button = event.currentTarget;
-    input.type = input.type === 'password' ? 'text' : 'password';
-    button.textContent = input.type === 'password' ? '显示' : '隐藏';
+    const show = form.elements.password.type === 'password';
+    [form.elements.password, form.elements.password_confirm].forEach(input => { input.type = show ? 'text' : 'password'; });
+    const button = event.currentTarget; button.textContent = show ? '隐藏' : '显示';
+    button.setAttribute('aria-pressed', String(show)); button.setAttribute('aria-label', show ? '隐藏新密码和确认密码' : '显示新密码和确认密码');
   };
-  modal.querySelector('#profile-edit-form').onsubmit = async event => {
-    event.preventDefault();
-    const form = event.currentTarget; const error = modal.querySelector('#profile-edit-error');
-    const password = form.elements.password.value; const confirmation = form.elements.password_confirm.value;
-    if (password !== confirmation) { error.textContent = '两次输入的新密码不一致。'; return; }
+  form.onsubmit = async event => {
+    event.preventDefault(); if (modal._saving) return;
+    const error = modal.querySelector('#profile-edit-error'); error.textContent = '';
+    const password = form.elements.password.value;
+    const confirmation = form.elements.password_confirm.value;
+    const byteLength = new TextEncoder().encode(password).length;
+    if (password && (byteLength < 12 || byteLength > 72)) {
+      form.elements.password.setCustomValidity('新密码必须为 12–72 个 UTF-8 字节。');
+    }
+    if (password !== confirmation) form.elements.password_confirm.setCustomValidity('两次输入的新密码不一致。');
+    if (!form.reportValidity()) return;
     const data = {username: form.elements.username.value.trim()};
     if (isSelf) data.current_password = form.elements.current_password.value;
     if (password) data.password = password;
-    error.textContent = '';
-    await withSubmitting(form, '保存中…', async () => {
-      try {
-        const result = await api(`/admin/v1/users/${encodeURIComponent(user.id)}/profile`, {method:'PUT', body:JSON.stringify(data)});
-        close();
-        if (result.reauthentication_required) {
-          clearSession();
-          notice('基本信息已更新，请使用新用户名和密码重新登录。', false, 'auth');
-          return;
-        }
-        notice(result.sessions_revoked ? '基本信息已更新，原有会话已失效。' : '基本信息已更新。', true);
-        renderUsers();
-      } catch (caught) { error.textContent = caught.message; }
-    });
+    modal._saving = true;
+    const submit = form.querySelector('[type="submit"]'); submit.textContent = '保存中…';
+    const controls = [...modal.querySelectorAll('input, button')]; controls.forEach(control => { control.disabled = true; });
+    try {
+      const result = await api(isSelf ? '/auth/v1/me' : `/admin/v1/users/${encodeURIComponent(user.id)}/profile`, {method:'PUT', body:JSON.stringify(data)});
+      closeProfileModal(true);
+      if (result.reauthentication_required) {
+        clearSession(); $('#username').value = result.user.email; $('#password').value = '';
+        notice('信息已更新，请使用新的登录信息重新登录。', true, 'auth'); $('#password').focus();
+        return;
+      }
+      if (isSelf) state.user = result.user;
+      notice(result.sessions_revoked ? '信息已更新，该用户的旧会话已失效。' : '信息未发生变化。', true);
+      if (state.page === 'users') renderUsers();
+    } catch (caught) {
+      if (modal.isConnected) { error.textContent = profileErrorMessage(caught); error.focus(); }
+    } finally {
+      modal._saving = false;
+      if (modal.isConnected) { controls.forEach(control => { control.disabled = false; }); submit.textContent = '保存基本信息'; }
+    }
   };
-  const first = modal.querySelector('input[name="username"]'); first.focus(); first.select();
-  modal.onkeydown = event => { if (event.key === 'Escape') close(); };
+  form.elements.username.focus(); form.elements.username.select();
+  modal.onkeydown = event => {
+    if (event.key === 'Escape') { event.preventDefault(); close(); }
+    if (event.key === 'Tab') {
+      const focusable = [...modal.querySelectorAll('button:not(:disabled), input:not(:disabled)')];
+      const first = focusable[0], last = focusable.at(-1);
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  };
 }
 
 async function renderUsers() {
@@ -468,7 +510,7 @@ async function renderUsers() {
   try {
     const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
     if (!page.isConnected) return;
-    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${can('user.manage')?`<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button><button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
+    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${u.id === state.user?.id ? `<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button>` : ''}${can('user.manage')?`${u.id !== state.user?.id ? `<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button>` : ''}<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
     $('#user-form').onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries()))});notice('用户创建成功',true);renderUsers()}catch(error){notice(error.message)}})};
     $$('#page [data-user-profile]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userProfile);if(user)openProfileModal(user)});
     $$('#page [data-user-status]').forEach(button=>button.onclick=async()=>{await withSubmitting(button.closest('.actions'),'处理中…',async()=>{try{await api(`/admin/v1/users/${encodeURIComponent(button.dataset.userStatus)}/status`,{method:'PUT',body:JSON.stringify({status:button.dataset.status})});notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})});
@@ -798,7 +840,11 @@ async function uploadPlugin(event) {
     const response = await fetch('/admin/v1/plugins', {method:'POST', headers, body:new FormData(form)});
     const body = await response.json().catch(() => ({}));
     if (response.status === 401) { clearSession(); throw new Error('登录已过期，请重新登录'); }
-    if (!response.ok) throw new Error(body.error || `请求失败：${response.status}`);
+    if (!response.ok) {
+    const error = new Error(body.error || `请求失败：${response.status}`);
+    error.code = body.code || ''; error.status = response.status;
+    throw error;
+  }
     notice(`插件 ${body.name || body.id || ''} 上传成功，请启用后使用`, true); renderPlugins();
   } catch (error) { notice(error.message); }
 }
@@ -835,6 +881,7 @@ $('#login-form').onsubmit = async (event) => {
   } catch (error) { notice(authErrorMessage(error), false, 'auth'); }
 };
 $('#logout').onclick = logout;
+$('#account-settings').onclick = () => openProfileModal(state.user);
 $('#refresh').onclick = renderPage;
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
 hydrateSession();

@@ -102,3 +102,27 @@ func TestUserTableUsesScopedCenteredRowLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestUserProfileEditingAssetsAreAvailable(t *testing.T) {
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{"account-settings", "data-user-profile", "user-profile-modal", "/auth/v1/me", "current_password", "password_confirm"} {
+		if !strings.Contains(string(js), marker) {
+			t.Errorf("missing profile editing asset marker: %s", marker)
+		}
+	}
+	controls, err := assets.ReadFile("assets/controls.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(controls), ".profile-modal .password-input-row") {
+		t.Error("profile password visibility control styles missing")
+	}
+	html := httptest.NewRecorder()
+	Console().ServeHTTP(html, httptest.NewRequest("GET", "/admin/", nil))
+	if !strings.Contains(html.Body.String(), `id="account-settings"`) {
+		t.Error("account settings control missing from console shell")
+	}
+}

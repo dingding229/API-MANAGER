@@ -217,16 +217,15 @@ form .auth-mode-option:focus-within {
 }
 
 
+.profile-modal .modal-heading .small { margin-bottom: 0; }
 .profile-modal .password-input-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
 }
-.profile-modal .password-input-row button {
-  min-width: 64px;
-  min-height: var(--control-height);
-}
-@media (max-width: 600px) {
-  .profile-modal .password-input-row { grid-template-columns: minmax(0, 1fr) auto; }
-}
+.profile-modal .password-input-row button { min-width: 64px; min-height: var(--control-height); }
+.profile-modal .profile-impact { margin: 0; padding: 12px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface-muted); color: var(--control-muted); line-height: 1.6; font-size: 12px; }
+.profile-modal .field > label.field-label { display: block; font-weight: 650; }
+.account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.account-actions button.link { min-height: 44px; padding: 8px 0; }
