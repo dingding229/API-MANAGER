@@ -64,3 +64,34 @@ func TestConsoleLoadsCanonicalControlsAfterPageStyles(t *testing.T) {
 		t.Fatal("shared control styles missing")
 	}
 }
+
+func TestUserTableUsesScopedCenteredRowLayout(t *testing.T) {
+	css, err := assets.ReadFile("assets/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		".user-table td { vertical-align: middle; }",
+		".user-table .user-cell {\n  display: flex;\n  align-items: center;",
+		".user-table .actions {\n  align-items: center;",
+		".user-table .actions button {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;",
+		".user-table { --user-row-control-height: 44px; }",
+		".console{grid-template-columns:minmax(0,1fr)}",
+	} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("missing scoped user table rule: %s", rule)
+		}
+	}
+	if !strings.Contains(string(css), ".observation-table td{vertical-align:top}") {
+		t.Error("multi-line observation tables must retain top alignment")
+	}
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, markup := range []string{`<table class="user-table">`, `<div class="user-cell"><strong>`, `<div class="user-cell user-cell-badges">`, `<div class="user-cell"><span class="badge`} {
+		if !strings.Contains(string(js), markup) {
+			t.Errorf("missing centered user cell markup: %s", markup)
+		}
+	}
+}
