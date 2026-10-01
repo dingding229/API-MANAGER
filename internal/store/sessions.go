@@ -15,8 +15,12 @@ func (m *Memory) CreateSession(session model.Session) error {
 			delete(m.sessions, hash)
 		}
 	}
-	if user, ok := m.users[session.UserID]; !ok || user.Status != "active" {
+	user, ok := m.users[session.UserID]
+	if !ok || user.Status != "active" {
 		return ErrNotFound
+	}
+	if session.AuthenticatedPasswordHash != "" && (user.Email != session.AuthenticatedUsername || user.PasswordHash != session.AuthenticatedPasswordHash) {
+		return ErrConflict
 	}
 	// Limit active sessions for a user without retaining plaintext tokens.
 	count := 0
@@ -34,6 +38,7 @@ func (m *Memory) CreateSession(session model.Session) error {
 	if count >= 20 {
 		delete(m.sessions, oldestHash)
 	}
+	session.AuthenticatedUsername, session.AuthenticatedPasswordHash = "", ""
 	m.sessions[session.Hash] = session
 	return nil
 }
@@ -60,16 +65,22 @@ func (p *Postgres) CreateSession(session model.Session) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `DELETE FROM user_sessions WHERE expires_at <= NOW()`); err != nil {
-		return err
-	}
-	// Serialize logins for this account so the active-session bound is atomic.
-	var status string
-	if err = tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, session.UserID).Scan(&status); err != nil {
+	// The same account row lock is used by profile changes and session creation.
+	// Always lock the account before deleting sessions to avoid lock-order inversions.
+	var status, username, passwordHash string
+	if err = tx.QueryRow(ctx, `SELECT status,email,password_hash FROM users WHERE id=$1 FOR UPDATE`, session.UserID).Scan(&status, &username, &passwordHash); errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
 		return err
 	}
 	if status != "active" {
 		return ErrNotFound
+	}
+	if session.AuthenticatedPasswordHash != "" && (username != session.AuthenticatedUsername || passwordHash != session.AuthenticatedPasswordHash) {
+		return ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1 AND expires_at <= NOW()`, session.UserID); err != nil {
+		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1 AND key_hash IN (SELECT key_hash FROM user_sessions WHERE user_id=$1 ORDER BY expires_at DESC OFFSET 19)`, session.UserID); err != nil {
 		return err

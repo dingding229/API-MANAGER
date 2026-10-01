@@ -85,6 +85,13 @@ func TestUserTableUsesScopedCenteredRowLayout(t *testing.T) {
 	if !strings.Contains(string(css), ".observation-table td{vertical-align:top}") {
 		t.Error("multi-line observation tables must retain top alignment")
 	}
+	controlsCSS, err := assets.ReadFile("assets/controls.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(controlsCSS), ".profile-modal .password-input-row") {
+		t.Error("profile password controls missing")
+	}
 	js, err := assets.ReadFile("assets/app.js")
 	if err != nil {
 		t.Fatal(err)

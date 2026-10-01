@@ -116,6 +116,22 @@ type CreateUserRequest struct {
 	Roles    []string `json:"roles,omitempty"`
 }
 
+// UpdateUserProfileRequest never accepts role, status, or password hashes.
+// Omitted password preserves the existing password; an explicit empty one is invalid.
+type UpdateUserProfileRequest struct {
+	Username        *string `json:"username,omitempty"`
+	Password        *string `json:"password,omitempty"`
+	CurrentPassword string  `json:"current_password,omitempty"`
+}
+
+// UserProfileUpdate is an internal optimistic guard for an atomic credential update.
+type UserProfileUpdate struct {
+	Username             string
+	PasswordHash         string
+	ExpectedUsername     string
+	ExpectedPasswordHash string
+}
+
 type LoginRequest struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
@@ -215,7 +231,11 @@ type AuditLogPage struct {
 }
 
 type Session struct {
-	Hash      string    `json:"-"`
-	UserID    string    `json:"user_id"`
-	ExpiresAt time.Time `json:"expires_at"`
+	// Creation-only guards prevent a login verified against old credentials from
+	// creating a usable session after a concurrent rename or password reset.
+	AuthenticatedUsername     string    `json:"-"`
+	AuthenticatedPasswordHash string    `json:"-"`
+	Hash                      string    `json:"-"`
+	UserID                    string    `json:"user_id"`
+	ExpiresAt                 time.Time `json:"expires_at"`
 }

@@ -2,6 +2,8 @@ package user
 
 import (
 	"api-manager/internal/auth"
+	"api-manager/internal/model"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -129,5 +131,58 @@ func TestRolePermissionUpdatesValidateAndProtectSuperAdmin(t *testing.T) {
 	}
 	if err := service.UpdateRolePermissions("super_admin", []string{"api.read"}); err == nil {
 		t.Fatal("super_admin mutation accepted")
+	}
+}
+
+func TestUpdateProfileReauthenticatesSelfAndRevokesSessions(t *testing.T) {
+	m := store.NewMemory()
+	s := NewService(m)
+	if err := s.EnsureInitialAdmin("admin", "admin-password"); err != nil {
+		t.Fatal(err)
+	}
+	admin, oldToken, err := s.Authenticate("admin", "admin-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	username := "renamed-admin"
+	password := "new-admin-password"
+	updated, revoked, err := s.UpdateProfile(admin.ID, admin.ID, model.UpdateUserProfileRequest{Username: &username, Password: &password, CurrentPassword: "admin-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !revoked || updated.Email != username {
+		t.Fatalf("profile update result = %#v, revoked=%v", updated, revoked)
+	}
+	if _, err := s.ValidateSession(oldToken); err == nil {
+		t.Fatal("old session survived password update")
+	}
+	if _, _, err := s.Authenticate("admin", "admin-password"); err == nil {
+		t.Fatal("old credentials still accepted")
+	}
+	if _, _, err := s.Authenticate(username, password); err != nil {
+		t.Fatalf("new credentials rejected: %v", err)
+	}
+}
+
+func TestUpdateProfileRequiresCurrentPasswordForSelfAndProtectsPrivilegedTarget(t *testing.T) {
+	m := store.NewMemory()
+	s := NewService(m)
+	if err := s.EnsureInitialAdmin("admin", "admin-password"); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := s.Create("reader", "reader-password", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	username := "reader-renamed"
+	if _, _, err := s.UpdateProfile(reader.ID, reader.ID, model.UpdateUserProfileRequest{Username: &username}); !errors.Is(err, ErrCurrentPassword) {
+		t.Fatalf("missing current password error = %v", err)
+	}
+	admin, err := m.GetUserByEmail("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.UpdateProfile(reader.ID, admin.ID, model.UpdateUserProfileRequest{Username: &username}); !errors.Is(err, ErrProfileForbidden) {
+		t.Fatalf("privileged target error = %v", err)
 	}
 }

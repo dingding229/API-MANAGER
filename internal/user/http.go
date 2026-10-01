@@ -55,6 +55,8 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, h.service.Profile(user))
+	case r.Method == http.MethodPut && r.URL.Path == "/auth/v1/me":
+		h.updateOwnProfile(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/logout":
 		token := sessionToken(r)
 		if _, err := h.service.ValidateSession(token); err != nil {

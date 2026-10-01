@@ -26,6 +26,7 @@ type Store interface {
 	CountUsers() int
 	GetUserByID(string) (model.User, error)
 	UpdateUserStatus(string, string) error
+	UpdateUserProfile(string, model.UserProfileUpdate) (model.User, bool, error)
 
 	ListPermissions() []model.Permission
 	CreateRole(model.Role) error

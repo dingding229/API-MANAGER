@@ -409,14 +409,68 @@ function openRoleModal(user, roles) {
   modal.onkeydown = event => { if (event.key === 'Escape') close(); };
 }
 
+function closeProfileModal() {
+  const modal = $('#user-profile-modal');
+  if (!modal) return;
+  const previous = modal._previousFocus;
+  modal.remove();
+  previous?.focus?.();
+}
+
+function openProfileModal(user) {
+  closeProfileModal();
+  const isSelf = user.id === state.user?.id;
+  const modal = document.createElement('div');
+  modal.id = 'user-profile-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
+  modal._previousFocus = document.activeElement;
+  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title"><div class="modal-heading"><div><p class="eyebrow">ACCOUNT DETAILS</p><h2 id="profile-modal-title">编辑基本信息</h2><p class="small">${esc(user.email)} · ${isSelf ? '修改自己的用户名或密码。' : '修改该用户的用户名或密码。'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field"><span class="field-label">用户名或邮箱 <span aria-hidden="true">*</span></span><input name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.email)}" autocomplete="username"><span class="field-hint">支持 3–64 位用户名，或有效邮箱地址。</span></label>${isSelf ? '<label class="field"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input name="current_password" type="password" required minlength="12" maxlength="72" autocomplete="current-password"><span class="field-hint">修改自己的信息时需要确认当前密码。</span></label>' : ''}<label class="field"><span class="field-label">新密码</span><span class="password-input-row"><input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password"><button type="button" class="secondary" data-toggle-password>显示</button></span><span class="field-hint">留空表示不修改密码；填写时需要 12–72 位。</span></label><label class="field"><span class="field-label">确认新密码</span><input name="password_confirm" type="password" minlength="12" maxlength="72" autocomplete="new-password"></label><p id="profile-edit-error" class="message" role="alert" aria-live="polite"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
+  document.body.appendChild(modal);
+  const close = () => closeProfileModal();
+  modal.querySelector('.modal-close').onclick = close;
+  modal.querySelector('[data-profile-modal-cancel]').onclick = close;
+  modal.addEventListener('click', event => { if (event.target === modal) close(); });
+  modal.querySelector('[data-toggle-password]').onclick = event => {
+    const input = modal.querySelector('input[name="password"]');
+    const button = event.currentTarget;
+    input.type = input.type === 'password' ? 'text' : 'password';
+    button.textContent = input.type === 'password' ? '显示' : '隐藏';
+  };
+  modal.querySelector('#profile-edit-form').onsubmit = async event => {
+    event.preventDefault();
+    const form = event.currentTarget; const error = modal.querySelector('#profile-edit-error');
+    const password = form.elements.password.value; const confirmation = form.elements.password_confirm.value;
+    if (password !== confirmation) { error.textContent = '两次输入的新密码不一致。'; return; }
+    const data = {username: form.elements.username.value.trim()};
+    if (isSelf) data.current_password = form.elements.current_password.value;
+    if (password) data.password = password;
+    error.textContent = '';
+    await withSubmitting(form, '保存中…', async () => {
+      try {
+        const result = await api(`/admin/v1/users/${encodeURIComponent(user.id)}/profile`, {method:'PUT', body:JSON.stringify(data)});
+        close();
+        if (result.reauthentication_required) {
+          clearSession();
+          notice('基本信息已更新，请使用新用户名和密码重新登录。', false, 'auth');
+          return;
+        }
+        notice(result.sessions_revoked ? '基本信息已更新，原有会话已失效。' : '基本信息已更新。', true);
+        renderUsers();
+      } catch (caught) { error.textContent = caught.message; }
+    });
+  };
+  const first = modal.querySelector('input[name="username"]'); first.focus(); first.select();
+  modal.onkeydown = event => { if (event.key === 'Escape') close(); };
+}
+
 async function renderUsers() {
   if (state.page !== 'users') return;
   const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
     if (!page.isConnected) return;
-    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
+    page.innerHTML = `<div class="split"><div class="table-wrap"><table class="user-table"><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell"><strong>${esc(u.email)}</strong></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></div></td><td><div class="actions">${can('user.manage')?`<button class="secondary" data-user-profile="${esc(u.id)}">编辑信息</button><button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>用户名或邮箱<input name="email" type="text" required autocomplete="username"></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}">${esc(roleLabel(r.name))}</option>`).join('')}</select></label><button type="submit">创建用户</button></form><p class="small">角色决定用户可访问的管理功能。超级管理员不能通过普通用户表单授予。</p></div></div>`;
     $('#user-form').onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries()))});notice('用户创建成功',true);renderUsers()}catch(error){notice(error.message)}})};
+    $$('#page [data-user-profile]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userProfile);if(user)openProfileModal(user)});
     $$('#page [data-user-status]').forEach(button=>button.onclick=async()=>{await withSubmitting(button.closest('.actions'),'处理中…',async()=>{try{await api(`/admin/v1/users/${encodeURIComponent(button.dataset.userStatus)}/status`,{method:'PUT',body:JSON.stringify({status:button.dataset.status})});notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})});
     $$('#page [data-user-roles]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userRoles);if(user)openRoleModal(user,roles)});
   } catch(error) { if(!page.isConnected)return; page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`; }

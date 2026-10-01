@@ -53,3 +53,51 @@ func TestLoginRejectsAmbiguousOrOversizedJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfProfileUpdateRequiresCurrentPasswordAndRevokesSession(t *testing.T) {
+	s := NewService(store.NewMemory())
+	if err := s.EnsureInitialAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Authenticate("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"admin-renamed","current_password":"a-long-initial-password"}`))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	NewHTTP(s).ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("profile update=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		ReauthenticationRequired bool `json:"reauthentication_required"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || !body.ReauthenticationRequired {
+		t.Fatalf("unexpected profile response: %s", response.Body.String())
+	}
+	if _, err := s.ValidateSession(token); err == nil {
+		t.Fatal("session survived self profile update")
+	}
+	if _, _, err := s.Authenticate("admin-renamed", "a-long-initial-password"); err != nil {
+		t.Fatalf("renamed account cannot login: %v", err)
+	}
+}
+
+func TestSelfProfileUpdateRejectsWrongCurrentPassword(t *testing.T) {
+	s := NewService(store.NewMemory())
+	if err := s.EnsureInitialAdmin("admin", "a-long-initial-password"); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Authenticate("admin", "a-long-initial-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"admin-renamed","current_password":"wrong-password"}`))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	NewHTTP(s).ServeHTTP(response, request)
+	if response.Code != 403 {
+		t.Fatalf("wrong password status=%d body=%s", response.Code, response.Body.String())
+	}
+}

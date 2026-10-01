@@ -36,6 +36,7 @@ type UserManager interface {
 	CreateRole(string, string, []string) (model.Role, error)
 	AssignRoles(string, []string) error
 	SetStatus(string, string) error
+	UpdateProfile(string, string, model.UpdateUserProfileRequest) (model.User, bool, error)
 }
 
 type Admin struct {
@@ -150,6 +151,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.listUsers(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/users":
 		a.createUser(w, r)
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/profile"):
+		a.updateUserProfile(w, r)
 	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/roles"):
 		a.assignUserRoles(w, r)
 	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/status"):
@@ -219,6 +222,8 @@ func requiredPermission(r *http.Request) string {
 		return "plugin.manage"
 	case path == "/admin/v1/users" && r.Method == http.MethodGet:
 		return "user.read"
+	case strings.HasPrefix(path, "/admin/v1/users/") && strings.HasSuffix(path, "/profile") && r.Method == http.MethodPut:
+		return "user.manage"
 	case path == "/admin/v1/users" && r.Method == http.MethodPost, strings.Contains(path, "/roles"), strings.Contains(path, "/status"):
 		return "user.manage"
 	case path == "/admin/v1/roles" && r.Method == http.MethodGet, path == "/admin/v1/permissions":

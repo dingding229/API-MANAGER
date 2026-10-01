@@ -215,3 +215,18 @@ form .auth-mode-option:focus-within {
   form .auth-mode-control { background: Canvas; }
   form .auth-mode-option:has(input:checked) { border-color: Highlight; background: Highlight; color: HighlightText; }
 }
+
+
+.profile-modal .password-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+.profile-modal .password-input-row button {
+  min-width: 64px;
+  min-height: var(--control-height);
+}
+@media (max-width: 600px) {
+  .profile-modal .password-input-row { grid-template-columns: minmax(0, 1fr) auto; }
+}

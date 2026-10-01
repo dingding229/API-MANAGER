@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"api-manager/internal/audit"
 	"api-manager/internal/ids"
 	"api-manager/internal/model"
+	"api-manager/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -30,6 +30,7 @@ type Store interface {
 	ListUsers() []model.User
 	CountUsers() int
 	UpdateUserStatus(string, string) error
+	UpdateUserProfile(string, model.UserProfileUpdate) (model.User, bool, error)
 	EnsureRBAC() error
 	ListPermissions() []model.Permission
 	CreateRole(model.Role) error
@@ -82,10 +83,8 @@ func (s *Service) Create(email, password, role string) (model.User, error) {
 }
 
 func (s *Service) CreateWithRoles(email, password string, roles []string) (model.User, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
-	address, mailErr := mail.ParseAddress(email)
-	validName := usernamePattern.MatchString(email) || (mailErr == nil && address.Address == email && len(email) <= 254)
-	if !validName || len(password) < 12 || len(password) > 72 {
+	email = normalizeUsername(email)
+	if !validUsername(email) || !validPassword(password) {
 		return model.User{}, errors.New("valid username or email and password with 12 to 72 bytes are required")
 	}
 	roles = normalizeRoles(roles)
@@ -242,7 +241,10 @@ func (s *Service) Authenticate(username, password string) (model.User, string, e
 		return model.User{}, "", err
 	}
 	token := "us_" + hex.EncodeToString(random)
-	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl)}); err != nil {
+	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedUsername: user.Email, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			return model.User{}, "", ErrInvalidCredentials
+		}
 		return model.User{}, "", err
 	}
 	return user, token, nil
