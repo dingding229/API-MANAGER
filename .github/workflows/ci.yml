@@ -236,6 +236,13 @@ jobs:
           assert status==200
           session=login['token']
           assert call('GET','/auth/v1/me',session=session)[0]==200
+          # The front page and admin UI share the API listener. Grafana is
+          # disabled for this small integration run, but its route must require login.
+          for path in ('/', '/admin/', '/admin/app.js'):
+              with urlopen('http://127.0.0.1:8080'+path,timeout=10) as response:
+                  assert response.status==200
+          assert call('GET','/catalog.json')[0]==200
+          assert call('GET','/admin/grafana/api/health')[0]==401
           assert call('GET','/admin/v1/apis',key='ak_invalid_business_key')[0]==401
           for mode in ('jwt','hmac'):
               assert call('POST','/admin/v1/apis',session=session,data={'name':'rejected','method':'GET','path':'/api/rejected','auth_mode':mode})[0]==400

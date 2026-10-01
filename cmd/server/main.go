@@ -19,6 +19,7 @@ import (
 	"api-manager/internal/catalog"
 	"api-manager/internal/config"
 	"api-manager/internal/gateway"
+	"api-manager/internal/grafanaproxy"
 	"api-manager/internal/httpx"
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
@@ -89,7 +90,7 @@ func main() {
 			logger.Error("full observability stack requires HTTP_ADDR with a numeric port", "error", splitErr)
 			os.Exit(1)
 		}
-		bundledStack, err = stack.Start(rootCtx, stack.Options{Directory: cfg.ObservabilityDir, APIPort: port, MetricsToken: cfg.MetricsToken, GrafanaPassword: cfg.GrafanaAdminPassword})
+		bundledStack, err = stack.Start(rootCtx, stack.Options{Directory: cfg.ObservabilityDir, APIPort: port, MetricsToken: cfg.MetricsToken, GrafanaPassword: cfg.GrafanaAdminPassword, GrafanaRootURL: strings.TrimRight(cfg.PublicBaseURL, "/") + cfg.AdminPath + "/grafana/"})
 		if err != nil {
 			logger.Error("start bundled observability stack failed", "error", err)
 			os.Exit(1)
@@ -150,12 +151,18 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/admin/", admin)
-	mux.Handle("/auth/", authHandler)
-	mux.Handle("/console/", web.Console())
+	grafana := grafanaproxy.New(userService, cfg.AdminPath, cfg.ObservabilityStackEnabled, logger)
+	grafana.SetSecureCookies(strings.HasPrefix(cfg.PublicBaseURL, "https://"))
+	web.MountAdministration(mux, cfg.AdminPath, admin, authHandler, grafana, http.HandlerFunc(grafana.Grant))
 	mux.Handle("/api/", gatewayHandler)
 	publicExport := catalog.New(activeStore, cfg.PublicAPIBaseURL)
 	mux.Handle("/public/v1/catalog", publicExport)
+	publicHandler, err := publicweb.New(cfg.PublicUIDir, publicExport)
+	if err != nil {
+		logger.Error("load public documentation failed", "error", err)
+		os.Exit(1)
+	}
+	mux.Handle("/", publicHandler)
 	mux.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeHealth(w, http.StatusOK, `{"status":"ok"}`)
 	})
@@ -191,23 +198,7 @@ func main() {
 		MaxHeaderBytes:    64 << 10,
 	}
 
-	serverErr := make(chan error, 2)
-	var publicServer *http.Server
-	if cfg.PublicHTTPAddr != "" {
-		publicHandler, err := publicweb.New(cfg.PublicUIDir, publicExport)
-		if err != nil {
-			logger.Error("load public documentation failed", "error", err)
-			os.Exit(1)
-		}
-		publicServer = &http.Server{Addr: cfg.PublicHTTPAddr, Handler: httpx.Recover(logger, publicHandler), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
-		go func() {
-			logger.Info("public documentation starting", "addr", cfg.PublicHTTPAddr)
-			if err := publicServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				serverErr <- err
-				stop()
-			}
-		}()
-	}
+	serverErr := make(chan error, 1)
 
 	go func() {
 		logger.Info("server starting", "addr", cfg.HTTPAddr, "store", storeName(activeStore), "limiter", limiterName(limiter))
@@ -232,11 +223,7 @@ func main() {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if publicServer != nil {
-		if err := publicServer.Shutdown(shutdownCtx); err != nil {
-			logger.Error("public documentation shutdown failed", "error", err)
-		}
-	}
+
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)

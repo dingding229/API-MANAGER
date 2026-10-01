@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>API Manager Console</title>
-  <link rel="stylesheet" href="/console/app.css">
+  <link rel="stylesheet" href="__ADMIN_PATH__/app.css">
 </head>
-<body>
+<body data-admin-path="__ADMIN_PATH__">
   <main id="app">
     <section id="login-view" class="auth-shell">
       <div class="auth-card">
@@ -33,6 +33,7 @@
           <button data-page="roles" data-permission="user.read">角色与权限</button>
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
+          <button data-page="grafana" data-permission="observability.read">Grafana 仪表盘</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>
         </nav>
         <div class="account"><span id="current-user"></span><button id="logout" class="link">退出登录</button></div>
@@ -45,6 +46,6 @@
     </section>
   </main>
   <template id="empty"><div class="empty">暂无数据</div></template>
-  <script src="/console/app.js"></script>
+  <script src="__ADMIN_PATH__/app.js"></script>
 </body>
 </html>

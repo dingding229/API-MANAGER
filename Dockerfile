@@ -103,6 +103,11 @@ COPY --from=patched-alertmanager /out/alertmanager /usr/local/bin/alertmanager
 COPY --from=grafana-assets /usr/share/grafana /usr/share/grafana
 COPY --from=grafana /etc/grafana/grafana.ini /etc/grafana/grafana.ini
 COPY --from=patched-grafana /out/grafana /usr/local/bin/grafana
+USER root
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends --only-upgrade openssl libssl3t64 \
+    && apt-get clean \
+    && find /var/lib/apt/lists -type f -delete
 RUN groupadd -g 65532 api-manager && useradd -u 65532 -g api-manager -M -s /usr/sbin/nologin api-manager \
     && ln -s /bin/alloy /usr/local/bin/alloy
 COPY --from=patched-alloy /out/alloy /bin/alloy
@@ -112,9 +117,8 @@ COPY --from=builder --chown=65532:65532 /out/plugin-library /data/plugin-library
 COPY --from=builder --chown=65532:65532 /out/observability /data/observability
 COPY --from=public-ui-build /ui/out /usr/share/api-manager/public-ui
 COPY public-ui/LICENSE.fumadocs /usr/share/api-manager/LICENSE.fumadocs
-ENV PUBLIC_HTTP_ADDR=:8081
 ENV PUBLIC_UI_DIR=/usr/share/api-manager/public-ui
 USER 65532:65532
-EXPOSE 8080 8081 3000
+EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s CMD ["/api-manager", "--healthcheck"]
 ENTRYPOINT ["/api-manager"]

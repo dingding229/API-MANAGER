@@ -14,7 +14,7 @@ unexpected=''
 for path in $(git ls-files --cached --others --exclude-standard); do
   [ -e "$path" ] || continue
   case "$path" in
-    .dockerignore|.env.example|.gitignore|Dockerfile|Makefile|README.md|go.mod|go.sum|\
+    .dockerignore|.env.example|.gitignore|Dockerfile|Dockerfile.release|Makefile|README.md|go.mod|go.sum|\
     docker-compose.yml|\
     .github/dependabot.yml|.github/workflows/ci.yml|\
     cmd/server/*|internal/*|configs/*|public-ui/*|deploy/helm/api-manager/*|\

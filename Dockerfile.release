@@ -1,0 +1,33 @@
+# Application release: reuse the immutable previously audited observability bundle.
+# Dockerfile remains the full source-build recipe for refreshing upstream components.
+FROM --platform=$BUILDPLATFORM golang:1.26.7-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS app
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY cmd/server ./cmd/server
+COPY internal ./internal
+ARG TARGETOS TARGETARCH
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/api-manager ./cmd/server
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS public-ui
+WORKDIR /ui
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY public-ui/package.json public-ui/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
+COPY public-ui ./
+RUN npm run build
+FROM docker.io/dingding229/api-manager:0.3.1@sha256:4fff021b65b2b8fd6ba745b8c0b2c06f8cce24fa30602bfef3b49141003aa5fe
+USER root
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get install -y --no-install-recommends --only-upgrade openssl libssl3t64 \
+    && apt-get clean \
+    && find /var/lib/apt/lists -type f -delete
+COPY --from=app --chown=65532:65532 /out/api-manager /api-manager
+COPY --from=public-ui /ui/out /usr/share/api-manager/public-ui
+COPY public-ui/LICENSE.fumadocs /usr/share/api-manager/LICENSE.fumadocs
+# Old bundle metadata is not a listener; only the main HTTP listener is active.
+ENV PUBLIC_HTTP_ADDR=""
+ENV HTTP_ADDR=:8080
+ENV ADMIN_PATH=/admin
+ENV PUBLIC_UI_DIR=/usr/share/api-manager/public-ui
+EXPOSE 8080
+USER 65532:65532

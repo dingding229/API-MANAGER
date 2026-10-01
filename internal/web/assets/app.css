@@ -163,3 +163,5 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 #login-form button,#username,#password{min-height:44px}#password{font-size:16px}#password:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
 
 @media(max-width:850px){.sidebar{flex-wrap:wrap;overflow:visible}.sidebar nav{flex-basis:100%;order:3;overflow-x:auto;padding-top:8px}.account{display:flex;align-items:center;gap:8px;margin:0 0 0 auto;padding:0}.account span{display:none}.account button{min-height:44px;padding:8px}}
+
+.grafana-panel{padding:18px;min-width:0}.grafana-heading{display:flex;justify-content:space-between;align-items:start;gap:16px}.grafana-heading h2{margin-bottom:6px}.grafana-heading .small{margin:0}.grafana-frame{display:block;width:100%;height:calc(100vh - 240px);min-height:600px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}#grafana-status{color:var(--muted);font-size:13px;line-height:1.6}@media(max-width:850px){.grafana-heading{flex-direction:column}.grafana-frame{height:75vh;min-height:480px}}

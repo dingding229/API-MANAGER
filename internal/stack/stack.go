@@ -29,6 +29,7 @@ type Options struct {
 	APIPort         string
 	MetricsToken    string
 	GrafanaPassword string
+	GrafanaRootURL  string
 	// BinaryDir is primarily for testing; the image installs upstream binaries here.
 	BinaryDir string
 }
@@ -45,7 +46,7 @@ type Stack struct {
 func (s *Stack) Errors() <-chan error { return s.errs }
 
 // Start writes the embedded configuration to a writable data volume, then starts
-// the six independent upstream processes. Only Grafana is exposed outside loopback.
+// the six independent upstream processes. All upstream processes listen on loopback; Grafana is exposed only via the authenticated management proxy.
 func Start(ctx context.Context, options Options) (*Stack, error) {
 	if options.GrafanaPassword == "" {
 		return nil, errors.New("GRAFANA_ADMIN_PASSWORD (or GRAFANA_ADMIN_PASSWORD_FILE) is required when the full stack is enabled")
@@ -112,7 +113,9 @@ func Start(ctx context.Context, options Options) (*Stack, error) {
 			"GF_PATHS_HOME=/usr/share/grafana", "GF_PATHS_CONFIG=/etc/grafana/grafana.ini", "GF_PATHS_DATA=" + filepath.Join(options.Directory, "grafana"),
 			"GF_PATHS_LOGS=" + filepath.Join(options.Directory, "grafana", "log"), "GF_PATHS_PLUGINS=" + filepath.Join(options.Directory, "grafana", "plugins"),
 			"GF_PATHS_PROVISIONING=" + filepath.Join(configDir, "grafana", "provisioning"),
-			"GF_SERVER_HTTP_ADDR=0.0.0.0", "GF_SERVER_HTTP_PORT=3000", "GF_SECURITY_ADMIN_PASSWORD=" + options.GrafanaPassword,
+			"GF_SERVER_HTTP_ADDR=127.0.0.1", "GF_SERVER_HTTP_PORT=3000", "GF_SECURITY_ADMIN_PASSWORD=" + options.GrafanaPassword,
+			"GF_SERVER_ROOT_URL=" + options.GrafanaRootURL, "GF_SERVER_SERVE_FROM_SUB_PATH=true", "GF_SECURITY_ALLOW_EMBEDDING=true",
+			"GF_AUTH_PROXY_ENABLED=true", "GF_AUTH_PROXY_HEADER_NAME=X-WEBAUTH-USER", "GF_AUTH_PROXY_HEADER_PROPERTY=username", "GF_AUTH_PROXY_AUTO_SIGN_UP=true", "GF_AUTH_PROXY_HEADERS=Name:X-WEBAUTH-NAME Role:X-WEBAUTH-ROLE", "GF_AUTH_PROXY_WHITELIST=127.0.0.1", "GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN=false", "GF_AUTH_DISABLE_LOGIN_FORM=true", "GF_AUTH_BASIC_ENABLED=false", "GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer", "GF_AUTH_PROXY_SYNC_TTL=0", "GF_AUTH_DISABLE_SIGNOUT_MENU=true",
 			"GF_USERS_ALLOW_SIGN_UP=false", "GF_AUTH_ANONYMOUS_ENABLED=false", "GF_PLUGINS_PREINSTALL_DISABLED=true",
 		}},
 	}

@@ -1,3 +1,4 @@
+const adminPath = document.body.dataset.adminPath || "/admin";
 sessionStorage.removeItem('api_manager_key');
 const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], page: 'overview', cache: {} };
 const $ = (selector) => document.querySelector(selector);
@@ -128,15 +129,21 @@ async function hydrateSession() {
 }
 
 function renderPage() {
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志'};
+  // Each view owns its node. Late responses from the previous view can only
+  // update a detached node, never overwrite the active view (including iframes).
+  const oldPage = $('#page');
+  const newPage = document.createElement('div'); newPage.id = 'page';
+  oldPage.replaceWith(newPage);
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', grafana:'Grafana 仪表盘', audit:'审计日志'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => button.classList.toggle('active', button.dataset.page === state.page));
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, grafana: renderGrafana, audit: renderAuditLogs};
   return renderers[state.page]();
 }
 
 async function renderOverview() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
+  if (state.page !== 'overview') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const [apis, credentials, plugins, ready] = await Promise.all([
       can('api.read') ? api('/admin/v1/apis') : Promise.resolve([]),
@@ -144,7 +151,7 @@ async function renderOverview() {
       can('plugin.read') ? api('/admin/v1/plugins') : Promise.resolve({plugins:[]}),
       fetch('/health/ready').then((r) => r.json()).catch(() => ({status:'unknown'}))
     ]);
-    page.innerHTML = `<div class="stats">
+    if (!page.isConnected) return; page.innerHTML = `<div class="stats">
       <div class="stat"><span class="small">接口数量</span><div class="number">${apis.length}</div></div>
       <div class="stat"><span class="small">已发布接口</span><div class="number">${apis.filter(x=>x.enabled).length}</div></div>
       <div class="stat"><span class="small">调用凭证</span><div class="number">${credentials.length}</div></div>
@@ -156,21 +163,22 @@ async function renderOverview() {
       <div class="card"><h2>当前账号</h2><p>${esc(state.user?.email)}</p><p class="small">角色：${esc((state.user?.roles || [state.user?.role]).filter(Boolean).join(', '))}</p><p class="small">权限：${state.permissions.length} 项</p></div>
     </div>`;
     $$('[data-go]').forEach((button) => button.onclick = () => { state.page = button.dataset.go; renderPage(); });
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 async function renderAPIs() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
+  if (state.page !== 'apis') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const apis = await api('/admin/v1/apis');
-    page.innerHTML = `<div class="split"><div class="table-wrap"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table><thead><tr><th>名称</th><th>路由</th><th>鉴权</th><th>状态</th><th>操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
+    if (!page.isConnected) return; page.innerHTML = `<div class="split"><div class="table-wrap"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table><thead><tr><th>名称</th><th>路由</th><th>鉴权</th><th>状态</th><th>操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
     $('#openapi').onclick = async () => { try { const document = await api('/admin/v1/openapi.json'); const blob = new Blob([JSON.stringify(document, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener,noreferrer'); setTimeout(() => URL.revokeObjectURL(url), 30000); } catch(error) { notice(error.message); } };
     $('#api-form').onsubmit = createAPI;
     $('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
     $('#openapi-import-form').onsubmit = importOpenAPI;
     $$('#page [data-action]').forEach((button) => button.onclick = () => apiAction(button.dataset.action, button.dataset.id));
     $$('#page [data-edit-api]').forEach((button) => button.onclick = () => editAPI(button.dataset.editApi, apis));
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 function apiRow(item) {
@@ -314,10 +322,11 @@ async function apiAction(action, id) {
 }
 
 async function renderCredentials() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
+  if (state.page !== 'credentials') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const items = await api('/admin/v1/credentials');
-    page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>名称</th><th>前缀</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${items.length?items.map(c=>`<tr><td>${esc(c.name)}</td><td><code>${esc(c.prefix)}…</code></td><td><span class="badge ${c.revoked?'off':''}">${c.revoked?'已撤销':'有效'}</span></td><td>${esc(new Date(c.created_at).toLocaleString())}</td><td><div class="actions">${!c.revoked&&can('credential.reveal')?`<button class="secondary" data-view-key="${esc(c.id)}" ${c.api_key_available?'':'disabled title="历史凭证无法恢复，请先轮换"'}>${c.api_key_available?'查看并复制 Key':'需轮换后可查看'}</button>`:''}${!c.revoked&&can('credential.write')?`<button class="secondary" data-rotate="${esc(c.id)}">重新生成并查看 Key</button><button class="danger" data-revoke="${esc(c.id)}">撤销</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="5"><div class="empty">暂无凭证</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建调用凭证</h2><form id="credential-form" class="form-stack"><label>名称<input name="name" required placeholder="production-client"></label><button>创建</button></form><p class="small">新建或轮换后的 Key 会加密保存。拥有查看权限的管理员可按需查看并复制；历史凭证若未加密保存，需要先轮换。</p></div></div>`;
+    if (!page.isConnected) return; page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>名称</th><th>前缀</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>${items.length?items.map(c=>`<tr><td>${esc(c.name)}</td><td><code>${esc(c.prefix)}…</code></td><td><span class="badge ${c.revoked?'off':''}">${c.revoked?'已撤销':'有效'}</span></td><td>${esc(new Date(c.created_at).toLocaleString())}</td><td><div class="actions">${!c.revoked&&can('credential.reveal')?`<button class="secondary" data-view-key="${esc(c.id)}" ${c.api_key_available?'':'disabled title="历史凭证无法恢复，请先轮换"'}>${c.api_key_available?'查看并复制 Key':'需轮换后可查看'}</button>`:''}${!c.revoked&&can('credential.write')?`<button class="secondary" data-rotate="${esc(c.id)}">重新生成并查看 Key</button><button class="danger" data-revoke="${esc(c.id)}">撤销</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="5"><div class="empty">暂无凭证</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建调用凭证</h2><form id="credential-form" class="form-stack"><label>名称<input name="name" required placeholder="production-client"></label><button>创建</button></form><p class="small">新建或轮换后的 Key 会加密保存。拥有查看权限的管理员可按需查看并复制；历史凭证若未加密保存，需要先轮换。</p></div></div>`;
     $('#credential-form').onsubmit = async (e) => { e.preventDefault(); try { const result = await api('/admin/v1/credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))}); await renderCredentials(); showCredentialKey(result.api_key, '新建凭证'); } catch(error){notice(error.message)} };
     $$('#page [data-view-key]').forEach(button => button.onclick = async () => {
       if (button.disabled) return;
@@ -328,7 +337,7 @@ async function renderCredentials() {
       try { const result = await api(`/admin/v1/credentials/${encodeURIComponent(button.dataset.rotate)}/rotate`, {method:'POST'}); await renderCredentials(); showCredentialKey(result.api_key, '重新生成成功，旧 Key 已失效'); } catch(error) { notice(error.message); }
     });
     $$('#page [data-revoke]').forEach(button => button.onclick = async () => { if(confirm('确定撤销此凭证？')){try{await api(`/admin/v1/credentials/${encodeURIComponent(button.dataset.revoke)}/revoke`,{method:'POST'});renderCredentials()}catch(error){notice(error.message)}} });
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 function showCredentialKey(key, title) {
@@ -351,16 +360,18 @@ function showCredentialKey(key, title) {
 }
 
 async function renderUsers() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
-  try { const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]); page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td>${esc(u.email)}</td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ')}</td><td><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>邮箱<input name="email" type="text" required></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required></label><label>角色<select name="role">${roles.filter(r=>can('*') || (r.name !== 'super_admin' && r.name !== 'tenant_admin' && !(r.permissions || []).some(p=>p==='*'||p==='user.manage'))).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</select></label><button>创建用户</button></form></div></div>`; $('#user-form').onsubmit=async(e)=>{e.preventDefault();try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))});notice('用户创建成功',true);renderUsers()}catch(err){notice(err.message)}}; $$('#page [data-user-status]').forEach(b=>b.onclick=async()=>{try{await api(`/admin/v1/users/${b.dataset.userStatus}/status`,{method:'PUT',body:JSON.stringify({status:b.dataset.status})});renderUsers()}catch(e){notice(e.message)}}); $$('#page [data-user-roles]').forEach(b=>b.onclick=async()=>{const value=prompt('输入角色，多个角色用英文逗号分隔');if(value===null)return;try{await api(`/admin/v1/users/${b.dataset.userRoles}/roles`,{method:'PUT',body:JSON.stringify({roles:value.split(',').map(x=>x.trim()).filter(Boolean)})});renderUsers()}catch(e){notice(e.message)}}); } catch(error){page.innerHTML=`<div class="empty">${esc(error.message)}</div>`}
+  if (state.page !== 'users') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
+  try { const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]); if (!page.isConnected) return; page.innerHTML = `<div class="split"><div class="table-wrap"><table><thead><tr><th>用户名 / 邮箱</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td>${esc(u.email)}</td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(r)}</span>`).join(' ')}</td><td><span class="badge ${u.status==='active'?'':'off'}">${esc(u.status)}</span></td><td><div class="actions">${can('user.manage')?`<button data-user-status="${esc(u.id)}" data-status="${u.status==='active'?'disabled':'active'}">${u.status==='active'?'禁用':'启用'}</button><button class="secondary" data-user-roles="${esc(u.id)}">编辑角色</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><label>邮箱<input name="email" type="text" required></label><label>密码<input name="password" type="password" minlength="12" maxlength="72" required></label><label>角色<select name="role">${roles.filter(r=>can('*') || (r.name !== 'super_admin' && r.name !== 'tenant_admin' && !(r.permissions || []).some(p=>p==='*'||p==='user.manage'))).map(r=>`<option value="${esc(r.name)}">${esc(r.name)}</option>`).join('')}</select></label><button>创建用户</button></form></div></div>`; $('#user-form').onsubmit=async(e)=>{e.preventDefault();try{await api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))});notice('用户创建成功',true);renderUsers()}catch(err){notice(err.message)}}; $$('#page [data-user-status]').forEach(b=>b.onclick=async()=>{try{await api(`/admin/v1/users/${b.dataset.userStatus}/status`,{method:'PUT',body:JSON.stringify({status:b.dataset.status})});renderUsers()}catch(e){notice(e.message)}}); $$('#page [data-user-roles]').forEach(b=>b.onclick=async()=>{const value=prompt('输入角色，多个角色用英文逗号分隔');if(value===null)return;try{await api(`/admin/v1/users/${b.dataset.userRoles}/roles`,{method:'PUT',body:JSON.stringify({roles:value.split(',').map(x=>x.trim()).filter(Boolean)})});renderUsers()}catch(e){notice(e.message)}}); } catch(error){if (!page.isConnected) return; page.innerHTML =`<div class="empty">${esc(error.message)}</div>`}
 }
 
 async function renderRoles() {
+  if (state.page !== 'roles') return;
   const page = $('#page');
-  page.innerHTML = '<div class="empty">加载中…</div>';
+  if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const [roles, permissions] = await Promise.all([api('/admin/v1/roles'), api('/admin/v1/permissions')]);
-    page.innerHTML = `<div class="roles-page">
+    if (!page.isConnected) return; page.innerHTML = `<div class="roles-page">
       <div class="table-wrap roles-table-wrap"><table class="roles-table"><thead><tr><th scope="col">角色</th><th scope="col">说明</th><th scope="col">权限</th><th scope="col">操作</th></tr></thead><tbody>
       ${roles.map(r => `<tr><td><strong title="${esc(r.name)}">${esc(roleLabel(r.name))}</strong>${roleLabels[r.name] ? `<br><span class="small">${esc(r.name)}</span>` : ''}</td><td>${esc(roleDescription(r))}</td><td>${rolePermissionsSummary(r.permissions || [])}</td><td>${can('*') && r.name !== 'super_admin' ? `<button class="secondary" data-role="${esc(r.name)}">编辑权限</button>` : ''}</td></tr>`).join('')}
       </tbody></table></div>
@@ -390,7 +401,7 @@ async function renderRoles() {
         } catch (error) { notice(error.message); }
       };
     });
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 
@@ -453,7 +464,8 @@ function traceRow(item) {
 }
 
 async function renderObservability() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载内置观测数据…</div>';
+  if (state.page !== 'observability') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载内置观测数据…</div>';
   const filters = state.cache.observabilityFilters || {level:'', search:'', traceStatus:''};
   try {
     const logParams = new URLSearchParams({limit:'100'});
@@ -472,7 +484,7 @@ async function renderObservability() {
     const firing = (dashboard.alerts || []).filter((alert) => alert.status === 'firing');
     const storageError = String(storage.last_write_error || '');
     const storageLabel = storageError ? '持久化异常' : (storage.persistent ? '持久化已启用' : '仅内存保存');
-    page.innerHTML = `<div class="observability-page">
+    if (!page.isConnected) return; page.innerHTML = `<div class="observability-page">
       <section class="observability-intro"><div><p class="eyebrow">EMBEDDED OBSERVABILITY</p><h2>内置运行观测</h2><p>指标、日志、链路追踪和告警均由 API Manager 自身采集，无需额外监控容器。</p></div><div class="storage-state ${storage.persistent && !storageError ? 'ok' : 'warning'}"><strong>${storageLabel}</strong><span>日志 ${formatMetric(storage.logs)} / ${formatMetric(storage.max_logs)} · 链路 ${formatMetric(storage.traces)} / ${formatMetric(storage.max_traces)}</span>${storageError ? `<span class="storage-error" title="${esc(storageError)}">${esc(storageError)}</span>` : ''}</div></section>
       <div class="stats observability-stats">
         <div class="stat"><span class="small">网关请求</span><div class="number">${formatMetric(metrics.gateway_requests_total)}</div><span class="metric-caption">累计调用</span></div>
@@ -498,13 +510,14 @@ async function renderObservability() {
     };
     $('#clear-observation-filter').onclick = () => { state.cache.observabilityFilters = {level:'',search:'',traceStatus:''}; renderObservability(); };
     $$('[data-alert-ack]').forEach((button) => button.onclick = async () => { try { await api(`/admin/v1/observability/alerts/${encodeURIComponent(button.dataset.alertAck)}/ack`, {method:'POST'}); notice('告警已确认', true); renderObservability(); } catch (error) { notice(error.message); } });
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 async function renderAuditLogs(pageNumber = 1) {
+  if (state.page !== 'audit') return;
   const page = $('#page');
   const filters = state.cache.auditFilters || {};
-  page.innerHTML = `<div class="card audit-filters"><h2>筛选条件</h2><form id="audit-filter-form" class="filter-grid">
+  if (!page.isConnected) return; page.innerHTML = `<div class="card audit-filters"><h2>筛选条件</h2><form id="audit-filter-form" class="filter-grid">
     <label>操作<input name="action" value="${esc(filters.action || '')}" placeholder="例如 api.publish"></label>
     <label>资源类型<input name="resource_type" value="${esc(filters.resource_type || '')}" placeholder="例如 api、user"></label>
     <label>操作者 ID<input name="actor_id" value="${esc(filters.actor_id || '')}" placeholder="用户 UUID"></label>
@@ -549,7 +562,8 @@ function auditRow(item) {
 }
 
 async function renderPlugins() {
-  const page = $('#page'); page.innerHTML = '<div class="empty">加载中…</div>';
+  if (state.page !== 'plugins') return;
+  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const [result, apis, library] = await Promise.all([
       api('/admin/v1/plugins'),
@@ -561,7 +575,7 @@ async function renderPlugins() {
     const unique = [...new Map(managed.map(item => [item.name, managed.find(version => version.name === item.name && version.enabled) || item])).values()];
     const usage = unique.map(item => pluginUsage(item, apis)).join('') || '<div class="plugin-empty">还没有托管插件。上传并启用 WASM 插件后，可以在这里配置调用路由。</div>';
     const runtime = (result.plugins || []).map(name => `<code>${esc(name)}</code>`).join(' ') || '<span>暂无已加载插件</span>';
-    page.innerHTML = `
+    if (!page.isConnected) return; page.innerHTML = `
       <div class="plugin-page">
         <div class="plugin-top">
           <section class="plugin-panel plugin-versions" aria-labelledby="plugin-versions-title">
@@ -592,7 +606,7 @@ async function renderPlugins() {
     $$('#page [data-plugin-route]').forEach(button => button.onclick = () => openPluginRouteDraft(button.dataset.pluginName, button.dataset.pluginRoute, button.dataset.pluginMethod, button.dataset.pluginAuth, button.dataset.pluginTitle));
     $$('#page [data-plugin-library-install]').forEach(button => button.onclick = () => installPluginLibrary(button.dataset.pluginLibraryName, button.dataset.pluginLibraryVersion));
     $$('#page [data-plugin-library-publish]').forEach(button => button.onclick = () => publishPluginLibrary(button.dataset.pluginLibraryPublish));
-  } catch (error) { page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
+  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty">${esc(error.message)}</div>`; }
 }
 
 async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode = 'api_key', title = '') {
@@ -734,3 +748,27 @@ $('#logout').onclick = logout;
 $('#refresh').onclick = renderPage;
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
 hydrateSession();
+
+
+async function renderGrafana() {
+  if (state.page !== 'grafana') return;
+ const page = $('#page');
+ if (!page.isConnected) return; page.innerHTML = `<section class="card grafana-panel"><div class="grafana-heading"><div><h2>Grafana 仪表盘</h2><p class="small">使用当前账号权限访问，无需单独登录或开放其他端口。</p></div><button id="grafana-reconnect" class="secondary">重新连接</button></div><p id="grafana-status" role="status">正在连接 Grafana…</p><div id="grafana-content"></div></section>`;
+ const connect = async () => {
+  const status = page.querySelector('#grafana-status'); const content = page.querySelector('#grafana-content');
+  if (!status || !content) return;
+  status.textContent = '正在连接 Grafana…'; content.replaceChildren();
+  try {
+   await api(`${adminPath}/grafana-session`, {method:'POST'});
+   if (state.page !== 'grafana' || !page.isConnected) return;
+   const frame = document.createElement('iframe');
+   frame.title = 'Grafana 运行监控仪表盘';
+   frame.src = `${adminPath}/grafana/d/api-manager-overview/api-manager-overview?orgId=1&kiosk`;
+   frame.className = 'grafana-frame'; frame.referrerPolicy = 'same-origin';
+   frame.addEventListener('load', () => { if(status.isConnected) status.textContent='已连接。连接权限每次请求重新校验；过期时请重新连接。'; });
+   content.appendChild(frame);
+  } catch(error) { if(status.isConnected) status.textContent = `无法连接 Grafana：${error.message}`; }
+ };
+ $('#grafana-reconnect').onclick = connect;
+ await connect();
+}

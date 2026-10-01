@@ -2,6 +2,7 @@ package web
 
 import (
 	"embed"
+	"html"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -11,33 +12,41 @@ import (
 //go:embed assets/*
 var assets embed.FS
 
-func Console() http.Handler {
-	fileServer := http.FileServer(http.FS(assets))
+func Console() http.Handler { return ConsoleAt("/admin") }
+func ConsoleAt(base string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/console" {
-			http.Redirect(w, r, "/console/", http.StatusPermanentRedirect)
+		if r.Method != "GET" && r.Method != "HEAD" {
+			w.Header().Set("Allow", "GET, HEAD")
+			w.WriteHeader(405)
 			return
 		}
-		path := strings.TrimPrefix(r.URL.Path, "/console/")
+		if r.URL.Path == base {
+			http.Redirect(w, r, base+"/", http.StatusPermanentRedirect)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, base+"/")
 		if path == "" || path == "index.html" {
-			contents, err := assets.ReadFile("assets/index.html")
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write(contents)
-			return
+			path = "index.html"
 		}
-		if strings.Contains(path, "..") {
+		if path != "index.html" && path != "app.css" && path != "app.js" {
 			http.NotFound(w, r)
 			return
+		}
+		contents, err := assets.ReadFile("assets/" + path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if path == "index.html" {
+			contents = []byte(strings.ReplaceAll(string(contents), "__ADMIN_PATH__", html.EscapeString(base)))
 		}
 		if contentType := mime.TypeByExtension(filepath.Ext(path)); contentType != "" {
 			w.Header().Set("Content-Type", contentType)
 		}
-		clone := r.Clone(r.Context())
-		clone.URL.Path = "/assets/" + path
-		fileServer.ServeHTTP(w, clone)
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != "HEAD" {
+			// #nosec G705 -- bytes are embedded assets; the only substitution is the HTML-escaped, validated server-side ADMIN_PATH, never request input.
+			_, _ = w.Write(contents)
+		}
 	})
 }

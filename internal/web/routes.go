@@ -1,0 +1,36 @@
+package web
+
+import (
+	"net/http"
+	"regexp"
+	"strings"
+)
+
+var adminPathPattern = regexp.MustCompile(`^/[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$`)
+
+func ValidAdminPath(value string) bool {
+	if len(value) > 100 || !adminPathPattern.MatchString(value) {
+		return false
+	}
+	for _, path := range []string{"/api", "/auth", "/health", "/metrics", "/public", "/_next", "/catalog.json", "/admin/v1"} {
+		if value == path || strings.HasPrefix(value, path+"/") {
+			return false
+		}
+	}
+	return true
+}
+
+// MountAdministration separates the fixed authenticated API routes from the
+// configurable UI and Grafana paths, including the default /admin prefix.
+func MountAdministration(mux *http.ServeMux, path string, admin, auth, grafana, grant http.Handler) {
+	mux.Handle("/admin/v1/", admin)
+	mux.Handle("/auth/", auth)
+	mux.Handle(path+"/grafana-session", grant)
+	mux.Handle(path+"/grafana/", grafana)
+	mux.Handle(path+"/grafana", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, path+"/grafana/", http.StatusTemporaryRedirect)
+	}))
+	console := ConsoleAt(path)
+	mux.Handle(path+"/", console)
+	mux.Handle(path, console)
+}

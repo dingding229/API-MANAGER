@@ -12,7 +12,6 @@ imagePullSecrets: []
 service:
   type: ClusterIP
   port: 8080
-  publicPort: 8081
 
 ingress:
   enabled: false
@@ -35,7 +34,8 @@ resources:
 
 env:
   HTTP_ADDR: ":8080"
-  PUBLIC_HTTP_ADDR: ":8081"
+  ADMIN_PATH: /admin
+  PUBLIC_BASE_URL: http://localhost:8080
   PUBLIC_UI_DIR: /usr/share/api-manager/public-ui
   ADMIN_USERNAME: admin
   LOG_LEVEL: info

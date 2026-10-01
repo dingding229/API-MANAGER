@@ -1,6 +1,7 @@
 package config
 
 import (
+	"api-manager/internal/web"
 	"errors"
 	"fmt"
 	"io"
@@ -17,7 +18,8 @@ type Config struct {
 	UpstreamCredentials       string
 	HTTPAddr                  string
 	PublicAPIBaseURL          string
-	PublicHTTPAddr            string
+	AdminPath                 string
+	PublicBaseURL             string
 	PublicUIDir               string
 	AdminUsername             string
 	AdminPassword             string
@@ -146,7 +148,8 @@ func Load() (Config, error) {
 		UpstreamCredentials:       secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:                  env("HTTP_ADDR", ":8080"),
 		PublicAPIBaseURL:          env("PUBLIC_API_BASE_URL", ""),
-		PublicHTTPAddr:            env("PUBLIC_HTTP_ADDR", ""),
+		AdminPath:                 env("ADMIN_PATH", "/admin"),
+		PublicBaseURL:             env("PUBLIC_BASE_URL", "http://localhost:8080"),
 		PublicUIDir:               env("PUBLIC_UI_DIR", "/usr/share/api-manager/public-ui"),
 		AdminUsername:             env("ADMIN_USERNAME", "admin"),
 		AdminPassword:             secrets["ADMIN_PASSWORD"],
@@ -272,15 +275,18 @@ func (c Config) Validate() error {
 	if c.ObservabilityStackEnabled && (len(c.GrafanaAdminPassword) < 32 || c.GrafanaAdminPassword == c.CredentialEncryptionKey || c.GrafanaAdminPassword == c.RedisPassword || c.GrafanaAdminPassword == c.MetricsToken) {
 		return errors.New("the full observability stack requires a distinct GRAFANA_ADMIN_PASSWORD of at least 32 characters")
 	}
-	if c.PublicHTTPAddr != "" {
-		host, port, err := net.SplitHostPort(c.PublicHTTPAddr)
-		if err != nil || (host != "" && net.ParseIP(host) == nil && !strings.Contains(host, ".")) || port == "" {
-			return errors.New("PUBLIC_HTTP_ADDR must be a valid host:port address")
-		}
-		if c.PublicUIDir == "" || filepath.IsAbs(c.PublicUIDir) == false {
-			return errors.New("PUBLIC_UI_DIR must be an absolute directory")
-		}
+
+	if !web.ValidAdminPath(c.AdminPath) {
+		return errors.New("ADMIN_PATH must be a safe, non-reserved absolute path without a trailing slash")
 	}
+	if !filepath.IsAbs(c.PublicUIDir) {
+		return errors.New("PUBLIC_UI_DIR must be an absolute directory")
+	}
+	u, err := url.Parse(c.PublicBaseURL)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") {
+		return errors.New("PUBLIC_BASE_URL must be an HTTP(S) origin without credentials, path, query or fragment")
+	}
+
 	if c.UserSessionTTL < time.Second || c.UserSessionTTL > 24*time.Hour {
 		return errors.New("USER_SESSION_TTL must be between 1 second and 24 hours")
 	}

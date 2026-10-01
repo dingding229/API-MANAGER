@@ -49,6 +49,8 @@ def main():
         fake_business_key = "ak_" + "invalid-key-for-auth-isolation-check"
         checks = {
             "readiness": (request(base, "/health/ready"), 200),
+            "public frontend": (request(base, "/"), 200),
+            "public catalog": (request(base, "/catalog.json"), 200),
             "anonymous metrics denied": (request(base, "/metrics"), 401),
             "metrics KEY accepted": (request(base, "/metrics", metrics), 200),
             "anonymous management denied": (request(base, "/admin/v1/apis"), 401),
