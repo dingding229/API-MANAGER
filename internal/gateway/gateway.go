@@ -38,6 +38,7 @@ import (
 )
 
 type Gateway struct {
+	apiHostAllowed func(string) bool
 	credentials    upstream.Credentials
 	store          store.Store
 	plugins        *plugin.Registry
@@ -74,6 +75,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	g.requests.Add(1)
 	capture := newCaptureWriter(w)
+	if g.apiHostAllowed != nil && (!g.apiHostAllowed(r.Host) || (r.URL.Host != "" && !g.apiHostAllowed(r.URL.Host))) {
+		writeJSONError(capture, http.StatusMisdirectedRequest, "请使用设置的接口调用地址。")
+		g.logRequest(r, model.API{}, capture, started)
+		return
+	}
 	api, ok, matchErr := g.match(r.Method, r.URL.Path)
 	if matchErr != nil {
 		g.logger.Error("list API routes failed", "error", matchErr)
@@ -652,3 +658,5 @@ func routeBefore(a, b, actual string) bool {
 	}
 	return a < b
 }
+
+func (g *Gateway) SetAPIHostPolicy(allowed func(string) bool) { g.apiHostAllowed = allowed }

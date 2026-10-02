@@ -19,7 +19,15 @@ type Catalog struct {
 	baseURL      string
 	siteProvider func() model.PublicSiteInfo
 }
+type Operation struct {
+	Method         string      `json:"method"`
+	Authentication string      `json:"authentication"`
+	Parameters     []Parameter `json:"parameters"`
+	Body           []Parameter `json:"body"`
+}
 type Document struct {
+	Methods        []string    `json:"methods"`
+	Operations     []Operation `json:"operations"`
 	ID             string      `json:"id"`
 	Title          string      `json:"title"`
 	Summary        string      `json:"summary"`
@@ -85,9 +93,13 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if c.siteProvider != nil {
 		info := c.siteProvider()
 		result.Site = &info
-		result.BaseURL = info.APIBaseURL
+		result.BaseURL = info.WebsiteURL
+		if info.APIDomain != "" {
+			result.BaseURL = info.APIDomain
+		}
 	}
 	visible := 0
+	grouped := map[string]int{}
 	for _, a := range apis {
 		if !a.PublicVisible || !a.Enabled || a.PublishedAt == nil || strings.TrimSpace(a.PublicTitle) == "" || (a.AuthMode != "api_key" && a.AuthMode != "none") || !strings.HasPrefix(a.Path, "/api/") || strings.ContainsAny(a.Path, "?\r\n#") {
 			continue
@@ -97,7 +109,7 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		visible++
 		for _, method := range a.HTTPMethods() {
-			digest := sha256.Sum256([]byte(method + " " + a.Path))
+			digest := sha256.Sum256([]byte(a.Path))
 			category := a.PublicCategory
 			if category == "" {
 				category = "通用接口"
@@ -119,9 +131,10 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 					name := strings.Trim(part, "{}")
 					found := false
-					for _, p := range d.Parameters {
+					for index, p := range d.Parameters {
 						if p.Name == name && p.Location == "path" {
 							found = true
+							d.Parameters[index].Required = true
 						}
 					}
 					if !found {
@@ -129,7 +142,24 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			result.APIs = append(result.APIs, d)
+			operation := Operation{Method: method, Authentication: d.Authentication, Parameters: d.Parameters, Body: d.Body}
+			if index, exists := grouped[a.Path]; exists {
+				duplicate := false
+				for _, existing := range result.APIs[index].Methods {
+					if existing == method {
+						duplicate = true
+					}
+				}
+				if !duplicate {
+					result.APIs[index].Methods = append(result.APIs[index].Methods, method)
+					result.APIs[index].Operations = append(result.APIs[index].Operations, operation)
+				}
+			} else {
+				d.Methods = []string{method}
+				d.Operations = []Operation{operation}
+				grouped[a.Path] = len(result.APIs)
+				result.APIs = append(result.APIs, d)
+			}
 		}
 	}
 	sort.Slice(result.APIs, func(i, j int) bool {

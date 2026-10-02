@@ -65,3 +65,55 @@ func TestCatalogIsReadOnlyAndDoesNotAcceptCredentialOrigins(t *testing.T) {
 		t.Fatal("public write method accepted")
 	}
 }
+
+func TestMultipleMethodsProduceOnePublicDocument(t *testing.T) {
+	m := store.NewMemory()
+	now := time.Now()
+	a := model.API{ID: "multi", Method: "GET", Methods: []string{"GET", "POST", "OPTIONS"}, Path: "/api/item/{id}", AuthMode: "api_key", Enabled: true, PublishedAt: &now, PublicVisible: true, PublicTitle: "商品"}
+	if err := m.CreateAPI(a); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	New(m, "").ServeHTTP(w, httptest.NewRequest("GET", "/public/v1/catalog", nil))
+	var result Response
+	_ = json.Unmarshal(w.Body.Bytes(), &result)
+	if len(result.APIs) != 1 || len(result.APIs[0].Methods) != 3 || len(result.APIs[0].Operations) != 3 {
+		t.Fatalf("methods were duplicated as interfaces: %+v", result)
+	}
+}
+func TestSamePathDistinctOperationsKeepAuthenticationAndParameters(t *testing.T) {
+	m := store.NewMemory()
+	now := time.Now()
+	for _, a := range []model.API{{ID: "get", Method: "GET", Path: "/api/items", AuthMode: "none", Enabled: true, PublishedAt: &now, PublicVisible: true, PublicTitle: "商品"}, {ID: "post", Method: "POST", Path: "/api/items", AuthMode: "api_key", Enabled: true, PublishedAt: &now, PublicVisible: true, PublicTitle: "商品", RequestSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`)}} {
+		if err := m.CreateAPI(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := httptest.NewRecorder()
+	New(m, "").ServeHTTP(w, httptest.NewRequest("GET", "/public/v1/catalog", nil))
+	var result Response
+	_ = json.Unmarshal(w.Body.Bytes(), &result)
+	if len(result.APIs) != 1 {
+		t.Fatal("same interface split into separate cards")
+	}
+	for _, op := range result.APIs[0].Operations {
+		if op.Method == "POST" && (op.Authentication != "api_key" || len(op.Body) != 1) {
+			t.Fatal("operation-specific settings lost")
+		}
+	}
+}
+func TestCatalogUsesDedicatedDomainOrWebsite(t *testing.T) {
+	c := New(store.NewMemory(), "https://old-example.example")
+	cfg := model.PublicSiteInfo{WebsiteURL: "http://site.example.com:8081", APIDomain: "https://api.example.com"}
+	c.SetSiteProvider(func() model.PublicSiteInfo { return cfg })
+	for _, expected := range []string{"https://api.example.com", "http://site.example.com:8081"} {
+		w := httptest.NewRecorder()
+		c.ServeHTTP(w, httptest.NewRequest("GET", "/public/v1/catalog", nil))
+		var result Response
+		_ = json.Unmarshal(w.Body.Bytes(), &result)
+		if result.BaseURL != expected {
+			t.Fatal("wrong API example origin")
+		}
+		cfg.APIDomain = ""
+	}
+}

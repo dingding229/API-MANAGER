@@ -26,9 +26,11 @@ type Store interface {
 	SaveSiteSettings(model.SiteSettingsRecord, int64) (model.SiteSettingsRecord, error)
 }
 type snapshot struct {
-	record   model.SiteSettingsRecord
-	password string
-	mailer   *user.SMTPMailer
+	apiAuthority string
+	apiScheme    string
+	record       model.SiteSettingsRecord
+	password     string
+	mailer       *user.SMTPMailer
 }
 type Service struct {
 	store       Store
@@ -48,7 +50,7 @@ var ErrTestLimited = errors.New("test email rate limited")
 var ErrMailFailed = errors.New("test email delivery failed; check SMTP credentials, sender, recipient and TLS settings")
 
 func Defaults() model.SiteSettings {
-	return model.SiteSettings{Site: model.PublicSiteInfo{Name: "API Manager", PublicTitle: "API Manager · 开放接口目录", AdminTitle: "API Manager Console", Description: "浏览已公开的 API 接口、参数和调用方式。", Subtitle: "开放接口目录", HeroTitle: "找到接口，\n开始你的下一次调用。", HeroDescription: "从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。", Footer: "仅展示已授权公开的接口信息"}, SMTP: model.SMTPSettings{Port: 587, Mode: "starttls"}}
+	return model.SiteSettings{Site: model.PublicSiteInfo{Name: "API Manager", PublicTitle: "API Manager · 开放接口目录", AdminTitle: "API Manager Console", Description: "浏览已公开的 API 接口、参数和调用方式。", Subtitle: "开放接口目录", HeroTitle: "找到接口，\n开始你的下一次调用。", HeroDescription: "从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。", Footer: "已发布的服务信息"}, SMTP: model.SMTPSettings{Port: 587, Mode: "starttls"}}
 }
 func New(ctx context.Context, s Store, key string, defaults model.SiteSettings, password string, users *user.Service) (*Service, error) {
 	service := &Service{store: s, key: key, ctx: ctx, users: users}
@@ -99,6 +101,11 @@ func (s *Service) Save(req model.UpdateSiteSettingsRequest) (model.SiteSettingsV
 	if len(password) > 1024 || strings.ContainsAny(password, "\r\n\x00") {
 		return model.SiteSettingsView{}, ErrInvalid
 	}
+	domain, err := NormalizeAPIDomain(req.Site.APIDomain)
+	if err != nil {
+		return model.SiteSettingsView{}, err
+	}
+	req.Site.APIDomain = domain
 	record := model.SiteSettingsRecord{Settings: model.SiteSettings{Site: req.Site, SMTP: req.SMTP}, UpdatedAt: time.Now().UTC()}
 	prepared, err := s.prepare(record, password)
 	if err != nil {
@@ -140,6 +147,15 @@ func (s *Service) prepare(record model.SiteSettingsRecord, password string) (*sn
 		return nil, err
 	}
 	snap := &snapshot{record: record, password: password}
+	if cfg.Site.APIDomain != "" {
+		domain, err := NormalizeAPIDomain(cfg.Site.APIDomain)
+		if err != nil {
+			return nil, err
+		}
+		u, _ := url.Parse(domain)
+		snap.apiAuthority = u.Host
+		snap.apiScheme = u.Scheme
+	}
 	if cfg.SMTP.Enabled {
 		mailer, err := user.NewSMTPMailer(cfg.SMTP.Host, cfg.SMTP.Port, cfg.SMTP.Username, password, cfg.SMTP.From, cfg.SMTP.Mode)
 		if err != nil {
@@ -224,13 +240,28 @@ func Validate(cfg model.SiteSettings, password string) error {
 			return ErrInvalid
 		}
 	}
-	if len(cfg.Site.WebsiteURL) > 512 || len(cfg.Site.APIBaseURL) > 512 || !validURL(cfg.Site.WebsiteURL, true) || !validURL(cfg.Site.APIBaseURL, true) {
+	if len(cfg.Site.WebsiteURL) > 512 || len(cfg.Site.APIBaseURL) > 512 || !validWebsiteOrigin(cfg.Site.WebsiteURL) || !validURL(cfg.Site.APIBaseURL, true) {
 		return ErrInvalid
 	}
 	if cfg.Site.ContactEmail != "" {
 		a, err := mail.ParseAddress(cfg.Site.ContactEmail)
 		if err != nil || a.Address != cfg.Site.ContactEmail || len(cfg.Site.ContactEmail) > 254 || !strings.Contains(cfg.Site.ContactEmail, "@") {
 			return ErrInvalid
+		}
+	}
+	if len(cfg.Site.APIDomain) > 512 {
+		return ErrInvalid
+	}
+	if _, err := NormalizeAPIDomain(cfg.Site.APIDomain); err != nil {
+		return err
+	}
+	if cfg.Site.APIDomain != "" && cfg.Site.WebsiteURL != "" {
+		u, err := url.Parse(cfg.Site.WebsiteURL)
+		if err != nil {
+			return ErrInvalid
+		}
+		if SameHostname(cfg.Site.APIDomain, u.Host) {
+			return ErrSameSiteDomain
 		}
 	}
 	smtp := cfg.SMTP
@@ -246,4 +277,16 @@ func Validate(cfg model.SiteSettings, password string) error {
 		}
 	}
 	return nil
+}
+
+func validWebsiteOrigin(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	_, ok := canonicalAuthority(u.Host, u.Scheme)
+	return ok
 }

@@ -150,6 +150,7 @@ func main() {
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
 	gatewayHandler.SetProductionMode(cfg.ProductionMode)
+	gatewayHandler.SetAPIHostPolicy(siteService.AllowsAPIHost)
 
 	ready := func(ctx context.Context) error {
 		if health, ok := activeStore.(store.HealthStore); ok {
@@ -199,6 +200,7 @@ func main() {
 	handler = loggingMiddleware(logger, handler)
 	handler = metrics.Middleware(handler)
 	handler = httpx.CORS(cfg.CORSOrigins, handler)
+	handler = siteService.APIDomainGuard(handler)
 	handler = httpx.SecurityHeaders(handler)
 	handler = httpx.Recover(logger, handler)
 	handler = httpx.RequestID(handler)

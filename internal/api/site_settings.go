@@ -54,10 +54,24 @@ func (a *Admin) siteSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	if !decodeSiteJSON(w, r, &request) {
 		return
 	}
+	domain, err := sitesettings.NormalizeAPIDomain(request.Site.APIDomain)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "请填写有效的接口专用域名或完整地址"})
+		return
+	}
+	if domain != "" && request.Site.WebsiteURL == "" && sitesettings.SameHostname(domain, r.Host) {
+		writeJSON(w, 400, map[string]string{"error": "接口专用地址不能与网站地址相同"})
+		return
+	}
+	request.Site.APIDomain = domain
 	value, err := a.siteSettings.Save(request)
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			writeJSON(w, 409, map[string]string{"error": "设置已经更新，请重新加载后再保存"})
+			return
+		}
+		if errors.Is(err, sitesettings.ErrSameSiteDomain) {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
 		if errors.Is(err, sitesettings.ErrInvalid) {

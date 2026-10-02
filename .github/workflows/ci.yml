@@ -258,7 +258,7 @@ jobs:
           assert 'test-only-encrypted-smtp-secret' not in json.dumps(saved)
           assert call('GET','/public/v1/site')[1]['name']=='CI verified website'
           public_catalog=call('GET','/catalog.json')[1]
-          assert public_catalog['site']['public_title']=='CI API documents' and public_catalog['base_url']=='https://api.example.test'
+          assert public_catalog['site']['public_title']=='CI API documents' and public_catalog['base_url']==''
           assert 'smtp' not in json.dumps(public_catalog)
           assert call('PUT','/admin/v1/settings',session=session,data={'version':settings['version'],'site':settings['site'],'smtp':settings['smtp']})[0]==409
           status,tenant=call('POST','/admin/v1/users',session=session,data={'username':'settings-tenant','email':'settings-tenant@example.test','password':'Viewer88','roles':['tenant_admin']})
@@ -295,11 +295,23 @@ jobs:
           for method in multi['methods']:
               assert call(method,'/api/multi')[0]==200
           assert call('PUT','/api/multi')[0]==404
+          config=call('GET','/admin/v1/settings',session=session)[1]
+          config['site']['website_url']='http://127.0.0.1:8080'
+          config['site']['api_domain']='api.example.test'
+          assert call('PUT','/admin/v1/settings',session=session,data={'version':config['version'],'site':config['site'],'smtp':config['smtp']})[0]==200
+          assert call('GET','/api/multi')[0]==421
+          request=Request('http://127.0.0.1:8080/api/multi',headers={'Host':'api.example.test'})
+          with urlopen(request,timeout=5) as response:
+              assert response.status==200
+          config=call('GET','/admin/v1/settings',session=session)[1]
+          config['site']['api_domain']=''
+          assert call('PUT','/admin/v1/settings',session=session,data={'version':config['version'],'site':config['site'],'smtp':config['smtp']})[0]==200
+          assert call('GET','/api/multi')[0]==200
           assert call('POST','/admin/v1/apis',session=session,data={'name':'conflict','response_status':200,'methods':['POST','PUT'],'path':'/api/multi'})[0]==409
           exported=call('GET','/admin/v1/openapi.json',session=session)[1]
           assert set(exported['paths']['/api/multi'])=={'get','post','head','options'}
           catalog=call('GET','/catalog.json')[1]
-          assert {a['method'] for a in catalog['apis'] if a['path']=='/api/multi'}=={'GET','POST','HEAD','OPTIONS'}
+          assert [a['methods'] for a in catalog['apis'] if a['path']=='/api/multi']==[['GET','POST','HEAD','OPTIONS']]
           status,audits=call('GET','/admin/v1/audit-logs',session=session)
           assert status==200 and audits['items']
           assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',session=session)[0]==200

@@ -12,6 +12,7 @@ type PublicSiteInfo struct {
 	Keywords        string `json:"keywords"`
 	WebsiteURL      string `json:"website_url"`
 	APIBaseURL      string `json:"api_base_url"`
+	APIDomain       string `json:"api_domain,omitempty"`
 	Subtitle        string `json:"subtitle"`
 	HeroTitle       string `json:"hero_title"`
 	HeroDescription string `json:"hero_description"`
