@@ -161,3 +161,13 @@ func TestOverviewAndRecoveryAssets(t *testing.T) {
 		t.Fatal("username/email combined control remains")
 	}
 }
+
+func TestSettingsRefreshDoesNotReplaceAnotherPage(t *testing.T) {
+	js, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "async function renderSiteSettings() {\n  if(state.page!=='settings')return;") {
+		t.Fatal("late settings response can replace another active view")
+	}
+}

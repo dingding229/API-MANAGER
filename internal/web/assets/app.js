@@ -1009,6 +1009,7 @@ function siteSettingArea(label,name,value,max) {
  return `<label class="field"><span class="field-label">${esc(label)}</span><textarea name="${esc(name)}" maxlength="${max}" rows="3">${esc(value)}</textarea></label>`;
 }
 async function renderSiteSettings() {
+  if(state.page!=='settings')return;
   if(!(state.user?.roles||[state.user?.role]).includes('super_admin')){$('#page').innerHTML='<div class="empty">仅超级管理员可配置网站。</div>';return;}
   const page=$('#page');page.innerHTML='<div class="empty">加载网站设置…</div>';
   try {
