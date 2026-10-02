@@ -3,13 +3,16 @@
 package publicweb
 
 import (
+	"api-manager/internal/model"
 	"bytes"
 	"encoding/json"
+	"html"
 	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,8 +22,9 @@ import (
 const maxCatalogBytes = 2 << 20
 
 type Handler struct {
-	assets fs.FS
-	export http.Handler
+	assets       fs.FS
+	export       http.Handler
+	siteProvider func() model.PublicSiteInfo
 }
 
 func New(directory string, export http.Handler) (*Handler, error) {
@@ -77,6 +81,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if name != "index.html" {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+	if name == "index.html" && h.siteProvider != nil {
+		data, err := io.ReadAll(io.LimitReader(f, 4<<20))
+		if err != nil {
+			unavailable(w)
+			return
+		}
+		site := h.siteProvider()
+		data = pageTitle.ReplaceAllLiteral(data, []byte("<title>"+html.EscapeString(site.PublicTitle)+"</title>"))
+		data = pageDescription.ReplaceAllLiteral(data, []byte(`<meta name="description" content="`+html.EscapeString(site.Description)+`"/>`))
+		extra := `<meta name="keywords" content="` + html.EscapeString(site.Keywords) + `"/><meta property="og:title" content="` + html.EscapeString(site.PublicTitle) + `"/><meta property="og:description" content="` + html.EscapeString(site.Description) + `"/>`
+		if site.WebsiteURL != "" {
+			extra += `<link rel="canonical" href="` + html.EscapeString(strings.TrimRight(site.WebsiteURL, "/")+"/") + `"/>`
+		}
+		data = bytes.Replace(data, []byte("</head>"), []byte(extra+"</head>"), 1)
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
+		return
 	}
 	if seek, ok := f.(io.ReadSeeker); ok {
 		http.ServeContent(w, r, name, info.ModTime(), seek)
@@ -141,3 +162,8 @@ func (r *boundedResponse) Write(p []byte) (int, error) {
 	}
 	return r.body.Write(p)
 }
+
+var pageTitle = regexp.MustCompile(`<title>[^<]*</title>`)
+var pageDescription = regexp.MustCompile(`<meta name="description" content="[^"]*"/?>`)
+
+func (h *Handler) SetSiteProvider(provider func() model.PublicSiteInfo) { h.siteProvider = provider }

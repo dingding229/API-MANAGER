@@ -47,3 +47,9 @@ test('POSIX quoting keeps shell metacharacters literal, including quotes in para
   assert.equal(args[2], `https://YOUR_API_DOMAIN/api/${hostile}`);
   assert.equal(JSON.parse(args.at(-1))[hostile], 'YOUR_VALUE');
 });
+
+test('website public identity never contains SMTP credentials or private settings', () => {
+ const value={version:1,base_url:'https://api.example.test',apis:[],site:{name:'配置网站',public_title:'公开标题',description:'<script>never execute</script>',smtp:{host:'SECRET-host',password:'SECRET-password'},smtp_password:'SECRET-password',encrypted_smtp_password:'SECRET-cipher',admin_token:'SECRET-token'}};
+ const result=projectCatalog(value);assert.equal(result.site.name,'配置网站');assert.equal(result.site.public_title,'公开标题');assert.equal(JSON.stringify(result).includes('SECRET'),false);
+ assert.equal(result.site.description,'<script>never execute</script>');
+});

@@ -16,6 +16,7 @@ var (
 )
 
 type Memory struct {
+	siteSettings  model.SiteSettingsRecord
 	bootstrapHash string
 	bootstrapUsed bool
 	mu            sync.RWMutex

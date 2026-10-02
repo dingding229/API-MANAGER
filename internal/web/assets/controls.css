@@ -183,3 +183,18 @@ form.form-stack select {min-height:var(--control-height);appearance:none;padding
 }
 .method-error {color:var(--danger);font-size:13px;line-height:1.5;margin:6px 0 0;}
 form .method-field[aria-invalid="true"] .method-options {outline:1px solid var(--danger);outline-offset:4px;border-radius:var(--control-radius);}
+
+.settings-page {display:grid;gap:20px;max-width:1100px;}
+.settings-page .form-stack {gap:20px;}
+.settings-section {display:grid;gap:16px;}
+.settings-section h2 {margin:0;}
+.settings-heading {display:flex;align-items:start;justify-content:space-between;gap:16px;}
+.settings-heading .small {margin:6px 0 0;}
+.settings-security-note {margin:0;padding:16px 18px;background:var(--surface-soft);border:1px solid var(--control-border);border-radius:10px;color:var(--control-muted);font-size:13px;line-height:1.7;}
+.settings-save {display:flex;justify-content:space-between;align-items:center;gap:16px;padding:8px 0;}
+.settings-save p {margin:0;font-size:13px;}
+.settings-test-row {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:end;}
+.password-input-row {display:flex;gap:8px;align-items:center;}
+.password-input-row input {min-width:0;flex:1;}
+.password-input-row button {min-height:44px;}
+@media(max-width:600px) {.settings-test-row{grid-template-columns:1fr;}.settings-heading,.settings-save{flex-direction:column;align-items:stretch;}.settings-security-note{padding:14px;}}

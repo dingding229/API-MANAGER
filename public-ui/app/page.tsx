@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Clipboard, Code2, Folder, KeyRound, LockKeyhole, Search, ShieldCheck, UnlockKeyhole } from 'lucide-react';
 import { DocsBody, DocsTitle, DocsDescription } from 'fumadocs-ui/layouts/docs/page';
 
-import { command, projectCatalog, type ApiDoc, type Catalog } from '../lib/catalog';
+import { command, projectCatalog, defaultSite, type ApiDoc, type Catalog } from '../lib/catalog';
 
 const emptyCatalog: Catalog = { version: 1, base_url: '', apis: [] };
 const authLabel = (auth: ApiDoc['authentication']) => auth === 'none' ? '无需验证' : 'KEY 认证';
@@ -36,15 +36,18 @@ export default function PublicCatalog() {
   const filtered = useMemo(() => catalog.apis.filter((api) => [api.title, api.summary, api.path, api.category].join(' ').toLowerCase().includes(query.toLowerCase()) && (method === 'all' || api.method === method) && (auth === 'all' || api.authentication === auth) && (category === 'all' || api.category === category)), [catalog.apis, query, method, auth, category]);
   const current = filtered.find((api) => api.id === selected) || filtered[0];
 
+  const site=catalog.site || defaultSite;
+  useEffect(()=>{document.title=site.public_title;const description=document.querySelector('meta[name="description"]');description?.setAttribute('content',site.description);let keywords=document.querySelector('meta[name="keywords"]');if(!keywords){keywords=document.createElement('meta');keywords.setAttribute('name','keywords');document.head.appendChild(keywords)}keywords.setAttribute('content',site.keywords)},[site.public_title,site.description,site.keywords]);
   return <>
-    <header className="site-header"><div className="header-inner"><a className="brand" href="/" aria-label="API Manager 开放接口目录"><span className="brand-mark" aria-hidden="true" /><span>API Manager<small>开放接口目录</small></span></a><span className="header-note"><i />只读调用文档</span></div></header>
+    <header className="site-header"><div className="header-inner"><a className="brand" href="/" aria-label={`${site.name} ${site.subtitle}`}><span className="brand-mark" aria-hidden="true" /><span>{site.name}<small>{site.subtitle}</small></span></a><span className="header-note"><i />只读调用文档</span></div></header>
     <main>
-      <section className="hero"><div><span className="kicker">面向开发者的接口文档</span><h1>找到接口，<br />开始你的下一次调用。</h1><p>从用途到参数，从认证方式到调用示例。<br />让接口接入清晰、直接、有据可循。</p></div><div className="hero-mark" aria-hidden="true">{'{'}<span /><span />{'}'}</div></section>
+      <section className="hero"><div><span className="kicker">面向开发者的接口文档</span><h1>{site.hero_title.split("\n").map((line,index)=><span key={index}>{index>0&&<br/>}{line}</span>)}</h1><p>{site.hero_description.split("\n").map((line,index)=><span key={index}>{index>0&&<br/>}{line}</span>)}</p></div><div className="hero-mark" aria-hidden="true">{'{'}<span /><span />{'}'}</div></section>
+      {site.announcement&&<section className="site-announcement" aria-label="网站公告">{site.announcement}</section>}
       <section className="toolbar" aria-label="搜索及筛选接口"><label className="search"><Search size={19} /><span className="sr-only">搜索接口</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索接口名称、路径或用途" /></label><select aria-label="请求方法" value={method} onChange={(event) => setMethod(event.target.value)}><option value="all">全部请求方法</option>{methods.map((value) => <option key={value}>{value}</option>)}</select><select aria-label="认证方式" value={auth} onChange={(event) => setAuth(event.target.value)}><option value="all">全部认证方式</option><option value="api_key">KEY 认证</option><option value="none">无需验证</option></select></section>
       <div className="catalog-meta" role="status" aria-live="polite"><span>{loading ? '正在读取公开接口…' : `${catalog.apis.length} 个公开接口${filtered.length !== catalog.apis.length ? `，当前找到 ${filtered.length} 个` : ''}`}</span><span>{categories.length} 个分类</span></div>
       {error ? <div className="error-state" role="alert"><h2>{error}</h2><button onClick={() => void load()}>重新读取目录</button></div> : <section className="workspace"><aside className="sidebar"><div className="sidebar-title"><strong>接口分类</strong><span>{catalog.apis.length}</span></div><nav aria-label="接口分类">{[['all', '全部接口', catalog.apis.length], ...categories.map((value) => [value, value, catalog.apis.filter((api) => api.category === value).length])].map(([id, label, count]) => <button key={id} className={category === id ? 'active' : ''} onClick={() => setCategory(String(id))} aria-pressed={category === id}><Folder size={15} />{label}<em>{count}</em></button>)}</nav><div className="sidebar-note"><ShieldCheck size={17} /><p>公开文档，不公开凭据。<br />KEY 请自行妥善保管。</p></div></aside><section className="endpoint-list"><div className="column-title"><strong>{category === 'all' ? '全部接口' : category}</strong><span>{filtered.length}</span></div>{!filtered.length ? <div className="empty">没有匹配的接口。<br />试试其他关键词或筛选条件。</div> : filtered.map((api) => <button key={api.id} className={`endpoint ${current?.id === api.id ? 'active' : ''}`} onClick={() => setSelected(api.id)} aria-pressed={current?.id === api.id}><span className="endpoint-head"><strong>{api.title}</strong><b className={methodClass(api.method)}>{api.method}</b></span><code>{api.path}</code><p>{api.summary || '查看参数与调用示例'}</p><small>{api.authentication === 'none' ? <UnlockKeyhole size={11} /> : <LockKeyhole size={11} />}{authLabel(api.authentication)} · 已公开</small></button>)}</section><section className="document" aria-label="接口文档">{current ? <Document key={current.id} api={current} baseUrl={catalog.base_url} /> : <div className="initial"><Code2 size={42} /><h2>选择一个接口</h2><p>公开接口的调用文档会显示在这里。</p></div>}</section></section>}
       <section className="note"><span>01</span><div><strong>先读文档，再开始接入</strong><p>示例中的域名、参数和 KEY 均为占位内容。页面不会收集、保存或测试你的 KEY。</p></div></section>
-    </main><footer><strong>API Manager</strong><span>仅展示已授权公开的接口信息</span></footer>
+    </main><footer><strong>{site.name}</strong><span>{site.footer}{site.contact_email&&<> · <a href={`mailto:${site.contact_email}`}>{site.contact_email}</a></>}</span></footer>
   </>;
 }
 

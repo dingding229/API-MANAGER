@@ -1,6 +1,7 @@
 package publicweb
 
 import (
+	"api-manager/internal/model"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,5 +81,24 @@ func TestExportFailuresNeverLeakDetails(t *testing.T) {
 		if w.Code != 503 || w.Body.String() != "{\"error\":\"public catalog unavailable\"}\n" {
 			t.Fatal("export failure not closed")
 		}
+	}
+}
+
+func TestServerRenderedWebsiteMetadataIsEscaped(t *testing.T) {
+	h := fixture(t, http.NotFoundHandler())
+	dir := t.TempDir()
+	source := `<html><head><title>default</title><meta name="description" content="default"/></head><body>public</body></html>`
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h.assets = os.DirFS(dir)
+	h.SetSiteProvider(func() model.PublicSiteInfo {
+		return model.PublicSiteInfo{PublicTitle: `</title><script>alert(1)</script>`, Description: `"/><script>alert(2)</script>`, Keywords: `" bad=1`, WebsiteURL: "https://example.test"}
+	})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	body := w.Body.String()
+	if strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, `rel="canonical" href="https://example.test/"`) {
+		t.Fatal("unsafe or missing dynamic metadata")
 	}
 }

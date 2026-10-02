@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -159,4 +160,37 @@ func TestRecoveryConfigurationRequiresTrustedHTTPSAndTLS(t *testing.T) {
 	if _, err := NewSMTPMailer("smtp.example.test", 587, "user", "pass", "from@example.test", "plaintext"); err == nil {
 		t.Fatal("plaintext SMTP accepted")
 	}
+}
+
+func TestRecoveryCanBeReconfiguredWhileRequestsRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewService(store.NewMemory())
+	mailer := &captureMailer{ch: make(chan capturedMail, 2)}
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 30; n++ {
+				if err := s.ConfigureRecovery(ctx, mailer, "https://example.test/admin/"); err != nil {
+					t.Error(err)
+				}
+				s.DisableRecovery()
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h := NewHTTP(s)
+			for n := 0; n < 30; n++ {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest("GET", "/auth/v1/recovery", nil))
+			}
+		}()
+	}
+	wg.Wait()
+	s.DisableRecovery()
 }

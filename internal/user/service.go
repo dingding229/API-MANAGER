@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"api-manager/internal/audit"
@@ -48,6 +49,7 @@ type Service struct {
 	store         Store
 	ttl           time.Duration
 	recovery      *recovery
+	recoveryMu    sync.RWMutex
 }
 type sessionStore interface {
 	CreateSession(model.Session) error

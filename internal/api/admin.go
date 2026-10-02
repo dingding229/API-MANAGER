@@ -23,6 +23,7 @@ import (
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
 	apiSchema "api-manager/internal/schema"
+	"api-manager/internal/sitesettings"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
 	"gopkg.in/yaml.v3"
@@ -41,6 +42,7 @@ type UserManager interface {
 }
 
 type Admin struct {
+	siteSettings            *sitesettings.Service
 	store                   store.Store
 	plugins                 *plugin.Registry
 	userManager             UserManager
@@ -92,6 +94,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.URL.Path == "/admin/v1/settings" && (r.Method == http.MethodGet || r.Method == http.MethodPut):
+		a.siteSettingsHandler(w, r)
+	case r.URL.Path == "/admin/v1/settings/smtp/test" && r.Method == http.MethodPost:
+		a.testSiteSMTP(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/overview":
 		a.overview(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/summary":
@@ -197,6 +203,8 @@ func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
+	case path == "/admin/v1/settings" || strings.HasPrefix(path, "/admin/v1/settings/"):
+		return "*"
 	case strings.HasPrefix(path, "/admin/v1/observability/alerts/") && strings.HasSuffix(path, "/ack") && r.Method == http.MethodPost:
 		return "observability.manage"
 	case strings.HasPrefix(path, "/admin/v1/observability/") && r.Method == http.MethodGet:

@@ -28,6 +28,8 @@ type recoveryStore interface {
 	CompletePasswordReset(string, string) (string, error)
 }
 type recovery struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
 	mailer  ResetMailer
 	baseURL string
 	queue   chan string
@@ -50,21 +52,31 @@ func (s *Service) ConfigureRecovery(ctx context.Context, mailer ResetMailer, bas
 	if _, ok := s.store.(recoveryStore); !ok {
 		return errors.New("password recovery storage unavailable")
 	}
-	r := &recovery{mailer: mailer, baseURL: u.String(), queue: make(chan string, 32), ips: make(map[string]recoveryRate)}
+	workerCtx, cancel := context.WithCancel(ctx)
+	r := &recovery{ctx: workerCtx, cancel: cancel, mailer: mailer, baseURL: u.String(), queue: make(chan string, 32), ips: make(map[string]recoveryRate)}
+	s.recoveryMu.Lock()
+	old := s.recovery
 	s.recovery = r
+	s.recoveryMu.Unlock()
+	if old != nil {
+		old.cancel()
+	}
 	go func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-workerCtx.Done():
 				return
 			case email := <-r.queue:
-				s.deliverReset(ctx, r, email)
+				s.deliverReset(workerCtx, r, email)
 			}
 		}
 	}()
 	return nil
 }
 func (s *Service) deliverReset(ctx context.Context, r *recovery, email string) {
+	if ctx.Err() != nil {
+		return
+	}
 	u, err := s.store.GetUserByEmail(email)
 	if err != nil || u.Status != "active" || u.Email == "" {
 		return
@@ -116,7 +128,7 @@ func (r *recovery) allow(addr string) bool {
 	return true
 }
 func (h *HTTP) recoveryStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]bool{"enabled": h.service.recovery != nil})
+	writeJSON(w, 200, map[string]bool{"enabled": h.service.currentRecovery() != nil})
 }
 func decodeRecovery(w http.ResponseWriter, r *http.Request, target any) bool {
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
@@ -128,7 +140,7 @@ func decodeRecovery(w http.ResponseWriter, r *http.Request, target any) bool {
 	return true
 }
 func (h *HTTP) forgotPassword(w http.ResponseWriter, r *http.Request) {
-	rec := h.service.recovery
+	rec := h.service.currentRecovery()
 	if rec == nil {
 		writeJSON(w, 503, map[string]string{"error": "email recovery is not configured", "code": "recovery_unavailable"})
 		return
@@ -155,7 +167,7 @@ func (h *HTTP) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, map[string]string{"message": "If an active account matches this email, a reset link will be sent. It expires in 15 minutes."})
 }
 func (h *HTTP) resetPassword(w http.ResponseWriter, r *http.Request) {
-	rec := h.service.recovery
+	rec := h.service.currentRecovery()
 	if rec == nil {
 		writeJSON(w, 503, map[string]string{"error": "email recovery is not configured"})
 		return
@@ -188,4 +200,23 @@ func (h *HTTP) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	h.service.RecordAudit(audit.Actor{Type: "anonymous"}, r, "auth.password.reset", "user", id, http.StatusOK, nil)
 	writeJSON(w, 200, map[string]string{"message": "Password changed. Sign in again."})
+}
+
+func (s *Service) currentRecovery() *recovery {
+	s.recoveryMu.RLock()
+	defer s.recoveryMu.RUnlock()
+	return s.recovery
+}
+func (s *Service) DisableRecovery() {
+	s.recoveryMu.Lock()
+	old := s.recovery
+	s.recovery = nil
+	s.recoveryMu.Unlock()
+	if old != nil {
+		old.cancel()
+	}
+}
+func ValidRecoveryURL(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	return err == nil && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && (u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")))
 }

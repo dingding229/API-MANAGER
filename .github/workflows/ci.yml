@@ -247,6 +247,25 @@ jobs:
           status,profile_user=call('POST','/admin/v1/users',session=session,data={'username':'contact-user','email':'contact@example.test','password':'UiRead88','role':'viewer'})
           assert status==201 and profile_user['username']=='contact-user' and profile_user['email']=='contact@example.test'
           assert call('GET','/admin/v1/overview',session=session)[0]==200
+          assert call('GET','/admin/v1/settings')[0]==401
+          status,settings=call('GET','/admin/v1/settings',session=session)
+          assert status==200 and settings['version']==0
+          settings['site']['name']='CI verified website'
+          settings['site']['public_title']='CI API documents'
+          settings['site']['api_base_url']='https://api.example.test'
+          status,saved=call('PUT','/admin/v1/settings',session=session,data={'version':settings['version'],'site':settings['site'],'smtp':settings['smtp'],'smtp_password':'test-only-encrypted-smtp-secret'})
+          assert status==200 and saved['smtp_password_set'] is True
+          assert 'test-only-encrypted-smtp-secret' not in json.dumps(saved)
+          assert call('GET','/public/v1/site')[1]['name']=='CI verified website'
+          public_catalog=call('GET','/catalog.json')[1]
+          assert public_catalog['site']['public_title']=='CI API documents' and public_catalog['base_url']=='https://api.example.test'
+          assert 'smtp' not in json.dumps(public_catalog)
+          assert call('PUT','/admin/v1/settings',session=session,data={'version':settings['version'],'site':settings['site'],'smtp':settings['smtp']})[0]==409
+          status,tenant=call('POST','/admin/v1/users',session=session,data={'username':'settings-tenant','email':'settings-tenant@example.test','password':'Viewer88','roles':['tenant_admin']})
+          assert status==201
+          tenant_session=call('POST','/auth/v1/login',data={'username':'settings-tenant','password':'Viewer88'})[1]['token']
+          assert call('GET','/admin/v1/settings',session=tenant_session)[0]==403
+          assert call('POST','/admin/v1/settings/smtp/test',session=tenant_session,data={'recipient':'settings-tenant@example.test'})[0]==403
 
           # The front page and admin UI share the API listener.
           for path in ('/', '/admin/', '/admin/app.js'):

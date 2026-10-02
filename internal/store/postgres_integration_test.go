@@ -158,4 +158,17 @@ func TestPostgresProductionInvariants(t *testing.T) {
 		}
 	}
 
+	record := model.SiteSettingsRecord{Settings: model.SiteSettings{Site: model.PublicSiteInfo{Name: "stored-site"}}, EncryptedSMTPPassword: "encrypted-fixture", UpdatedAt: time.Now().UTC()}
+	saved, err := p.SaveSiteSettings(record, 0)
+	if err != nil || saved.Version != 1 {
+		t.Fatal("initial site settings not persisted")
+	}
+	if _, err = p.SaveSiteSettings(record, 0); !errors.Is(err, ErrConflict) {
+		t.Fatal("site settings optimistic guard ignored")
+	}
+	loaded, err := p.GetSiteSettings()
+	if err != nil || loaded.EncryptedSMTPPassword != "encrypted-fixture" || loaded.Settings.Site.Name != "stored-site" {
+		t.Fatal("site settings persistence changed")
+	}
+
 }

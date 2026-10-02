@@ -15,8 +15,9 @@ import (
 
 type Store interface{ ListAPIs() []model.API }
 type Catalog struct {
-	store   Store
-	baseURL string
+	store        Store
+	baseURL      string
+	siteProvider func() model.PublicSiteInfo
 }
 type Document struct {
 	ID             string      `json:"id"`
@@ -36,9 +37,10 @@ type Parameter struct {
 	Required bool   `json:"required"`
 }
 type Response struct {
-	Version int        `json:"version"`
-	BaseURL string     `json:"base_url"`
-	APIs    []Document `json:"apis"`
+	Version int                   `json:"version"`
+	BaseURL string                `json:"base_url"`
+	APIs    []Document            `json:"apis"`
+	Site    *model.PublicSiteInfo `json:"site,omitempty"`
 }
 
 func New(store Store, baseURL string) *Catalog {
@@ -80,6 +82,11 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		apis = c.store.ListAPIs()
 	}
 	result := Response{Version: 1, BaseURL: c.baseURL, APIs: make([]Document, 0)}
+	if c.siteProvider != nil {
+		info := c.siteProvider()
+		result.Site = &info
+		result.BaseURL = info.APIBaseURL
+	}
 	visible := 0
 	for _, a := range apis {
 		if !a.PublicVisible || !a.Enabled || a.PublishedAt == nil || strings.TrimSpace(a.PublicTitle) == "" || (a.AuthMode != "api_key" && a.AuthMode != "none") || !strings.HasPrefix(a.Path, "/api/") || strings.ContainsAny(a.Path, "?\r\n#") {
@@ -175,3 +182,5 @@ func fields(raw json.RawMessage, location string) []Parameter {
 	}
 	return result
 }
+
+func (c *Catalog) SetSiteProvider(provider func() model.PublicSiteInfo) { c.siteProvider = provider }

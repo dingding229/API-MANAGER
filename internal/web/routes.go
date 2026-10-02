@@ -1,6 +1,7 @@
 package web
 
 import (
+	"api-manager/internal/model"
 	"net/http"
 	"regexp"
 	"strings"
@@ -23,10 +24,13 @@ func ValidAdminPath(value string) bool {
 // MountAdministration separates the fixed authenticated API routes from the
 // configurable UI path, including the default /admin prefix.
 func MountAdministration(mux *http.ServeMux, path string, admin, auth http.Handler) {
+	MountAdministrationWithSite(mux, path, admin, auth, nil)
+}
+func MountAdministrationWithSite(mux *http.ServeMux, path string, admin, auth http.Handler, provider func() model.PublicSiteInfo) {
 	mux.Handle("/admin/v1/", admin)
 	mux.Handle("/auth/", auth)
 
-	console := ConsoleAt(path)
+	console := ConsoleWithSite(path, provider)
 	mux.Handle(path+"/", console)
 	mux.Handle(path, console)
 }

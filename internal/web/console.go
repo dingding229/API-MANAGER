@@ -1,6 +1,7 @@
 package web
 
 import (
+	"api-manager/internal/model"
 	"embed"
 	"html"
 	"mime"
@@ -12,8 +13,9 @@ import (
 //go:embed assets/*
 var assets embed.FS
 
-func Console() http.Handler { return ConsoleAt("/admin") }
-func ConsoleAt(base string) http.Handler {
+func Console() http.Handler              { return ConsoleAt("/admin") }
+func ConsoleAt(base string) http.Handler { return ConsoleWithSite(base, nil) }
+func ConsoleWithSite(base string, provider func() model.PublicSiteInfo) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
 			http.NotFound(w, r)
@@ -43,6 +45,11 @@ func ConsoleAt(base string) http.Handler {
 			return
 		}
 		if path == "index.html" {
+			if provider != nil {
+				info := provider()
+				contents = []byte(strings.Replace(string(contents), "<title>API Manager Console</title>", "<title>"+html.EscapeString(info.AdminTitle)+"</title>", 1))
+			}
+
 			contents = []byte(strings.ReplaceAll(string(contents), "__ADMIN_PATH__", html.EscapeString(base)))
 		}
 		if contentType := mime.TypeByExtension(filepath.Ext(path)); contentType != "" {

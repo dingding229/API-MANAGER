@@ -24,3 +24,5 @@ button,a,select{transition:background-color .18s ease,color .18s ease}button:hov
 .toolbar select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(max-width:620px){.toolbar select,.search input{font-size:16px}.toolbar select{padding-right:38px}}
 @media(forced-colors:active){.toolbar select{appearance:auto;background-image:none}}
+.site-announcement{margin:0 0 18px;padding:16px 18px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:9px;background:#fff;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;font-size:14px}
+footer a{color:var(--accent);overflow-wrap:anywhere}footer a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}

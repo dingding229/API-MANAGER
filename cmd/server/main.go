@@ -20,10 +20,12 @@ import (
 	"api-manager/internal/config"
 	"api-manager/internal/gateway"
 	"api-manager/internal/httpx"
+	"api-manager/internal/model"
 	"api-manager/internal/observability"
 	"api-manager/internal/plugin"
 	"api-manager/internal/publicweb"
 	"api-manager/internal/ratelimit"
+	"api-manager/internal/sitesettings"
 	"api-manager/internal/stack"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
@@ -130,17 +132,20 @@ func main() {
 	admin.SetProductionMode(cfg.ProductionMode)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)
-	if cfg.SMTPHost != "" {
-		mailer, err := user.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPMode)
-		if err != nil {
-			logger.Error("invalid SMTP configuration")
-			os.Exit(1)
-		}
-		if err = userService.ConfigureRecovery(rootCtx, mailer, cfg.PasswordResetBaseURL); err != nil {
-			logger.Error("invalid password recovery URL")
-			os.Exit(1)
-		}
+	settingsStore, ok := activeStore.(sitesettings.Store)
+	if !ok {
+		logger.Error("persistent website settings unavailable")
+		os.Exit(1)
 	}
+	defaults := sitesettings.Defaults()
+	defaults.Site.APIBaseURL = cfg.PublicAPIBaseURL
+	defaults.SMTP = model.SMTPSettings{Enabled: cfg.SMTPHost != "", Host: cfg.SMTPHost, Port: cfg.SMTPPort, Mode: cfg.SMTPMode, Username: cfg.SMTPUsername, From: cfg.SMTPFrom, ResetURL: cfg.PasswordResetBaseURL}
+	siteService, err := sitesettings.New(rootCtx, settingsStore, cfg.CredentialEncryptionKey, defaults, cfg.SMTPPassword, userService)
+	if err != nil {
+		logger.Error("initialize website settings failed")
+		os.Exit(1)
+	}
+	admin.SetSiteSettings(siteService)
 	authHandler := user.NewHTTP(userService)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
@@ -161,15 +166,18 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	web.MountAdministration(mux, cfg.AdminPath, admin, authHandler)
+	web.MountAdministrationWithSite(mux, cfg.AdminPath, admin, authHandler, siteService.Public)
 	mux.Handle("/api/", gatewayHandler)
 	publicExport := catalog.New(activeStore, cfg.PublicAPIBaseURL)
+	publicExport.SetSiteProvider(siteService.Public)
+	mux.Handle("/public/v1/site", siteService)
 	mux.Handle("/public/v1/catalog", publicExport)
 	publicHandler, err := publicweb.New(cfg.PublicUIDir, publicExport)
 	if err != nil {
 		logger.Error("load public documentation failed", "error", err)
 		os.Exit(1)
 	}
+	publicHandler.SetSiteProvider(siteService.Public)
 	mux.Handle("/", publicHandler)
 	mux.HandleFunc("/health/live", func(w http.ResponseWriter, _ *http.Request) {
 		writeHealth(w, http.StatusOK, `{"status":"ok"}`)

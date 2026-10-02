@@ -1,6 +1,6 @@
 export type Field = { name: string; location: 'path' | 'query' | 'header' | 'body'; type: string; required: boolean };
 export type ApiDoc = { id: string; title: string; summary: string; category: string; method: string; path: string; authentication: 'api_key' | 'none'; parameters: Field[]; body: Field[] };
-export type Catalog = { version: number; base_url: string; apis: ApiDoc[] };
+export type Catalog = { version: number; base_url: string; apis: ApiDoc[]; site?: SiteInfo };
 
 export function sourceUrl(value: string) {
   const url = new URL(value);
@@ -36,7 +36,7 @@ export function projectCatalog(value: unknown): Catalog {
       if (!url.username && !url.password && !url.search && !url.hash && (url.pathname === '/' || url.pathname === '') && (url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname)))) base = url.origin;
     } catch { /* An invalid optional origin must not hide otherwise safe docs. */ }
   }
-  return { version: 1, base_url: base, apis };
+  return { version: 1, base_url: base, apis, ...(data.site ? {site:projectSite(data.site)} : {}) };
 }
 
 export const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -62,4 +62,18 @@ export function command(api: ApiDoc, baseUrl: string) {
   }
   if (api.body.length) lines.push(`  -H ${shellQuote('Content-Type: application/json')}`, `  --data ${shellQuote(JSON.stringify(Object.fromEntries(api.body.map((field) => [field.name, exampleValue(field.type)]))))}`);
   return lines.join(' \\\n');
+}
+
+export type SiteInfo = { name: string; public_title: string; admin_title: string; description: string; keywords: string; website_url: string; api_base_url: string; subtitle: string; hero_title: string; hero_description: string; announcement: string; footer: string; contact_email: string };
+export const defaultSite: SiteInfo = { name:'API Manager',public_title:'API Manager · 开放接口目录',admin_title:'API Manager Console',description:'浏览已公开的 API 接口、参数和调用方式。',keywords:'',website_url:'',api_base_url:'',subtitle:'开放接口目录',hero_title:'找到接口，\n开始你的下一次调用。',hero_description:'从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。',announcement:'',footer:'仅展示已授权公开的接口信息',contact_email:'' };
+export function projectSite(value: unknown): SiteInfo {
+ const data=object(value); const result={...defaultSite};
+ const limits:Record<keyof SiteInfo,number>={name:80,public_title:120,admin_title:120,description:600,keywords:300,website_url:512,api_base_url:512,subtitle:80,hero_title:160,hero_description:600,announcement:600,footer:300,contact_email:254};
+ for(const field of Object.keys(limits) as (keyof SiteInfo)[]) {if(typeof data[field]==='string') result[field]=text(data[field],limits[field]);}
+ for(const field of ['website_url','api_base_url'] as const) {
+  if(!result[field]) continue;
+  try {const u=new URL(result[field]);if(u.username||u.password||u.search||u.hash||(u.pathname!=='/'&&u.pathname!=='')||!(u.protocol==='https:'||(u.protocol==='http:'&&['localhost','127.0.0.1'].includes(u.hostname))))result[field]='';}
+  catch {result[field]='';}
+ }
+ return result;
 }

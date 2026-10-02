@@ -109,6 +109,8 @@ function showConsole() {
   $('#console-view').classList.remove('hidden');
   $('#current-user').textContent = `${state.user?.username || ''} · ${state.user?.roles?.join(', ') || state.user?.role || ''}`;
   $$('#nav button[data-permission]').forEach((button) => button.classList.toggle('hidden', !can(button.dataset.permission)));
+  const superAdmin=(state.user?.roles||[state.user?.role]).includes('super_admin');
+  $$('#nav [data-super-admin]').forEach(button=>button.classList.toggle('hidden',!superAdmin));
   renderPage();
 }
 
@@ -150,10 +152,10 @@ function renderPage() {
   const oldPage = $('#page');
   const newPage = document.createElement('div'); newPage.id = 'page';
   oldPage.replaceWith(newPage);
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => button.classList.toggle('active', button.dataset.page === state.page));
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings};
   return renderers[state.page]();
 }
 
@@ -985,9 +987,49 @@ async function initSetup() {
         form.querySelectorAll('input').forEach(input=>{input.value='';}); section.remove();
         notice('管理员注册成功，请使用设置的用户名和密码登录。',true,'auth'); $('#password').focus();
       } catch(error) { section.querySelector('.message').textContent = error.status===429?'请求过于频繁，请稍后重试。':'注册失败：请检查密钥、账号格式，或确认注册链接是否已经使用。'; }
-      finally {form._saving=false;}
+      finally {form._saving=false;fields.forEach(field=>field.disabled=false);updateRequirements();}
     };
     if (setupFragment) form.elements.username.focus();
   } catch (_) { pendingSetupKey=''; }
 }
 initSetup();
+
+async function refreshSiteIdentity() {
+  try {
+    const response=await fetch('/public/v1/site',{credentials:'omit',cache:'no-store'});if(!response.ok)return;
+    const data=await response.json();
+    if(typeof data.admin_title==='string') {document.title=data.admin_title;}
+    if(typeof data.name==='string') {$('#console-view .brand strong').textContent=data.name;$('#login-view .eyebrow').textContent=data.name;}
+  }catch(_){/* Static defaults remain usable during a transient network failure. */}
+}
+function siteSettingInput(label,name,value,max=120,type='text',hint='') {
+ return `<label class="field"><span class="field-label">${esc(label)}</span><input name="${esc(name)}" type="${type}" value="${esc(value)}" maxlength="${max}">${hint?`<span class="field-hint">${esc(hint)}</span>`:''}</label>`;
+}
+function siteSettingArea(label,name,value,max) {
+ return `<label class="field"><span class="field-label">${esc(label)}</span><textarea name="${esc(name)}" maxlength="${max}" rows="3">${esc(value)}</textarea></label>`;
+}
+async function renderSiteSettings() {
+  if(!(state.user?.roles||[state.user?.role]).includes('super_admin')){$('#page').innerHTML='<div class="empty">仅超级管理员可配置网站。</div>';return;}
+  const page=$('#page');page.innerHTML='<div class="empty">加载网站设置…</div>';
+  try {
+    const cfg=await api('/admin/v1/settings');if(!page.isConnected)return;
+    const site=cfg.site,smtp=cfg.smtp;
+    page.innerHTML=`<div class="settings-page"><p class="settings-security-note">仅超级管理员可管理。保存后立即生效并持久化；公开页面只接收网站展示信息，SMTP 账号与密码不会公开。监听端口、数据库与后台路由等部署边界仍通过服务器配置管理。</p><form id="site-settings-form" class="form-stack"><section class="card settings-section"><div class="settings-heading"><div><h2>网站基本信息</h2><p class="small">统一公开目录、浏览器标题与管理后台品牌。</p></div><span class="badge">全站生效</span></div><div class="grid-2">${siteSettingInput('网站名称','name',site.name,80)}${siteSettingInput('目录副标题','subtitle',site.subtitle,80)}${siteSettingInput('公开页面 title','public_title',site.public_title)}${siteSettingInput('管理后台 title','admin_title',site.admin_title)}</div>${siteSettingArea('网站描述 / SEO Description','description',site.description,600)}${siteSettingInput('SEO 关键词','keywords',site.keywords,300)}<div class="grid-2">${siteSettingInput('网站公开地址','website_url',site.website_url,512,'url','填写 HTTPS 根地址；用于记录本站地址，不自动迁移监听或域名。')}${siteSettingInput('API 调用根地址','api_base_url',site.api_base_url,512,'url','公开 cURL 示例将使用此地址；留空显示占位域名。')}</div></section><section class="card settings-section"><h2>公开目录内容</h2>${siteSettingArea('首页主标题','hero_title',site.hero_title,160)}${siteSettingArea('首页介绍','hero_description',site.hero_description,600)}${siteSettingArea('网站公告（可选）','announcement',site.announcement,600)}<div class="grid-2">${siteSettingInput('页脚说明','footer',site.footer,300)}${siteSettingInput('公开联系邮箱（可选）','contact_email',site.contact_email,254,'email')}</div><p class="field-hint">以上内容均为纯文本，不执行 HTML、Markdown 或脚本；主标题与介绍支持换行。</p></section><section class="card settings-section"><div class="settings-heading"><div><h2>SMTP 邮件与找回密码</h2><p class="small">支持 STARTTLS 与隐式 TLS，不允许关闭证书验证。</p></div><span class="badge ${cfg.recovery_enabled?'':'off'}">${cfg.recovery_enabled?'邮件找回已启用':'邮件找回未启用'}</span></div><label class="checkbox-field"><input type="checkbox" name="smtp_enabled" ${smtp.enabled?'checked':''}><span>启用 SMTP 与邮件找回密码</span></label><div class="grid-2">${siteSettingInput('SMTP 服务器','smtp_host',smtp.host,253,'text','填写公网邮件服务器主机名，不包含协议、路径或账号。')}${siteSettingInput('SMTP 端口','smtp_port',smtp.port,5,'number')}<label class="field"><span class="field-label">加密方式</span><select name="smtp_mode"><option value="starttls" ${smtp.mode==='starttls'?'selected':''}>STARTTLS · 常用端口 587</option><option value="tls" ${smtp.mode==='tls'?'selected':''}>隐式 TLS · 常用端口 465</option></select></label>${siteSettingInput('SMTP 用户名','smtp_username',smtp.username,254)}</div><label class="field"><span class="field-label">SMTP 密码 / 授权码</span><div class="password-input-row"><input name="smtp_password" type="password" maxlength="1024" autocomplete="new-password" placeholder="${cfg.smtp_password_set?'已设置；留空保留，不回显原密码':'未设置'}"><button class="secondary" type="button" data-smtp-visibility aria-pressed="false">显示</button></div><span class="field-hint">只写入新密码，数据库加密保存。留空保留已存密码，勾选下方选项才会清除。</span></label><label class="checkbox-field"><input type="checkbox" name="clear_smtp_password"><span>清除已保存的 SMTP 密码</span></label>${siteSettingInput('发件人邮箱','smtp_from',smtp.from,254,'email')}${siteSettingInput('密码重置页面地址','smtp_reset_url',smtp.reset_url,512,'url','填写完整 HTTPS 后台地址，例如 https://example.com/admin/；不包含查询参数或 #。')}<p class="field-hint">SMTP 服务器与发件地址、授权码必须匹配。为保护内部服务，后台配置不能探测私网、回环或云元数据地址。</p></section><div class="settings-save"><p role="status" aria-live="polite" data-settings-message></p><button type="submit">保存全部设置</button></div></form><section class="card settings-section"><h2>发送测试邮件</h2><p class="small">先保存 SMTP，再验证连接、TLS、认证与发件。测试邮件不包含任何密码、KEY 或重置令牌；每分钟最多三次。</p><form id="smtp-test-form" class="form-stack"><div class="settings-test-row"><label class="field"><span class="field-label">测试收件邮箱</span><input name="recipient" type="email" required maxlength="254" autocomplete="email"></label><button type="submit" ${cfg.recovery_enabled?'':'disabled'}>发送测试邮件</button></div><p role="status" aria-live="polite" data-test-message></p></form></section></div>`;
+    const form=page.querySelector('#site-settings-form');
+    const updateRequirements=()=>{const enabled=form.elements.smtp_enabled.checked;['smtp_host','smtp_port','smtp_from','smtp_reset_url'].forEach(name=>{form.elements[name].required=enabled});form.elements.name.required=true;form.elements.public_title.required=true;form.elements.admin_title.required=true;form.elements.hero_title.required=true;form.elements.smtp_port.min='1';form.elements.smtp_port.max='65535';form.elements.smtp_password.disabled=form.elements.clear_smtp_password.checked};
+    updateRequirements();form.elements.smtp_enabled.onchange=updateRequirements;form.elements.clear_smtp_password.onchange=()=>{if(form.elements.clear_smtp_password.checked)form.elements.smtp_password.value='';updateRequirements()};
+    page.querySelector('[data-smtp-visibility]').onclick=event=>{const button=event.currentTarget;const visible=form.elements.smtp_password.type==='password';form.elements.smtp_password.type=visible?'text':'password';button.textContent=visible?'隐藏':'显示';button.setAttribute('aria-pressed',String(visible))};
+    form.onsubmit=async event=>{
+      event.preventDefault();if(form._saving||!form.reportValidity())return;
+      const values=Object.fromEntries(new FormData(form).entries());const payload={version:cfg.version,site:{},smtp:{enabled:form.elements.smtp_enabled.checked,host:values.smtp_host.trim(),port:Number(values.smtp_port),mode:values.smtp_mode,username:values.smtp_username.trim(),from:values.smtp_from.trim(),reset_url:values.smtp_reset_url.trim()},clear_smtp_password:form.elements.clear_smtp_password.checked};
+      for(const name of ['name','public_title','admin_title','description','keywords','website_url','api_base_url','subtitle','hero_title','hero_description','announcement','footer','contact_email'])payload.site[name]=String(values[name]||'').trim();
+      if(!payload.clear_smtp_password&&form.elements.smtp_password.value)payload.smtp_password=form.elements.smtp_password.value;
+      const message=page.querySelector('[data-settings-message]');form._saving=true;const fields=[...form.querySelectorAll('input,select,textarea,button[type=button]')];fields.forEach(field=>field.disabled=true);
+      try {await withSubmitting(form,'保存中…',async()=>{await api('/admin/v1/settings',{method:'PUT',body:JSON.stringify(payload)});form.elements.smtp_password.value='';await refreshSiteIdentity();await initRecovery();notice('网站设置已保存并生效。',true);await renderSiteSettings()})}
+      catch(error){message.textContent=error.status===409?'其他管理员已更新设置，请刷新后重新编辑。':error.message;message.className='message';message.focus?.()}
+      finally {form._saving=false;}
+    };
+    const test=page.querySelector('#smtp-test-form');test.onsubmit=async event=>{event.preventDefault();if(test._saving||!test.reportValidity())return;test._saving=true;const message=page.querySelector('[data-test-message]');try{await withSubmitting(test,'发送中…',async()=>{const result=await api('/admin/v1/settings/smtp/test',{method:'POST',body:JSON.stringify({recipient:test.elements.recipient.value.trim()})});message.textContent=result.message;message.className='message ok'})}catch(error){message.textContent=error.message;message.className='message'}finally{test._saving=false}};
+  }catch(error){if(page.isConnected)page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`}
+}
+refreshSiteIdentity();

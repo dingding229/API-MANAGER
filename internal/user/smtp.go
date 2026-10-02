@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
 	"net/smtp"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 )
 
 type SMTPMailer struct {
+	tlsConfig                      *tls.Config // Internal test transport only; never exposed as website configuration.
+	DialContext                    func(context.Context, string, string) (net.Conn, error)
 	Host                           string
 	Port                           int
 	Username, Password, From, Mode string
@@ -23,26 +26,45 @@ func NewSMTPMailer(host string, port int, username, password, from, mode string)
 	if host == "" || strings.ContainsAny(host, "/\\\r\n ") || port < 1 || port > 65535 || !validEmail(from) || (mode != "starttls" && mode != "tls") || ((username == "") != (password == "")) {
 		return nil, errors.New("invalid SMTP configuration; TLS and sender address are required")
 	}
-	return &SMTPMailer{host, port, username, password, normalizeEmail(from), mode}, nil
+	return &SMTPMailer{Host: host, Port: port, Username: username, Password: password, From: normalizeEmail(from), Mode: mode}, nil
 }
 func (m *SMTPMailer) SendReset(ctx context.Context, to, link string) error {
 	if !validEmail(to) || strings.ContainsAny(link, "\r\n") {
 		return errors.New("invalid reset message")
 	}
+	return m.send(ctx, to, "API Manager password reset", "You requested an API Manager password reset.\r\n\r\nOpen this link within 15 minutes:\r\n"+link+"\r\n\r\nIf you did not request this, ignore this email. Do not share the link.\r\n")
+}
+func (m *SMTPMailer) SendTest(ctx context.Context, to, name string) error {
+	if !validEmail(to) || strings.ContainsAny(name, "\r\n") {
+		return errors.New("invalid test message")
+	}
+	return m.send(ctx, to, name+" SMTP test", "This is a configuration test from "+name+". No reset token, password or API credential is included.\r\n")
+}
+func (m *SMTPMailer) send(ctx context.Context, to, subject, text string) error {
 	d := net.Dialer{Timeout: 10 * time.Second}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(m.Host, strconv.Itoa(m.Port)))
+	dial := m.DialContext
+	if dial == nil {
+		dial = d.DialContext
+	}
+	conn, err := dial(ctx, "tcp", net.JoinHostPort(m.Host, strconv.Itoa(m.Port)))
 	if err != nil {
 		return errors.New("SMTP connection failed")
 	}
 	defer conn.Close()
+	rawConnection := conn
+	stop := context.AfterFunc(ctx, func() { _ = rawConnection.Close() })
+	defer stop()
 	deadline := time.Now().Add(15 * time.Second)
-	if v, ok := ctx.Deadline(); ok {
+	if v, ok := ctx.Deadline(); ok && v.Before(deadline) {
 		deadline = v
 	}
 	if err = conn.SetDeadline(deadline); err != nil {
 		return err
 	}
 	cfg := &tls.Config{ServerName: m.Host, MinVersion: tls.VersionTLS12}
+	if m.tlsConfig != nil {
+		cfg = m.tlsConfig.Clone()
+	}
 	if m.Mode == "tls" {
 		secure := tls.Client(conn, cfg)
 		if err = secure.HandshakeContext(ctx); err != nil {
@@ -78,7 +100,6 @@ func (m *SMTPMailer) SendReset(ctx context.Context, to, link string) error {
 	if err != nil {
 		return err
 	}
-	text := "You requested an API Manager password reset.\r\n\r\nOpen this link within 15 minutes:\r\n" + link + "\r\n\r\nIf you did not request this, ignore this email. Do not share the link.\r\n"
 	body := base64.StdEncoding.EncodeToString([]byte(text))
 	var lines []string
 	for len(body) > 76 {
@@ -86,7 +107,7 @@ func (m *SMTPMailer) SendReset(ctx context.Context, to, link string) error {
 		body = body[76:]
 	}
 	lines = append(lines, body)
-	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: API Manager password reset\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n", m.From, to, strings.Join(lines, "\r\n"))
+	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n", m.From, to, mime.QEncoding.Encode("UTF-8", subject), strings.Join(lines, "\r\n"))
 	if _, err = w.Write([]byte(message)); err != nil {
 		return err
 	}
