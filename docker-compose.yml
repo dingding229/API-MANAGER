@@ -27,6 +27,7 @@ services:
       SMTP_MODE: ${SMTP_MODE:-starttls}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
+      GITHUB_UPDATE_TOKEN_FILE: /run/secrets/github_update_token
       SMTP_PASSWORD_FILE: /run/secrets/smtp_password
       PASSWORD_RESET_BASE_URL: ${PASSWORD_RESET_BASE_URL:-}
       ADMIN_BOOTSTRAP_KEY_FILE: /run/secrets/admin_bootstrap_key
@@ -51,6 +52,7 @@ services:
       OTEL_EXPORTER_OTLP_INSECURE: "false"
     secrets:
       - admin_bootstrap_key
+      - github_update_token
       - smtp_password
       - credential_encryption_key
       - metrics_token
@@ -128,6 +130,7 @@ services:
     logging: *logging
 
 secrets:
+  github_update_token: {file: "${SECRETS_DIR:-./secrets}/github_update_token"}
   smtp_password: {file: "${SECRETS_DIR:-./secrets}/smtp_password"}
   admin_bootstrap_key: {file: "${SECRETS_DIR:-./secrets}/admin_bootstrap_key"}
   credential_encryption_key: {file: "${SECRETS_DIR:-./secrets}/credential_encryption_key"}

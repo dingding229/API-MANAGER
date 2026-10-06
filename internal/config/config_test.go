@@ -159,3 +159,30 @@ func TestOptionalSMTPPasswordFileMayBeEmpty(t *testing.T) {
 		t.Fatal("empty mandatory bootstrap key secret accepted")
 	}
 }
+
+func TestOptionalVersionCheckTokenLoadsOnlyFromSecret(t *testing.T) {
+	setValidTestEnvironment(t)
+	t.Setenv("GITHUB_UPDATE_TOKEN", "")
+	path := filepath.Join(t.TempDir(), "github_update_token")
+	if err := os.WriteFile(path, []byte("readonly-test-token\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_UPDATE_TOKEN_FILE", path)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitHubUpdateToken != "readonly-test-token" {
+		t.Fatal("optional version credential not loaded")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load()
+	if err != nil || cfg.GitHubUpdateToken != "" {
+		t.Fatal("empty optional token should be accepted", err)
+	}
+}

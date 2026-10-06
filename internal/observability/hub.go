@@ -196,6 +196,33 @@ func (h *Hub) recordLog(entry LogEntry) {
 	}
 }
 
+// ClearLogs clears only application-owned log history. Traces, alerts and
+// metrics remain untouched; the hub lock serializes cleanup with log writes.
+// The count describes the queryable in-memory window, not all journal lines.
+func (h *Hub) ClearLogs() (int, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	committed := h.logJournal == nil
+	var err error
+	if h.logJournal != nil {
+		committed, err = h.logJournal.Clear()
+	}
+	deleted := 0
+	if committed {
+		deleted = len(h.logs)
+		clear(h.logs)
+		h.logs = nil
+	}
+	if err != nil {
+		h.lastWriteError = "clear logs: " + err.Error()
+		return deleted, err
+	}
+	if strings.HasPrefix(h.lastWriteError, "clear logs: ") {
+		h.lastWriteError = ""
+	}
+	return deleted, nil
+}
+
 func (h *Hub) RecordTrace(entry TraceEntry) {
 	entry.Attributes = sanitizeStringMap(entry.Attributes)
 	if noisyPath(entry.Attributes["url.path"]) {
@@ -592,6 +619,88 @@ func (j *rollingJournal) rotate() error {
 	}
 	j.file, j.size = file, 0
 	return nil
+}
+
+// Clear stages only the three fixed log-journal paths and replaces the active
+// file with a new private inode. It never truncates a symlink/hardlink target.
+// Failed staging is rolled back; failures after commit are reported separately
+// while the new writer remains usable and stale in-memory entries are dropped.
+func (j *rollingJournal) Clear() (committed bool, result error) {
+	if j == nil || j.file == nil {
+		return false, errors.New("application log journal is unavailable")
+	}
+	activeInfo, err := j.file.Stat()
+	if err != nil {
+		return false, err
+	}
+	var paths []string
+	for _, path := range journalFiles(j.path) {
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) && path != j.path {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if !info.Mode().IsRegular() || (path == j.path && !os.SameFile(info, activeInfo)) {
+			return false, errors.New("application log path must be its original regular journal file")
+		}
+		paths = append(paths, path)
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(j.path), ".application-log-cleanup-")
+	if err != nil {
+		return false, err
+	}
+	keepStage := false
+	defer func() {
+		if !keepStage {
+			result = errors.Join(result, os.RemoveAll(stage))
+		}
+	}()
+	fresh, err := os.CreateTemp(stage, "empty-")
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if !committed {
+			_ = fresh.Close()
+		}
+	}()
+	if err := fresh.Sync(); err != nil {
+		return false, err
+	}
+	var moved []string
+	rollback := func(cause error) (bool, error) {
+		errs := []error{cause}
+		for i := len(moved) - 1; i >= 0; i-- {
+			path := moved[i]
+			if err := os.Rename(filepath.Join(stage, filepath.Base(path)), path); err != nil {
+				keepStage = true // Preserve journals for recovery if rollback itself fails.
+				errs = append(errs, err)
+			}
+		}
+		return false, errors.Join(errs...)
+	}
+	for _, path := range paths {
+		if err := os.Rename(path, filepath.Join(stage, filepath.Base(path))); err != nil {
+			return rollback(err)
+		}
+		moved = append(moved, path)
+	}
+	if err := os.Rename(fresh.Name(), j.path); err != nil {
+		return rollback(err)
+	}
+	old := j.file
+	j.file, j.size = fresh, 0
+	committed = true
+	closeErr := old.Close()
+	// #nosec G304 -- the directory is the operator-configured journal directory, not request input.
+	directory, err := os.Open(filepath.Dir(j.path))
+	if err != nil {
+		return true, errors.Join(closeErr, err)
+	}
+	syncErr := directory.Sync()
+	return true, errors.Join(closeErr, syncErr, directory.Close())
 }
 
 func (j *rollingJournal) Close() error {

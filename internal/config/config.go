@@ -15,6 +15,7 @@ import (
 )
 
 type Config struct {
+	GitHubUpdateToken                                                              string
 	UpstreamCredentials                                                            string
 	HTTPAddr                                                                       string
 	PublicAPIBaseURL                                                               string
@@ -56,7 +57,7 @@ type Config struct {
 
 func Load() (Config, error) {
 	secrets := make(map[string]string)
-	for _, name := range []string{"ADMIN_BOOTSTRAP_KEY", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD"} {
+	for _, name := range []string{"ADMIN_BOOTSTRAP_KEY", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD", "GITHUB_UPDATE_TOKEN"} {
 		value, err := secret(name)
 		if err != nil {
 			return Config{}, err
@@ -148,6 +149,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
+		GitHubUpdateToken:   secrets["GITHUB_UPDATE_TOKEN"],
 		UpstreamCredentials: secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:            env("HTTP_ADDR", ":8080"),
 		PublicAPIBaseURL:    env("PUBLIC_API_BASE_URL", ""),
@@ -222,7 +224,7 @@ func secret(name string) (string, error) {
 		return "", fmt.Errorf("read %s_FILE: invalid or oversized secret", name)
 	}
 	result := strings.TrimRight(string(contents), "\r\n")
-	if strings.ContainsRune(result, 0) || (result == "" && name != "SMTP_PASSWORD") {
+	if strings.ContainsRune(result, 0) || (result == "" && name != "SMTP_PASSWORD" && name != "GITHUB_UPDATE_TOKEN") {
 		return "", fmt.Errorf("%s_FILE must contain a non-empty text value", name)
 	}
 	return result, nil

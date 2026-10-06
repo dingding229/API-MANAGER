@@ -26,6 +26,7 @@ import (
 	"api-manager/internal/sitesettings"
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
+	"api-manager/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,6 +43,7 @@ type UserManager interface {
 }
 
 type Admin struct {
+	versionChecker          *version.Checker
 	siteSettings            *sitesettings.Service
 	store                   store.Store
 	plugins                 *plugin.Registry
@@ -80,6 +82,7 @@ func (a *Admin) SetObservability(hub *observability.Hub, metrics *observability.
 }
 
 func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "private, no-store")
 	actor, authorized := a.requestActor(r)
 	if !authorized {
 		a.auditor.Record(r.Context(), audit.Actor{Type: "anonymous"}, r, "auth.admin.denied", "admin", "", http.StatusUnauthorized, nil)
@@ -94,6 +97,14 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/version":
+		writeJSON(w, 200, version.Current())
+	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/version/check":
+		if a.versionChecker == nil {
+			writeJSON(w, 200, version.Current())
+		} else {
+			writeJSON(w, 200, a.versionChecker.Check(r.Context()))
+		}
 	case r.URL.Path == "/admin/v1/settings" && (r.Method == http.MethodGet || r.Method == http.MethodPut):
 		a.siteSettingsHandler(w, r)
 	case r.URL.Path == "/admin/v1/settings/smtp/test" && r.Method == http.MethodPost:
@@ -102,6 +113,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.overview(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/summary":
 		a.observabilitySummary(w)
+	case r.Method == http.MethodDelete && r.URL.Path == "/admin/v1/observability/logs":
+		a.clearObservabilityLogs(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/logs":
 		a.observabilityLogs(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/observability/traces":
@@ -205,6 +218,8 @@ func requiredPermission(r *http.Request) string {
 	switch {
 	case path == "/admin/v1/settings" || strings.HasPrefix(path, "/admin/v1/settings/"):
 		return "*"
+	case path == "/admin/v1/observability/logs" && r.Method == http.MethodDelete:
+		return "observability.logs.clear"
 	case strings.HasPrefix(path, "/admin/v1/observability/alerts/") && strings.HasSuffix(path, "/ack") && r.Method == http.MethodPost:
 		return "observability.manage"
 	case strings.HasPrefix(path, "/admin/v1/observability/") && r.Method == http.MethodGet:
@@ -727,7 +742,7 @@ func (a *Admin) mayGrantRoles(r *http.Request, roles []string) bool {
 			return false
 		}
 		for _, permission := range assigned.Permissions {
-			if permission == "*" || permission == "user.manage" {
+			if permission == "*" || permission == "user.manage" || permission == "observability.logs.clear" {
 				return false
 			}
 		}
@@ -1546,3 +1561,5 @@ func (a *Admin) updateAndRelease(api model.API) (model.Release, error) {
 	}
 	return a.store.CreateRelease(api)
 }
+
+func (a *Admin) SetVersionChecker(checker *version.Checker) { a.versionChecker = checker }

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import secrets
 
-FILES = ("admin_bootstrap_key", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password")
+FILES = ("admin_bootstrap_key", "credential_encryption_key", "metrics_token", "postgres_password", "redis_password", "smtp_password", "github_update_token")
 
 
 def main():
@@ -36,7 +36,7 @@ def main():
             continue
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "w") as output:
-            output.write("" if name == "smtp_password" else secrets.token_hex(32) + "\n")
+            output.write("" if name in ("smtp_password", "github_update_token") else secrets.token_hex(32) + "\n")
         path.chmod(0o444)
         created += 1
     print(f"Created {created} missing credential files in {target}; existing values kept, no values displayed.")

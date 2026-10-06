@@ -21,11 +21,16 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      release_version: ${{ steps.release-version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Read application release version
+        id: release-version
+        run: echo "version=$(awk '$1 == "appVersion:" { gsub(/"/, "", $2); print $2; exit }' deploy/helm/api-manager/Chart.yaml)" >> "$GITHUB_OUTPUT"
       - name: Enforce release source boundaries
         run: ./scripts/check-release-boundaries.sh
       - name: Restrict manual production publication to main
@@ -325,7 +330,7 @@ jobs:
 
   publish-amd64:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: scan
+    needs: [validate, scan]
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-24.04
@@ -349,6 +354,9 @@ jobs:
           file: Dockerfile.release
           push: true
           platforms: linux/amd64
+          build-args: |
+            APP_VERSION=v${{ needs.validate.outputs.release_version }}
+            APP_REVISION=${{ github.sha }}
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-amd64
           provenance: mode=max
           sbom: true
@@ -368,7 +376,7 @@ jobs:
 
   publish-arm64:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: scan
+    needs: [validate, scan]
     outputs:
       image-digest: ${{ steps.build.outputs.digest }}
     runs-on: ubuntu-24.04
@@ -393,6 +401,9 @@ jobs:
           file: Dockerfile.release
           push: true
           platforms: linux/arm64
+          build-args: |
+            APP_VERSION=v${{ needs.validate.outputs.release_version }}
+            APP_REVISION=${{ github.sha }}
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-arm64
           provenance: mode=max
           sbom: true

@@ -45,7 +45,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	// Static Next.js bootstrap needs inline script; all catalog content is escaped
 	// React text. No backend-supplied HTML, Markdown, scripts or MDX is evaluated.
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	connect := "'self'"
+	if h.siteProvider != nil {
+		origin := h.siteProvider().APIDomain
+		if u, err := url.Parse(origin); err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != "" && u.User == nil && (u.Path == "" || u.Path == "/") && u.RawQuery == "" && u.Fragment == "" && !strings.ContainsAny(origin, " ;\r\n\t") {
+			connect += " " + u.Scheme + "://" + u.Host
+		}
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src "+connect+"; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path == "/catalog.json" {
 		if r.Method != http.MethodGet {

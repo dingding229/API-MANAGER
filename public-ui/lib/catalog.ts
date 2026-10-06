@@ -105,3 +105,103 @@ export function projectSite(value: unknown): SiteInfo {
  }
  return result;
 }
+
+export type SnippetLanguage = 'curl' | 'javascript' | 'python' | 'go';
+export type RequestExample = { url: string; method: string; headers: [string, string][]; body?: string };
+export type CatalogFilters = { query: string; method: string; authentication: string; category: string };
+export function catalogOrigin(catalog: Catalog, pageOrigin: string): string {
+  return catalog.site?.api_domain || catalog.base_url || catalog.site?.website_url || pageOrigin;
+}
+export function filterCatalog(apis: ApiDoc[], filters: CatalogFilters): ApiDoc[] {
+  const query = filters.query.trim().toLocaleLowerCase();
+  return apis.filter(api => {
+    const operations = api.operations || [api];
+    const searchable = [api.title, api.summary, api.path, api.category, ...operations.flatMap(op => [...op.parameters, ...op.body].map(field => field.name))].join(' ').toLocaleLowerCase();
+    return searchable.includes(query) && (filters.category === 'all' || api.category === filters.category) && operations.some(op => (filters.method === 'all' || op.method === filters.method) && (filters.authentication === 'all' || op.authentication === filters.authentication));
+  });
+}
+function requestValues(api: ApiDoc, origin: string, method: string, overrides: Record<string, string>) {
+  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(method) || !(api.methods || [api.method]).includes(method)) throw new Error('请选择已公开的调用方式。');
+  let base: URL;
+  try { base = new URL(origin); } catch { throw new Error('调用地址尚未加载，请稍后重试。'); }
+  if (!['https:', 'http:'].includes(base.protocol) || base.username || base.password || base.search || base.hash || base.pathname !== '/') throw new Error('调用地址无效，请联系管理员。');
+  const operation = api.operations?.find(op => op.method === method);
+  const current = { ...api, ...operation, method };
+  const values: Record<string, string> = {};
+  for (const field of [...current.parameters, ...current.body]) {
+    const key = `${field.location}:${field.name}`;
+    let value: unknown = overrides[key] ?? exampleValue(field, base.origin);
+    if (['integer', 'number'].includes(field.type) && typeof value === 'string' && !value.trim()) throw new Error('请填写有效数字。');
+    value = bodyExample(field, value);
+    values[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    if (/[\r\n\x00-\x08\x0b-\x1f\x7f]/.test(values[key])) throw new Error('参数不能包含控制字符或换行。');
+  }
+  return { current, values, origin: base.origin };
+}
+export function requestExample(api: ApiDoc, origin: string, method = api.method, overrides: Record<string, string> = {}): RequestExample {
+  const { current, values, origin: base } = requestValues(api, origin, method, overrides);
+  const value = (field: Field) => values[`${field.location}:${field.name}`] ?? String(exampleValue(field, base));
+  const path = current.path.replace(/\{([^}]+)\}/g, (_match, name: string) => {
+    const value = values[`path:${name}`] ?? pathExample(name, current, base);
+    if (value === '.' || value === '..') throw new Error('路径参数不能为 . 或 ..。');
+    return encodeURIComponent(value);
+  });
+  const query = current.parameters.filter(field => field.location === 'query').map(field => `${encodeURIComponent(field.name)}=${encodeURIComponent(value(field))}`).join('&');
+  const parsed = new URL(`${base}${path}${query ? `?${query}` : ''}`);
+  if (parsed.origin !== base || !parsed.pathname.startsWith('/api/')) throw new Error('接口路径无效。');
+  const url = parsed.href;
+  const headers: [string, string][] = current.authentication === 'api_key' ? [['X-API-Key', '填写你的调用密钥']] : [];
+  const names = new Set(headers.map(([name]) => name.toLowerCase()));
+  for (const field of current.parameters.filter(field => field.location === 'header')) {
+    const name = field.name.toLowerCase();
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(field.name) || /^(authorization|x-api-key|cookie|host|content-length|content-type)$/i.test(name) || names.has(name)) continue;
+    names.add(name); headers.push([field.name, value(field)]);
+  }
+  let body: string | undefined;
+  if (current.body.length) {
+    body = JSON.stringify(Object.fromEntries(current.body.map(field => [field.name, bodyExample(field, value(field))])));
+    headers.push(['Content-Type', 'application/json']);
+  }
+  return { url, method, headers, ...(body !== undefined ? { body } : {}) };
+}
+// Snippets are displayed as escaped text, never evaluated by the page.
+function goQuote(value: string): string {
+  return '"' + Array.from(value, char => {
+    if (char === '"' || char === '\\') return '\\' + char;
+    const code = char.codePointAt(0)!;
+    if (code < 32 || code === 127) return '\\x' + code.toString(16).padStart(2, '0');
+    if (code >= 0xd800 && code <= 0xdfff) return '\\ufffd';
+    return char;
+  }).join('') + '"';
+}
+export function snippet(api: ApiDoc, origin: string, method: string, language: SnippetLanguage, overrides: Record<string, string> = {}): string {
+  const request = requestExample(api, origin, method, overrides);
+  if (language === 'curl') {
+    const lines = [`curl -X ${method} ${shellQuote(request.url)}`];
+    for (const [name, value] of request.headers) lines.push(`  -H ${shellQuote(`${name}: ${value}`)}`);
+    if (request.body !== undefined) lines.push(`  --data ${shellQuote(JSON.stringify(JSON.parse(request.body), null, 2))}`);
+    return lines.join(' \\\n');
+  }
+  if (language === 'javascript') {
+    if (request.body !== undefined && ['GET', 'HEAD'].includes(method)) throw new Error('此调用方式声明了请求内容，浏览器 fetch 不支持；请使用 cURL、Python 或 Go。');
+    const lines = [`const response = await fetch(${JSON.stringify(request.url)}, {`, `  method: ${JSON.stringify(method)},`, `  credentials: 'omit',`];
+    if (request.headers.length) lines.push(`  headers: new Headers(${JSON.stringify(request.headers, null, 2).split('\n').join('\n  ')}),`);
+    if (request.body !== undefined) lines.push(`  body: ${JSON.stringify(request.body)},`);
+    lines.push('});', '', 'if (!response.ok) {', '  throw new Error(`请求失败：${response.status}`);', '}', 'console.log(await response.text());');
+    return lines.join('\n');
+  }
+  if (language === 'python') {
+    const lines = ['from urllib.request import Request, urlopen', '', 'request = Request(', `    ${JSON.stringify(request.url)},`, `    method=${JSON.stringify(method)},`];
+    if (request.headers.length) lines.push(`    headers=${JSON.stringify(Object.fromEntries(request.headers), null, 4).split('\n').join('\n    ')},`);
+    if (request.body !== undefined) lines.push(`    data=${JSON.stringify(request.body)}.encode('utf-8'),`);
+    lines.push(')', '', 'with urlopen(request, timeout=15) as response:', "    print(response.read().decode('utf-8'))");
+    return lines.join('\n');
+  }
+  const imports = ['"fmt"', '"io"', '"net/http"', '"time"', ...(request.body !== undefined ? ['"strings"'] : [])];
+  const lines = ['package main', '', 'import (', ...imports.map(value => '    ' + value), ')', '', 'func main() {'];
+  if (request.body !== undefined) lines.push(`    body := strings.NewReader(${goQuote(request.body)})`);
+  lines.push(`    req, err := http.NewRequest(${goQuote(method)}, ${goQuote(request.url)}, ${request.body !== undefined ? 'body' : 'nil'})`, '    if err != nil { panic(err) }');
+  for (const [name, value] of request.headers) lines.push(`    req.Header.Set(${goQuote(name)}, ${goQuote(value)})`);
+  lines.push('', '    client := &http.Client{Timeout: 15 * time.Second}', '    response, err := client.Do(req)', '    if err != nil { panic(err) }', '    defer response.Body.Close()', '', '    data, err := io.ReadAll(response.Body)', '    if err != nil { panic(err) }', '    fmt.Println(response.StatusCode, string(data))', '}');
+  return lines.join('\n');
+}

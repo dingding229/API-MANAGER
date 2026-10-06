@@ -21,7 +21,7 @@ python3 scripts/init-production-secrets.py
 docker compose up -d
 ```
 
-初始化脚本生成 `secrets/` 目录及五个相互独立的凭据和可选 SMTP 密码文件，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
+初始化脚本生成 `secrets/` 目录及五个相互独立的凭据、可选 SMTP 密码和版本检查令牌文件，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
 
 访问 `http://127.0.0.1:8080/admin/`，使用用户名和密码登录。
 
@@ -170,6 +170,8 @@ ADMIN_PATH=/operations
 
 ### 运行观测
 
+在“运行观测 → 应用日志”中可清理全部应用日志。该操作需要 `observability.logs.clear` 权限，默认仅超级管理员拥有，可由超级管理员在角色权限中单独授予；勾选确认后才可执行。清理范围包含内存索引和已保存的应用日志文件，不包含审计日志、请求链路、统计数据、Docker 日志或外部观测系统的数据。清理请求与结果记入审计日志；无法保存审计信息时不会执行清理。服务会继续记录后续日志。
+
 后台“运行观测”由主程序提供指标、日志、链路、基础告警与 Dashboard。开启 `OBSERVABILITY_STACK_ENABLED=true` 可同时运行 Loki、Alloy、Tempo、Prometheus、Alertmanager 五个组件，增强日志、链路和指标的采集与持久化；不启用时，自研观测页面仍然可用。
 
 完整栈建议宿主机至少提供 4 GiB 内存，主程序容器配置 `API_MEMORY_LIMIT=2g` 或更高。所有观测组件仅监听容器回环地址，不增加宿主机公开端口。正式公网登录应使用 HTTPS。
@@ -238,3 +240,78 @@ ADMIN_PATH=/operations
 域名解析、证书和反向代理仍需配置到本服务。代理必须保留原始 `Host`；应用不会信任客户端提供的 `X-Forwarded-Host` 或 `Forwarded`。域名限制不能代替 KEY 认证。如果 HTTPS 在代理处终止，代理也应保证 TLS 域名与请求域名一致，生产业务不要直接暴露未加密的管理端口。
 
 公开目录中，每个接口只显示一次；不同请求方式的认证和参数分别保留。调用示例自动显示实际调用地址，参数使用可编辑的示例值，不公开真实密钥或后台配置中的敏感默认值。
+
+## 文档页在线测试
+
+公开文档仍可匿名浏览。已有用户可点击“登录测试”，使用用户名和密码登录；同一浏览器已登录管理后台时，文档页可直接识别登录状态。在线测试仅使用已公开并发布的接口，发送前会重新读取目录；下线、隐藏或变更调用域名后，需要刷新文档。
+
+参数编辑只更新示例，不会自动请求。测试时须勾选真实调用确认并点击“发送请求”；请求会消耗正常接口额度，写入类操作可能修改业务数据。停止等待或网络超时**不会撤销已经执行的请求**，不要盲目重试。
+
+测试请求从浏览器直接发送至后台配置的 API 调用域名；没有专用域名时使用网站调用地址。KEY 接口仍须输入有效调用密钥，无需验证的接口不附带密钥。登录会话不作为业务 API 的认证凭据，不传给业务接口；页面不保存调用密钥或响应到浏览器存储，也不提供可转发任意地址的测试代理。切换接口、请求方式或退出登录会清除页面中的密钥和响应。
+
+配置专用 API 域名时，须同时在“网站设置”中填写网站的完整 HTTPS 地址。程序仅为该网站来源开放业务接口的跨域读取，不开放跨域管理/登录接口，不携带登录 Cookie。公开页的连接策略同步允许配置的 API 域名。HTTPS 页面不能测试 HTTP 接口，GET/HEAD 声明了请求内容时须使用外部调用工具；响应最多展示 128 KiB，等待最多 15 秒。
+
+## 程序版本与更新检查
+
+管理后台侧栏显示当前程序版本，登录后自动检查，也可点击“检查更新”。正式发布镜像在构建时写入版本标签和源码提交号；本地构建显示 `-dev`，不将其误报为正式最新版本。检查以本项目 GitHub 仓库的稳定版本标签为依据，不计预发布标签，也不等同于 Docker Hub 镜像已经完成发布。检查成功的结果缓存一小时，失败缓存五分钟；检查不会自动更新镜像或修改数据。
+
+本仓库为私有仓库。没有只读凭据时，后台会提示无法检查，而不是显示“已是最新”。运行更新版 `python3 scripts/init-production-secrets.py` 可补齐空的 `secrets/github_update_token`，不会覆盖任何原凭据。需要启用检查时，在 GitHub 创建仅限 `dingding229/API-MANAGER`、仅 `Contents: Read-only` 的细粒度令牌，写入此文件，恢复 `0444` 文件权限（父目录 `0700`），重建主程序。令牌只用于固定的 GitHub 查询，不在网页、日志或公开目录中回显。非 Compose 部署可使用 `GITHUB_UPDATE_TOKEN_FILE`；无需写入网站设置或源码。
+
+升级继续使用 Docker Hub 的 `latest` 镜像：
+
+```bash
+python3 scripts/init-production-secrets.py
+python3 scripts/preflight-production.py
+docker compose pull api-manager
+docker compose up -d --no-deps api-manager
+```
+
+## Cloudflare CDN 与缓存
+
+生产入口使用 HTTPS 域名，建议源站配置受信任的公有 CA 证书并采用 **Full (strict)**，不要使用 Flexible。Cloudflare 常规代理不支持访客 URL 使用 `8081` 端口；应由源站反向代理在 `443` 接收请求，再转发到程序监听端口，保留原始 `Host`。数据库和 Redis 不公开，源站程序端口限制为回环或可信入口访问。
+
+| 内容 | 缓存策略 | 原因 |
+| --- | --- | --- |
+| `/_next/static/` 下成功返回、无凭据的构建指纹 JS/CSS/字体等 | 可长期缓存，`public, max-age=31536000, immutable` | 内容随构建路径变化，多个访客共享相同资源 |
+| `/` 公开 HTML | 不缓存 | 标题、SEO 和网站信息可在后台即时调整 |
+| `/catalog.json`、`/public/v1/*` | 不缓存 | 目录可即时隐藏、下线；缓存可能继续展示过期信息 |
+| `/test/v1/*`、`/auth/*` | 不缓存 | 登录状态、Cookie 和账号信息 |
+| 管理页面及资源（默认 `/admin`；自定义路径也相同）、`/admin/v1/*` | 不缓存 | 权限、设置、版本状态及未带指纹的管理资源 |
+| `/api/*`，包括无需验证的接口 | 不缓存 | 业务数据、额度、可能个性化的响应；不能按扩展名判断 |
+| `/health/*`、`/metrics` 和错误响应 | 不缓存 | 当前服务状态或受保护信息 |
+
+程序在最终响应边界统一限制动态内容，避免上游的 `Cache-Control`/`Expires` 意外使业务响应被 CDN 缓存。动态响应发送 `Cache-Control: private, no-store`、`CDN-Cache-Control: no-store` 和 `Cloudflare-CDN-Cache-Control: no-store`。仅符合静态白名单且未设置 Cookie 的成功资源发送长期缓存头。
+
+### 推荐 Cache Rules
+
+不要为整个网站开启 Cache Everything，也不要使用忽略源站缓存头的 Edge TTL。推荐两条规则（将 `docs.example.com` 替换为实际网站域名）：
+
+1. **公开静态资源**：仅网站域名的 `/_next/static/`，GET/HEAD，无 Cookie、Authorization、X-API-Key。设置 Eligible for cache，Edge TTL 选择“使用源站缓存控制；不存在时绕过缓存”，Browser TTL 尊重源站。
+2. **其他请求全部绕过**：使用下方表达式，设置 Bypass cache，放在其他缓存规则之后，避免被更宽泛规则覆盖。API 专用域名也由这条规则绕过。
+
+静态资源匹配表达式：
+
+```text
+(http.host eq "docs.example.com"
+ and starts_with(http.request.uri.path, "/_next/static/")
+ and http.request.method in {"GET" "HEAD"}
+ and not any(http.request.headers.names[*] eq "authorization")
+ and not any(http.request.headers.names[*] eq "x-api-key")
+ and not any(http.request.headers.names[*] eq "cookie"))
+```
+
+“其他请求全部绕过”使用上述整个表达式的否定，即 `not (...)`。这比逐一罗列后台路径更安全，修改 `/admin` 路径后不需要补充例外。规则应适用于网站和 API 域名，不设置忽略查询参数或忽略 Host 的共享缓存键。若已使用 Workers、Page Rules 或其他缓存规则，须检查它们未覆写上述保护。
+
+上线后使用实际 HTTPS 域名验证：
+
+```bash
+# 目录、登录、后台、业务 API 均不应出现 CF-Cache-Status: HIT。
+curl -sSI https://docs.example.com/catalog.json
+curl -sSI https://docs.example.com/admin/
+# 从网页源码取真实带构建指纹的资源 URL，连续请求检查缓存。
+curl -sSI 'https://docs.example.com/_next/static/chunks/实际文件名.js'
+```
+
+HEAD 仅用于检查响应头；部分接口不支持 HEAD。不要为检查缓存而请求可能有业务副作用的接口。上线切换 CDN 前清除旧缓存，再验证后台变更、下线接口不会被旧目录继续展示。`CF-Cache-Status` 为 HIT 才说明边缘命中；BYPASS/DYNAMIC 是动态路由的正常结果。
+
+官方参考：[默认缓存行为](https://developers.cloudflare.com/cache/concepts/default-cache-behavior/)、[Cache Rules 设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/)、[规则顺序](https://developers.cloudflare.com/cache/how-to/cache-rules/order/)、[网络端口](https://developers.cloudflare.com/fundamentals/reference/network-ports/)、[Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)。

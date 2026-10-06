@@ -13,7 +13,10 @@ RUN go mod download
 COPY cmd/server ./cmd/server
 COPY internal ./internal
 ARG TARGETOS TARGETARCH
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/api-manager ./cmd/server && mkdir -p /out/plugins /out/plugin-library /out/observability
+ARG APP_VERSION=0.3.26-dev
+ARG APP_REVISION=development
+ARG APP_BUILT_AT
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X api-manager/internal/version.Version=${APP_VERSION} -X api-manager/internal/version.Revision=${APP_REVISION} -X api-manager/internal/version.BuiltAt=${APP_BUILT_AT}" -o /out/api-manager ./cmd/server && mkdir -p /out/plugins /out/plugin-library /out/observability
 
 # Rebuild upstream binaries from immutable source archives with patched Go modules.
 # The downloaded tarballs and the Alertmanager UI release asset are SHA-256 checked.

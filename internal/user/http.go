@@ -11,7 +11,12 @@ import (
 	"strings"
 )
 
-type HTTP struct{ service *Service }
+type HTTP struct {
+	service    *Service
+	production bool
+}
+
+func (h *HTTP) SetProductionMode(value bool) { h.production = value }
 
 func NewHTTP(service *Service) *HTTP { return &HTTP{service: service} }
 func sessionToken(r *http.Request) string {
@@ -21,6 +26,10 @@ func sessionToken(r *http.Request) string {
 	return auth.ExtractAPIKey(r.Header.Get("Authorization"))
 }
 func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/test/v1/") {
+		h.testing(w, r)
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/setup":
 		available, err := h.service.SetupAvailable()
@@ -85,6 +94,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.service.RecordAudit(audit.Actor{ID: user.ID, Type: "user", Email: user.Username}, r, "auth.login", "user", user.ID, 200, nil)
+		setTestingCookie(w, r, token, h.production)
 		writeJSON(w, 200, map[string]any{"token": token, "user": user, "permissions": h.service.store.GetUserPermissions(user.ID)})
 	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/me":
 		user, err := h.service.ValidateSession(sessionToken(r))
@@ -105,6 +115,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 503, map[string]string{"error": "logout unavailable"})
 			return
 		}
+		clearTestingCookie(w, r, h.production)
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusNoContent)
 	default:

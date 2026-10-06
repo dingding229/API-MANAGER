@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -30,10 +31,15 @@ import (
 	"api-manager/internal/store"
 	"api-manager/internal/upstream"
 	"api-manager/internal/user"
+	"api-manager/internal/version"
 	"api-manager/internal/web"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		_ = json.NewEncoder(os.Stdout).Encode(version.Current())
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--healthcheck" {
 		client := &http.Client{Timeout: 2 * time.Second}
 		address := os.Getenv("HTTP_ADDR")
@@ -128,6 +134,7 @@ func main() {
 		os.Exit(1)
 	}
 	admin := api.NewAdminWithUserManagementAndPluginManager(activeStore, plugins, userService, pluginManager, logger)
+	admin.SetVersionChecker(version.NewChecker(cfg.GitHubUpdateToken))
 	admin.SetCredentialEncryptionKey(cfg.CredentialEncryptionKey)
 	admin.SetProductionMode(cfg.ProductionMode)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
@@ -147,6 +154,7 @@ func main() {
 	}
 	admin.SetSiteSettings(siteService)
 	authHandler := user.NewHTTP(userService)
+	authHandler.SetProductionMode(cfg.ProductionMode)
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
 	gatewayHandler.SetProductionMode(cfg.ProductionMode)
@@ -200,9 +208,11 @@ func main() {
 	handler = loggingMiddleware(logger, handler)
 	handler = metrics.Middleware(handler)
 	handler = httpx.CORS(cfg.CORSOrigins, handler)
+	handler = siteService.PublicAPICORS(handler)
 	handler = siteService.APIDomainGuard(handler)
 	handler = httpx.SecurityHeaders(handler)
 	handler = httpx.Recover(logger, handler)
+	handler = httpx.CachePolicy(handler)
 	handler = httpx.RequestID(handler)
 	handler = observability.Middleware(handler)
 

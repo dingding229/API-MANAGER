@@ -3,6 +3,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -35,6 +36,17 @@ func (s *Service) Record(ctx context.Context, actor Actor, r *http.Request, acti
 	if s == nil || s.store == nil {
 		return
 	}
+	if err := s.RecordChecked(ctx, actor, r, action, resourceType, resourceID, statusCode, details); err != nil && s.logger != nil {
+		s.logger.Error("write audit log failed", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+	}
+}
+
+// RecordChecked is used by destructive operations that must not proceed when
+// their audit intent cannot be accepted by the configured store.
+func (s *Service) RecordChecked(_ context.Context, actor Actor, r *http.Request, action, resourceType, resourceID string, statusCode int, details map[string]any) error {
+	if s == nil || s.store == nil {
+		return errors.New("audit storage unavailable")
+	}
 	if actor.Type == "" {
 		actor.Type = "system"
 	}
@@ -48,9 +60,7 @@ func (s *Service) Record(ctx context.Context, actor Actor, r *http.Request, acti
 		log.Method, log.Path, log.UserAgent = r.Method, r.URL.Path, r.UserAgent()
 		log.RemoteAddr = remoteIP(r.RemoteAddr)
 	}
-	if err := s.store.CreateAuditLog(log); err != nil && s.logger != nil {
-		s.logger.Error("write audit log failed", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
-	}
+	return s.store.CreateAuditLog(log)
 }
 
 func (s *Service) List(query model.AuditLogQuery) (model.AuditLogPage, error) {

@@ -17,6 +17,7 @@ var defaultPermissions = []model.Permission{
 	{Code: "audit.read", Description: "查看审计日志"},
 	{Code: "observability.read", Description: "查看内置指标、日志、链路与告警"},
 	{Code: "observability.manage", Description: "确认和管理内置告警"},
+	{Code: "observability.logs.clear", Description: "清理全部应用日志（不包含审计日志）"},
 }
 
 var defaultRoles = []model.Role{

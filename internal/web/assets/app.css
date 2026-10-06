@@ -197,17 +197,13 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 
 
 /* Quiet, equal-height row actions; destructive actions come last. */
-.user-table { table-layout: fixed; min-width: 760px !important; }
+.user-table { table-layout: fixed; min-width: 880px !important; }
 .user-table th:nth-child(1) { width: 29%; }
 .user-table th:nth-child(2) { width: 25%; }
 .user-table th:nth-child(3) { width: 16%; }
 .user-table th:nth-child(4) { width: 30%; }
 .user-table .user-cell-badges .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .user-table .actions { gap: 8px; flex-wrap: nowrap; }
-.user-table .actions button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: #344054; }
-.user-table .actions button:hover:not(:disabled) { border-color: #9aabc7; background: var(--surface-muted); }
-.user-table .actions button.danger { border-color: transparent; color: var(--danger); background: transparent; }
-.user-table .actions button.danger:hover:not(:disabled) { border-color: #fecdd3; background: #fff1f2; }
 
 /* Overview fills every row and keeps both information panels the same height. */
 .overview-page { display: grid; gap: 20px; min-width: 0; }
@@ -232,3 +228,10 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 .auth-recovery-link { background: transparent; color: var(--brand-strong); padding: 8px 0; min-height: 44px; margin-top: 10px; }
 @media(max-width:1100px) { .overview-stats { grid-template-columns: repeat(3,minmax(0,1fr)); } }
 @media(max-width:700px) { .overview-panels { grid-template-columns: minmax(0,1fr); } .overview-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .overview-section-head { flex-direction: column; } .overview-stats .stat { padding: 15px; } }
+
+.version-status { display: grid; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--border, #e2e8f0); font-size: 13px; margin-top: auto; }
+.version-status .small { line-height: 1.6; overflow-wrap: anywhere; }
+.version-status .link { justify-self: start; min-height: 36px; }
+.version-status { border-color: #ffffff24; color: #dbe3f6; }
+.version-status .small { color: #bdc8e1; }
+.version-status + .account { margin-top: 0; }

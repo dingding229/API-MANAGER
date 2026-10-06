@@ -102,3 +102,22 @@ func TestServerRenderedWebsiteMetadataIsEscaped(t *testing.T) {
 		t.Fatal("unsafe or missing dynamic metadata")
 	}
 }
+
+func TestPublicConnectPolicyOnlyAddsTheConfiguredSafeAPIDomain(t *testing.T) {
+	h := fixture(t, http.NotFoundHandler())
+	for _, tc := range []struct {
+		origin  string
+		allowed bool
+	}{{"https://api.example.com", true}, {"http://127.0.0.1:8080", true}, {"https://api.example.com; script-src *", false}, {"https://u:p@api.example.com", false}, {"https://api.example.com/path", false}, {"javascript:alert(1)", false}} {
+		h.SetSiteProvider(func() model.PublicSiteInfo { return model.PublicSiteInfo{APIDomain: tc.origin} })
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+		policy := w.Header().Get("Content-Security-Policy")
+		if strings.Contains(policy, "connect-src 'self' ") != tc.allowed {
+			t.Fatalf("%s policy=%s", tc.origin, policy)
+		}
+		if strings.Contains(policy, "script-src *") {
+			t.Fatal("CSP injection")
+		}
+	}
+}
