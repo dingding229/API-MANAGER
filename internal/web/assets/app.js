@@ -193,7 +193,7 @@ async function renderAPIs() {
   const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
   try {
     const apis = await api('/admin/v1/apis');
-    if (!page.isConnected) return; page.innerHTML = `<div class="split api-management-grid"><div class="table-wrap"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table><thead><tr><th>名称</th><th>路由</th><th>鉴权</th><th>状态</th><th>操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
+    if (!page.isConnected) return; page.innerHTML = `<div class="split api-management-grid"><div class="table-wrap api-table-wrap" role="region" aria-label="已配置接口" tabindex="0"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table class="api-table"><colgroup><col class="api-name-column"><col class="api-route-column"><col class="api-auth-column"><col class="api-status-column"><col class="api-actions-column"></colgroup><thead><tr><th scope="col">名称</th><th scope="col">路由</th><th scope="col" class="api-control-heading">鉴权</th><th scope="col" class="api-control-heading">状态</th><th scope="col" class="api-actions-heading">操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
     $('#openapi').onclick = async () => { try { const document = await api('/admin/v1/openapi.json'); const blob = new Blob([JSON.stringify(document, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener,noreferrer'); setTimeout(() => URL.revokeObjectURL(url), 30000); } catch(error) { notice(error.message); } };
     $('#api-form').onsubmit = createAPI;
     $('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
@@ -204,9 +204,23 @@ async function renderAPIs() {
 }
 
 function apiRow(item) {
-  const action = item.enabled ? `<button class="secondary" data-action="unpublish" data-id="${esc(item.id)}">下线</button>` : `<button data-action="publish" data-id="${esc(item.id)}">发布</button>`;
-  const source = item.plugin ? `插件：${esc(item.plugin)}` : item.upstream_url ? `上游：${esc(item.upstream_url)}` : '静态响应';
-  return `<tr><td><strong>${esc(item.name)}</strong><br><span class="small">${esc(source)}</span></td><td><code>${esc((item.methods?.length ? item.methods : [item.method]).join(' / '))} ${esc(item.path)}</code></td><td>${esc(authLabel(item.auth_mode))}</td><td><span class="badge ${item.enabled?'':'off'}">${item.enabled?'已发布':'草稿'}</span></td><td><div class="actions">${can('api.write')?`<button class="secondary" data-edit-api="${esc(item.id)}">编辑</button>`:''}${can('api.publish')?action:''}${can('api.delete')?`<button class="danger" data-action="delete" data-id="${esc(item.id)}">删除</button>`:''}</div></td></tr>`;
+  const label = (action) => esc(`${action}接口 ${item.name}`);
+  const publication = item.enabled
+    ? `<button type="button" class="secondary api-row-button" data-action="unpublish" data-id="${esc(item.id)}" aria-label="${label('下线')}">下线</button>`
+    : `<button type="button" class="api-row-button api-row-publish" data-action="publish" data-id="${esc(item.id)}" aria-label="${label('发布')}">发布</button>`;
+  const source = item.plugin ? `插件：${item.plugin}` : item.upstream_url ? `上游：${item.upstream_url}` : '静态响应';
+  const buttons = [
+    can('api.write') ? `<button type="button" class="secondary api-row-button" data-edit-api="${esc(item.id)}" aria-label="${label('编辑')}">编辑</button>` : '',
+    can('api.publish') ? publication : '',
+    can('api.delete') ? `<button type="button" class="danger api-row-button" data-action="delete" data-id="${esc(item.id)}" aria-label="${label('删除')}">删除</button>` : '',
+  ].filter(Boolean).join('');
+  return `<tr>
+    <td><div class="api-row-identity"><strong>${esc(item.name)}</strong><span class="small">${esc(source)}</span></div></td>
+    <td class="api-row-route"><code>${esc((item.methods?.length ? item.methods : [item.method]).join(' / '))} ${esc(item.path)}</code></td>
+    <td class="api-control-cell"><span class="api-auth-tag ${item.auth_mode === 'none' ? 'is-public' : ''}">${esc(authLabel(item.auth_mode))}</span></td>
+    <td class="api-control-cell"><span class="api-status-tag ${item.enabled ? 'is-live' : 'is-draft'}"><span class="api-status-dot" aria-hidden="true"></span>${item.enabled ? '已发布' : '草稿'}</span></td>
+    <td class="api-actions-cell"><div class="api-row-actions" role="group" aria-label="${esc(`${item.name}的操作`)}">${buttons || '<span class="api-no-actions">—</span>'}</div></td>
+  </tr>`;
 }
 
 function selected(value, expected) { return String(value ?? '') === String(expected) ? 'selected' : ''; }
