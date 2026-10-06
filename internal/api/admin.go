@@ -89,6 +89,14 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "admin authentication required"})
 		return
 	}
+	if _, cookieAuth := auth.SessionToken(r); cookieAuth && auth.UnsafeMethod(r.Method) && !auth.CookieMutationAllowed(r) {
+		writeJSON(w, 403, map[string]string{"error": "请在本站重新提交操作。"})
+		return
+	}
+	if active, ok := a.userManager.(interface{ TouchSession(string, *http.Request) }); ok {
+		token, _ := auth.SessionToken(r)
+		active.TouchSession(token, r)
+	}
 	r = r.WithContext(context.WithValue(r.Context(), auditActorContextKey{}, actor))
 	if permission := requiredPermission(r); permission != "" && !a.hasPermission(r, permission) {
 		a.recordAudit(r, "auth.permission.denied", "admin", "", http.StatusForbidden, map[string]any{"required": permission})
@@ -123,6 +131,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.acknowledgeObservabilityAlert(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/audit-logs":
 		a.listAuditLogs(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/apis/") && strings.HasSuffix(r.URL.Path, "/cache") && (r.Method == http.MethodGet || r.Method == http.MethodDelete):
+		a.pluginCache(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/apis":
 		a.listAPIs(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/apis":
@@ -169,6 +179,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.updatePluginStatus(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/"):
 		a.deletePlugin(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.Contains(r.URL.Path, "/sessions"):
+		a.manageSessions(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/users":
 		a.listUsers(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/users":
@@ -198,11 +210,8 @@ func (a *Admin) requestActor(r *http.Request) (audit.Actor, bool) {
 	if a.userManager == nil {
 		return audit.Actor{}, false
 	}
-	authorization := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authorization, "Bearer ") || len(r.Header.Values("Authorization")) != 1 || r.Header.Get("X-API-Key") != "" {
-		return audit.Actor{}, false
-	}
-	user, err := a.userManager.ValidateSession(auth.ExtractAPIKey(authorization))
+	token, _ := auth.SessionToken(r)
+	user, err := a.userManager.ValidateSession(token)
 	if err != nil {
 		return audit.Actor{}, false
 	}
@@ -216,6 +225,10 @@ func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/admin/v1/users/") && strings.Contains(path, "/sessions"):
+		return ""
+	case strings.HasPrefix(path, "/admin/v1/apis/") && strings.HasSuffix(path, "/cache") && r.Method == http.MethodDelete:
+		return "api.write"
 	case path == "/admin/v1/settings" || strings.HasPrefix(path, "/admin/v1/settings/"):
 		return "*"
 	case path == "/admin/v1/observability/logs" && r.Method == http.MethodDelete:
@@ -503,7 +516,16 @@ func (a *Admin) createCredential(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "credential encryption is not configured"})
 		return
 	}
-	credential := model.Credential{ID: newID("cred"), Name: request.Name, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encryptedKey, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
+	actor, _ := r.Context().Value(auditActorContextKey{}).(audit.Actor)
+	owner := request.OwnerUserID
+	if owner == "" {
+		owner = actor.ID
+	}
+	if _, err := a.store.GetUserByID(owner); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "凭据所属用户不存在"})
+		return
+	}
+	credential := model.Credential{OwnerUserID: owner, ID: newID("cred"), Name: request.Name, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encryptedKey, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
 	if err := a.store.CreateCredential(credential); err != nil {
 		writeStoreError(w, err)
 		return
@@ -1355,12 +1377,21 @@ func responseStatus(api model.API) int {
 }
 
 func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, updatedAt time.Time) model.API {
-	return model.API{PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: primaryMethod(request), Methods: normalizedMethods(request), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return model.API{PriceMicros: request.PriceMicros, PublicTestEnabled: request.PublicTestEnabled, PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: primaryMethod(request), Methods: normalizedMethods(request), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, PluginCache: request.PluginCache, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
 func normalizeAPIMethod(method string) string { return strings.ToUpper(strings.TrimSpace(method)) }
 
 func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) error {
+	if request.PriceMicros < 0 || request.PriceMicros > 1000000000000 || (request.PriceMicros > 0 && defaultAuthMode(request.AuthMode) != "api_key") {
+		return errors.New("调用价格无效；付费接口必须使用 KEY 认证")
+	}
+	if request.PublicTestEnabled && !request.PublicVisible {
+		return errors.New("在线测试仅能为公开展示的接口开启")
+	}
+	if err := request.PluginCache.Validate(request.Plugin); err != nil {
+		return err
+	}
 	if len(request.PublicTitle) > 120 || len(request.PublicSummary) > 600 || len(request.PublicCategory) > 48 {
 		return errors.New("public documentation fields exceed their size limits")
 	}

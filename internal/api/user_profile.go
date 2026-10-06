@@ -23,6 +23,14 @@ func (a *Admin) updateUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "admin authentication required"})
 		return
 	}
+	if guard, ok := a.userManager.(interface {
+		VerifyProfileRequest(*http.Request, string) error
+	}); ok {
+		if err := guard.VerifyProfileRequest(r, request.TurnstileToken); err != nil {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	updated, changed, err := a.userManager.UpdateProfile(actor.ID, id, request)
 	if err != nil {
 		user.WriteProfileError(w, err)

@@ -20,5 +20,11 @@ test('bounded response handles empty, multibyte and oversized bodies', async () 
 test('testing remains an explicit action with volatile credentials and safe output',()=>{
   const source=readFileSync(new URL('../app/testing.tsx',import.meta.url),'utf8');
   assert.doesNotMatch(source,/\/admin\/v1|\/auth\/v1|localStorage|sessionStorage|dangerouslySetInnerHTML/);
-  assert.match(source,/\/test\/v1\/session/);assert.match(source,/credentials: 'omit'/);assert.match(source,/redirect: 'error'/);assert.match(source,/cache: 'no-store'/);assert.match(source,/confirmed/);assert.match(source,/response\.status/);assert.match(source,/boundedResponse/);
+  assert.match(source,/\/test\/v1\/session/);assert.match(source,/credentials: 'omit'/);assert.match(source,/redirect:\s*'error'/);assert.match(source,/cache: 'no-store'/);assert.match(source,/confirmed/);assert.match(source,/data\.status/);assert.match(source,/\/test\/v1\/prepare/);assert.match(source,/\/test\/v1\/invoke/);assert.doesNotMatch(source,/fetch\(request\.url/);
+});
+
+test('both UIs share cookie authentication and react to login events',()=>{
+ const source=readFileSync(new URL('../app/testing.tsx',import.meta.url),'utf8');
+ assert.match(source,/BroadcastChannel\('api-manager-auth'\)/);assert.match(source,/visibilitychange/);assert.match(source,/session\.refresh\(\)/);assert.match(source,/X-API-Request/);
+ assert.doesNotMatch(source,/sessionStorage|localStorage|Authorization/);
 });

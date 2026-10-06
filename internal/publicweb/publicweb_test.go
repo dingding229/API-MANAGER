@@ -113,7 +113,7 @@ func TestPublicConnectPolicyOnlyAddsTheConfiguredSafeAPIDomain(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 		policy := w.Header().Get("Content-Security-Policy")
-		if strings.Contains(policy, "connect-src 'self' ") != tc.allowed {
+		if strings.Contains(policy, "connect-src 'self' "+tc.origin+" ") != tc.allowed {
 			t.Fatalf("%s policy=%s", tc.origin, policy)
 		}
 		if strings.Contains(policy, "script-src *") {

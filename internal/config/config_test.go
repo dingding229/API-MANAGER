@@ -186,3 +186,18 @@ func TestOptionalVersionCheckTokenLoadsOnlyFromSecret(t *testing.T) {
 		t.Fatal("empty optional token should be accepted", err)
 	}
 }
+
+func TestTrustedProxyConfigurationRejectsWildcardsAndInvalidCIDRs(t *testing.T) {
+	setValidTestEnvironment(t)
+	for _, value := range []string{"0.0.0.0/0", "::/0", "not-an-ip"} {
+		t.Setenv("TRUSTED_PROXY_CIDRS", value)
+		if _, err := Load(); err == nil {
+			t.Fatal("unsafe proxy trust", value)
+		}
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.2/32, 2001:db8::1/128")
+	cfg, err := Load()
+	if err != nil || len(cfg.TrustedProxyCIDRs) != 2 {
+		t.Fatal(cfg.TrustedProxyCIDRs, err)
+	}
+}

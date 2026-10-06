@@ -3,7 +3,9 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -90,6 +92,7 @@ type Manifest struct {
 var ErrRequestTooLarge = errors.New("wasm request exceeds 1 MiB")
 
 type wasmHandler struct {
+	revision string
 	manifest Manifest
 	runtime  wazero.Runtime
 	compiled wazero.CompiledModule
@@ -233,7 +236,8 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
-	r.Register(&wasmHandler{manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout})
+	sum := sha256.Sum256(append(append([]byte(nil), manifestBytes...), wasmBytes...))
+	r.Register(&wasmHandler{revision: hex.EncodeToString(sum[:]), manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout})
 	return nil
 }
 
@@ -358,3 +362,5 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 }
 
 var _ Handler = (*wasmHandler)(nil)
+
+func (w *wasmHandler) CacheRevision() string { return w.revision }

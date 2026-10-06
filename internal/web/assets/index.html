@@ -19,6 +19,7 @@
           <label class="field" for="password"><span class="field-label">密码</span><input id="password" name="password" type="password" aria-label="密码" aria-describedby="login-password-hint" required autocomplete="current-password" maxlength="72" placeholder="密码"><span id="login-password-hint" class="field-hint">新用户请使用注册链接创建管理员账号。</span></label>
           <button type="submit">登录</button>
         </form>
+        <a href="/account?return=admin" class="auth-recovery-link">邮箱登录、注册与双重验证</a>
         <button type="button" id="forgot-password" class="auth-recovery-link">忘记密码？</button>
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
       </div>
@@ -36,6 +37,9 @@
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>
+          <button data-page="sessions">登录会话</button>
+          <button data-page="accounts" data-super-admin="true" class="hidden">会员与计费</button>
+          <button data-page="authentication" data-super-admin="true" class="hidden">注册与登录</button>
           <button data-page="settings" data-super-admin="true" class="hidden">网站设置</button>
         </nav>
         <div class="version-status" aria-label="程序版本"><span id="current-version">版本读取中…</span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" class="link">检查更新</button></div>
@@ -50,5 +54,6 @@
   </main>
   <template id="empty"><div class="empty">暂无数据</div></template>
   <script src="__ADMIN_PATH__/app.js"></script>
+ <script src="__ADMIN_PATH__/account.js"></script>
 </body>
 </html>

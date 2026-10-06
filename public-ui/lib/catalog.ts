@@ -1,6 +1,6 @@
 export type Field = { name: string; location: 'path' | 'query' | 'header' | 'body'; type: string; required: boolean };
-export type Operation = { method:string; authentication: 'api_key'|'none'; parameters:Field[]; body:Field[] };
-export type ApiDoc = { methods?: string[]; operations?: Operation[]; id: string; title: string; summary: string; category: string; method: string; path: string; authentication: 'api_key' | 'none'; parameters: Field[]; body: Field[] };
+export type Operation = { price_micros?:number; test_enabled?: boolean; method:string; authentication: 'api_key'|'none'; parameters:Field[]; body:Field[] };
+export type ApiDoc = { price_micros?:number; methods?: string[]; operations?: Operation[]; id: string; title: string; summary: string; category: string; method: string; path: string; authentication: 'api_key' | 'none'; parameters: Field[]; body: Field[] };
 export type Catalog = { version: number; base_url: string; apis: ApiDoc[]; site?: SiteInfo };
 
 export function sourceUrl(value: string) {
@@ -30,14 +30,14 @@ export function projectCatalog(value: unknown): Catalog {
     const api=object(entry);
     if(typeof api.path!=='string'||api.path.length>512||!api.path.startsWith('/api/')||/[\x00-\x20\x7f?#\\]/.test(api.path)||typeof api.id!=='string'||!api.id||typeof api.title!=='string'||!api.title.trim())continue;
     const source=Array.isArray(api.operations)&&api.operations.length?api.operations.slice(0,7):[{method:api.method,authentication:api.authentication,parameters:api.parameters,body:api.body}];
-    const operations:Operation[]=source.flatMap(value=>{const op=object(value);if(!allowed.includes(String(op.method))||!['api_key','none'].includes(String(op.authentication)))return [];return [{method:String(op.method),authentication:op.authentication as Operation['authentication'],parameters:fields(op.parameters),body:fields(op.body)}]});
+    const operations:Operation[]=source.flatMap(value=>{const op=object(value);if(!allowed.includes(String(op.method))||!['api_key','none'].includes(String(op.authentication)))return [];return [{price_micros:Number.isSafeInteger(op.price_micros)&&Number(op.price_micros)>=0&&Number(op.price_micros)<=1000000000000?Number(op.price_micros):0,test_enabled:op.test_enabled===true,method:String(op.method),authentication:op.authentication as Operation['authentication'],parameters:fields(op.parameters),body:fields(op.body)}]});
     if(!operations.length)continue;
     const existing=byPath.get(api.path);
     if(existing){for(const operation of operations){if(!existing.methods!.includes(operation.method)){existing.methods!.push(operation.method);existing.operations!.push(operation)}};continue;}
     if(byPath.size>=200)continue;
     const first=operations[0];
     const unique=operations.filter((value,index,list)=>list.findIndex(item=>item.method===value.method)===index);
-    byPath.set(api.path,{id:text(api.id,64),title:text(api.title,120),summary:text(api.summary,600),category:text(api.category,48)||'通用接口',method:first.method,authentication:first.authentication,path:api.path,parameters:first.parameters,body:first.body,methods:unique.map(value=>value.method),operations:unique});
+    byPath.set(api.path,{price_micros:first.price_micros,id:text(api.id,64),title:text(api.title,120),summary:text(api.summary,600),category:text(api.category,48)||'通用接口',method:first.method,authentication:first.authentication,path:api.path,parameters:first.parameters,body:first.body,methods:unique.map(value=>value.method),operations:unique});
   }
   const apis=[...byPath.values()];
   let base = '';

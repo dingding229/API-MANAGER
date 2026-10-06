@@ -116,3 +116,10 @@ func (m *SMTPMailer) send(ctx context.Context, to, subject, text string) error {
 	}
 	return c.Quit()
 }
+
+func (m *SMTPMailer) SendVerification(ctx context.Context, to, code, purpose string) error {
+	if !validEmail(to) || strings.ContainsAny(code+purpose, "\r\n") {
+		return errors.New("invalid verification message")
+	}
+	return m.send(ctx, to, "API Manager 验证码", "本次"+purpose+"的验证码为："+code+"。有效期 10 分钟。请勿转发。若非本人操作，请忽略。\r\n")
+}

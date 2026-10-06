@@ -2,6 +2,7 @@ package user
 
 import (
 	"api-manager/internal/audit"
+	"api-manager/internal/auth"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,8 +11,8 @@ import (
 	"strings"
 )
 
-// The public UI sees only a username. Its HttpOnly session cannot be used as an
-// API key, and the cookie's path excludes all management and business API routes.
+// Both UIs use one host-only HttpOnly session. Business KEY authentication never
+// reads cookies; public DTOs still contain no management profile or credentials.
 const TestingCookie = "api_manager_test_session"
 
 func testingSecure(r *http.Request) bool {
@@ -19,14 +20,23 @@ func testingSecure(r *http.Request) bool {
 	return r.TLS != nil || (err == nil && origin.Scheme == "https" && strings.EqualFold(origin.Host, r.Host))
 }
 func setTestingCookie(w http.ResponseWriter, r *http.Request, token string, production bool) {
+	clearLegacyTestingCookie(w, r, production)
 	// #nosec G124 -- Secure is always true in production; plaintext cookies are permitted only for explicitly non-production HTTP previews. HttpOnly and SameSiteStrict are mandatory.
-	http.SetCookie(w, &http.Cookie{Name: TestingCookie, Value: token, Path: "/test/v1", HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
 }
 func clearTestingCookie(w http.ResponseWriter, r *http.Request, production bool) {
+	clearLegacyTestingCookie(w, r, production)
 	// #nosec G124 -- Secure is always true in production; plaintext cookies are permitted only for explicitly non-production HTTP previews. HttpOnly and SameSiteStrict are mandatory.
-	http.SetCookie(w, &http.Cookie{Name: TestingCookie, Path: "/test/v1", MaxAge: -1, HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
 }
 func testingToken(r *http.Request) string {
+	if _, cookieAuth := auth.SessionToken(r); cookieAuth {
+		token, _ := auth.SessionToken(r)
+		return token
+	}
+	if len(r.CookiesNamed(auth.SessionCookie)) > 0 || len(r.Header.Values("Authorization")) > 0 || len(r.Header.Values("X-API-Key")) > 0 {
+		return ""
+	}
 	cookies := r.CookiesNamed(TestingCookie)
 	if len(cookies) != 1 {
 		return ""
@@ -35,7 +45,7 @@ func testingToken(r *http.Request) string {
 }
 func testingSameOrigin(r *http.Request) bool {
 	origin, err := url.Parse(r.Header.Get("Origin"))
-	return err == nil && (origin.Scheme == "http" || origin.Scheme == "https") && origin.User == nil && origin.RawQuery == "" && origin.Fragment == "" && origin.Path == "" && strings.EqualFold(origin.Host, r.Host) && (r.TLS == nil || origin.Scheme == "https") && r.Header.Get("X-API-Test") == "1" && (r.Header.Get("Sec-Fetch-Site") == "" || r.Header.Get("Sec-Fetch-Site") == "same-origin")
+	return auth.CookieMutationAllowed(r) || (err == nil && (origin.Scheme == "http" || origin.Scheme == "https") && origin.User == nil && origin.RawQuery == "" && origin.Fragment == "" && origin.Path == "" && strings.EqualFold(origin.Host, r.Host) && (r.TLS == nil || origin.Scheme == "https") && r.Header.Get("X-API-Test") == "1" && (r.Header.Get("Sec-Fetch-Site") == "" || r.Header.Get("Sec-Fetch-Site") == "same-origin"))
 }
 func (h *HTTP) testing(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -47,11 +57,14 @@ func (h *HTTP) testing(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/test/v1/session":
 		u, err := h.service.ValidateSession(testingToken(r))
 		if err != nil {
-			clearTestingCookie(w, r, h.production)
 			writeJSON(w, 401, map[string]string{"error": "请先登录。"})
 			return
 		}
-		writeJSON(w, 200, map[string]string{"username": u.Username})
+		if len(r.CookiesNamed(auth.SessionCookie)) == 0 {
+			setTestingCookie(w, r, testingToken(r), h.production)
+		}
+		h.service.TouchSession(testingToken(r), r)
+		writeJSON(w, 200, map[string]any{"username": u.Username, "can_test": h.service.Can(u.ID, "api.test"), "can_test_write": (h.service.Can(u.ID, "api.test.write") || h.service.Can(u.ID, "api.write"))})
 	case r.Method == http.MethodPost && r.URL.Path == "/test/v1/login":
 		var req struct {
 			Username string `json:"username"`
@@ -63,7 +76,7 @@ func (h *HTTP) testing(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, map[string]string{"error": "请检查用户名和密码。"})
 			return
 		}
-		u, token, err := h.service.Authenticate(req.Username, req.Password)
+		u, token, err := h.service.AuthenticateRequest(req.Username, req.Password, r)
 		if err != nil {
 			status := 503
 			message := "登录暂时不可用。"
@@ -94,4 +107,16 @@ func (h *HTTP) testing(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 404, map[string]string{"error": "not found"})
 	}
+}
+
+func clearLegacyTestingCookie(w http.ResponseWriter, r *http.Request, production bool) {
+	// #nosec G124 -- Secure is mandatory in production and TLS; non-production HTTP tests are the only exception.
+	http.SetCookie(w, &http.Cookie{Name: TestingCookie, Path: "/test/v1", MaxAge: -1, HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
+}
+
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, token string, production bool) {
+	setTestingCookie(w, r, token, production)
+}
+func ClearSessionCookie(w http.ResponseWriter, r *http.Request, production bool) {
+	clearTestingCookie(w, r, production)
 }

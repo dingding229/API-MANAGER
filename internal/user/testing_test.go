@@ -1,6 +1,7 @@
 package user
 
 import (
+	"api-manager/internal/auth"
 	"api-manager/internal/store"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ func testingRequest(method, path, body string) *http.Request {
 	r := httptest.NewRequest(method, "https://docs.example.com"+path, strings.NewReader(body))
 	r.Header.Set("Origin", "https://docs.example.com")
 	r.Header.Set("X-API-Test", "1")
+	r.Header.Set("X-API-Request", "1")
 	return r
 }
 func TestPublicTestingSessionIsMinimalAndRevoked(t *testing.T) {
@@ -26,18 +28,23 @@ func TestPublicTestingSessionIsMinimalAndRevoked(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), "token") || strings.Contains(w.Body.String(), "permissions") {
 		t.Fatalf("login %d %s", w.Code, w.Body)
 	}
-	cookies := w.Result().Cookies()
+	var cookies []*http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.SessionCookie && c.Value != "" {
+			cookies = append(cookies, c)
+		}
+	}
 	if len(cookies) != 1 {
 		t.Fatal("missing session cookie")
 	}
 	cookie := cookies[0]
-	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/test/v1" {
+	if !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" {
 		t.Fatal("unsafe cookie")
 	}
 	for _, tc := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/test/v1/session", 200}, {"GET", "/auth/v1/me", 401}, {"POST", "/test/v1/logout", 204}, {"GET", "/test/v1/session", 401}} {
+	}{{"GET", "/test/v1/session", 200}, {"GET", "/auth/v1/me", 200}, {"POST", "/test/v1/logout", 204}, {"GET", "/test/v1/session", 401}} {
 		r := testingRequest(tc.method, tc.path, "")
 		r.AddCookie(cookie)
 		w = httptest.NewRecorder()

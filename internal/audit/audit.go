@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -57,8 +56,12 @@ func (s *Service) RecordChecked(_ context.Context, actor Actor, r *http.Request,
 	}
 	if r != nil {
 		log.RequestID = httpx.RequestIDFromContext(r.Context())
-		log.Method, log.Path, log.UserAgent = r.Method, r.URL.Path, r.UserAgent()
-		log.RemoteAddr = remoteIP(r.RemoteAddr)
+		agent := r.UserAgent()
+		if len(agent) > 512 {
+			agent = agent[:512]
+		}
+		log.Method, log.Path, log.UserAgent = r.Method, r.URL.Path, agent
+		log.RemoteAddr = httpx.Client(r).IP
 	}
 	return s.store.CreateAuditLog(log)
 }
@@ -68,14 +71,6 @@ func (s *Service) List(query model.AuditLogQuery) (model.AuditLogPage, error) {
 		return model.AuditLogPage{}, nil
 	}
 	return s.store.ListAuditLogs(query)
-}
-
-func remoteIP(addr string) string {
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		return host
-	}
-	return addr
 }
 
 func redact(details map[string]any) map[string]any {

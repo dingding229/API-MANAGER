@@ -2,7 +2,10 @@ let pendingSetupKey = '';
 const setupFragment = location.hash.match(/^#setup=([0-9a-f]{64})$/);
 if (setupFragment) { pendingSetupKey = setupFragment[1]; history.replaceState(null, '', location.pathname + location.search); }
 sessionStorage.removeItem('api_manager_key');
-const state = { token: sessionStorage.getItem('api_manager_session') || '', user: null, permissions: [], callOrigin: '', page: 'overview', cache: {}, recoveryEnabled: false };
+let legacySession = sessionStorage.getItem('api_manager_session') || '';
+sessionStorage.removeItem('api_manager_session');
+let authEpoch=0;
+const state = { user: null, permissions: [], callOrigin: '', page: 'overview', cache: {}, recoveryEnabled: false };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -12,6 +15,8 @@ const can = (permission) => state.permissions.includes('*') || state.permissions
 const permissionLabels = {
   '*': '全部权限',
   'api.read': '查看接口',
+  'api.test': '执行公开接口在线测试',
+  'user.sessions.manage': '查看与退出其他用户登录会话',
   'api.write': '创建与修改接口',
   'api.publish': '发布、下线与回滚接口',
   'api.delete': '删除接口',
@@ -41,9 +46,9 @@ const roleDescriptions = {
   api_developer: '接口开发权限',
   viewer: '只读权限',
 };
-const permissionLabel = (code) => permissionLabels[code] || code;
-const roleLabel = (name) => roleLabels[name] || name;
-const roleDescription = (role) => roleDescriptions[role.name] || role.description || '';
+const permissionLabel = (code) => state.cache.permissionNames?.[code] || permissionLabels[code] || code;
+const roleLabel = (name) => state.cache.roleNames?.[name] || roleLabels[name] || name;
+const roleDescription = (role) => role.description || roleDescriptions[role.name] || '';
 function permissionChecklist(permissions, selected = []) {
   const selectedCodes = new Set(selected);
   const categories = {api: '接口管理', credential: '调用凭证', plugin: '插件管理', user: '用户管理', audit: '审计日志', observability: '运行观测'};
@@ -71,11 +76,12 @@ function rolePermissionsSummary(codes = []) {
 }
 
 async function api(path, options = {}) {
+  const requestEpoch=authEpoch;
   const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
-  const response = await fetch(path, {...options, headers});
+  headers['X-API-Request'] = '1';
+  const response = await fetch(path, {...options, headers, credentials:'same-origin', cache:'no-store',signal:options.signal||((path.startsWith('/auth/')||path.startsWith('/test/'))?AbortSignal.timeout(10000):undefined)});
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401 && state.token) { clearSession(); throw new Error('登录已过期，请重新登录'); }
+  if (response.status === 401 && state.user && requestEpoch===authEpoch) { clearSession(); const expired=new Error('登录已过期，请重新登录');expired.status=401;throw expired; }
   if (!response.ok) {
     const error = new Error(body.error || `请求失败：${response.status}`);
     error.code = body.code || ''; error.status = response.status;
@@ -151,31 +157,58 @@ function showLogin() {
 }
 
 function clearSession() {
+  authEpoch++;legacySession='';
   closeProfileModal(true); closeRoleModal(true); closeLogCleanupModal(true);
-  state.token = ''; state.user = null; state.permissions = [];
+  $$('.cache-dialog').forEach(dialog=>{dialog.close();dialog.remove()});
+  state.user = null; state.permissions = [];
   sessionStorage.removeItem('api_manager_session');
   showLogin();
 }
+const authEvents = typeof BroadcastChannel === 'function' ? new BroadcastChannel('api-manager-auth') : null;
+function broadcastAuth() { authEvents?.postMessage('changed'); }
 async function logout() {
-  const token=state.token;
-  try {
-    if(token) await fetch('/auth/v1/logout',{method:'POST',headers:{Authorization:`Bearer ${token}`}});
-  } finally { clearSession(); }
+  try { await api('/auth/v1/logout',{method:'POST'}); clearSession(); broadcastAuth(); }
+  catch(error) { if(error.status===401) { clearSession(); broadcastAuth(); } else notice('退出未完成，请稍后重试'); }
 }
 async function login(username,password) {
-  const response=await fetch('/auth/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),cache:'no-store'});
-  const result=await response.json().catch(()=>({}));
-  if(!response.ok) throw new Error(result.error||'登录失败');
-  state.token=result.token;state.user=result.user;state.permissions=result.permissions||[];state.page='overview';
-  sessionStorage.setItem('api_manager_session',state.token);
-  $('#password').value='';showConsole();
+  authEpoch++;
+  const options=await api('/account/v1/options').catch(error=>{if(error.status===503)return {};throw error;});
+  if(options.turnstile){location.assign('/account?return=admin');return;}
+  const result=await api('/auth/v1/login',{method:'POST',body:JSON.stringify({username:username.trim(),password})});
+  if(result.mfa_required){$('#password').value='';location.assign('/account?mfa=1&return=admin');return;}
+  const profile=await api('/auth/v1/me').catch(()=>{throw new Error('浏览器未能保存安全登录状态，请使用 HTTPS 网站地址。')});
+  state.user=profile.user;state.permissions=profile.permissions||[];state.cache.roleNames=profile.level_names||{};state.cache.permissionNames=profile.permission_names||{};state.page='overview';legacySession='';
+  $('#password').value='';broadcastAuth();showConsole();
 }
-
+let hydratingSession = false;
+let pendingSessionHydration=false;
+let initialSessionHydration = true;
+const initialLoginControls=[...document.querySelectorAll('#login-form input,#login-form button')];
+initialLoginControls.forEach(control=>{control.disabled=true});
 async function hydrateSession() {
-  if (!state.token) return showLogin();
-  try { const result = await api('/auth/v1/me'); state.user = result.user; state.permissions = result.permissions || []; showConsole(); }
-  catch (_) { showLogin(); }
+  if (hydratingSession) { pendingSessionHydration=true;return; } const epoch=authEpoch,first=initialSessionHydration;hydratingSession=true;
+  try {
+    let result;
+    if(initialSessionHydration){initialSessionHydration=false;try{await api('/test/v1/session')}catch(error){if(error.status!==401)throw error}}
+    try { result=await api('/auth/v1/me'); }
+    catch(error) {
+      if(error.status!==401 || !legacySession) throw error;
+      await api('/auth/v1/session',{method:'POST',headers:{Authorization:`Bearer ${legacySession}`}});legacySession='';
+      result=await api('/auth/v1/me');broadcastAuth();
+    }
+    if(epoch!==authEpoch) return;
+    legacySession='';
+    const changed=JSON.stringify([state.user,state.permissions])!==JSON.stringify([result.user,result.permissions||[]]);
+    if(state.user?.id && state.user.id!==result.user.id) { closeProfileModal(true);closeRoleModal(true);closeLogCleanupModal(true);$$('.cache-dialog').forEach(dialog=>{dialog.close();dialog.remove()});state.cache={}; }
+    state.user=result.user;state.permissions=result.permissions||[];
+    if(changed || $('#console-view').classList.contains('hidden')) showConsole();
+  } catch(error) { if(epoch!==authEpoch)return;legacySession='';if(error.status===401) clearSession();else notice('登录状态暂时无法确认，请稍后刷新'); }
+  finally { hydratingSession=false;if(first)initialLoginControls.forEach(control=>{control.disabled=false});if(pendingSessionHydration){pendingSessionHydration=false;void hydrateSession()} }
 }
+authEvents?.addEventListener('message',()=>{authEpoch++;void hydrateSession()});
+window.addEventListener('focus',()=>void hydrateSession());
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void hydrateSession()});
+setInterval(()=>{if(!document.hidden)void hydrateSession()},60000);
 
 function renderPage() {
   // Each view owns its node. Late responses from the previous view can only
@@ -184,13 +217,13 @@ function renderPage() {
   const newPage = document.createElement('div'); newPage.id = 'page';
   oldPage.replaceWith(newPage);
   notice('');
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置',sessions:'登录会话',accounts:'会员与计费',authentication:'注册与登录'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => {
     const active = button.dataset.page === state.page; button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings,sessions: renderSessions,accounts:renderAccounts,authentication:renderAuthentication};
   return renderers[state.page]();
 }
 
@@ -207,20 +240,20 @@ function overviewSeries(points, timestamp) {
 }
 let versionRequest = 0;
 async function loadVersion(check = false) {
-  const token = state.token, run = ++versionRequest;
+  const actor = state.user?.id, run = ++versionRequest;
   const current = $('#current-version'), status = $('#update-status');
-  if (!current || !token) return;
+  if (!current || !actor) return;
   if (check && status) status.textContent = '正在检查…';
   try {
     const data = await api(check ? '/admin/v1/version/check' : '/admin/v1/version', check ? {method:'POST'} : {});
-    if (run !== versionRequest || token !== state.token) return;
+    if (run !== versionRequest || actor !== state.user?.id) return;
     current.textContent = `版本 ${data.current || '未知'}`;
     current.title = data.revision ? `构建 ${data.revision}` : '';
     if (status) {
       status.textContent = data.latest ? `${data.message} 最新：${data.latest}` : data.message || '尚未检查更新。';
       status.title = data.checked_at ? `检查时间：${new Date(data.checked_at).toLocaleString()}；检查结果会缓存，稍后可再检查。` : '';
     }
-  } catch (error) { if (run === versionRequest && token === state.token && status) status.textContent = '版本信息暂时不可用。'; }
+  } catch (error) { if (run === versionRequest && actor === state.user?.id && status) status.textContent = '版本信息暂时不可用。'; }
 }
 $('#check-update')?.addEventListener('click', event => void withAction(event.currentTarget,'检查中…',()=>loadVersion(true)));
 
@@ -249,7 +282,7 @@ async function renderAPIs() {
     const apis = await api('/admin/v1/apis');
     if (!page.isConnected) return; page.innerHTML = `<div class="split api-management-grid management-grid"><div class="table-wrap api-table-wrap" role="region" aria-label="已配置接口" tabindex="0"><div class="toolbar table-toolbar"><h2>已配置接口</h2><button class="secondary" id="openapi">导出 OpenAPI</button></div><table class="api-table"><colgroup><col class="api-name-column"><col class="api-route-column"><col class="api-auth-column"><col class="api-status-column"><col class="api-actions-column"></colgroup><thead><tr><th scope="col">名称</th><th scope="col">路由</th><th scope="col" class="api-control-heading">鉴权</th><th scope="col" class="api-control-heading">状态</th><th scope="col" class="api-actions-heading">操作</th></tr></thead><tbody>${apis.length ? apis.map(apiRow).join('') : '<tr><td colspan="5"><div class="empty">暂无接口</div></td></tr>'}</tbody></table></div><div class="card"><h2 id="api-form-title">创建接口</h2>${apiForm()}<hr class="section-line"><details class="import-openapi"><summary>导入 OpenAPI 3.x 文档</summary>${openAPIImportForm()}</details></div></div>`;
     $('#openapi').onclick = async () => { try { const document = await api('/admin/v1/openapi.json'); const blob = new Blob([JSON.stringify(document, null, 2)], {type:'application/json'}); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener,noreferrer'); setTimeout(() => URL.revokeObjectURL(url), 30000); } catch(error) { notice(error.message); } };
-    $('#api-form').onsubmit = createAPI;
+    $('#api-form').onsubmit = createAPI; bindCacheFields($('#api-form'));
     restrictForm($('#api-form'), 'api.write'); restrictForm($('#openapi-import-form'), 'api.write');
     $('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
     $('#openapi-import-form').onsubmit = importOpenAPI;
@@ -294,6 +327,7 @@ function apiForm(item = {}) {
         <fieldset class="field method-field" aria-describedby="method-hint"><legend class="field-label">请求方法 <span aria-hidden="true">*</span></legend><div class="method-options">${['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(method=>`<label class="method-option"><input type="checkbox" name="methods" value="${method}" ${(item.methods?.length?item.methods:[item.method||'GET']).includes(method)?'checked':''}><span>${method}</span></label>`).join('')}</div><span id="method-hint" class="field-hint">可以选择多种调用方式。</span><p class="method-error hidden" role="alert" data-method-error></p></fieldset>
         <label class="field"><span class="field-label">鉴权方式</span><select name="auth_mode" aria-describedby="auth-hint"><option value="api_key" ${item.auth_mode==='none'?'':'selected'}>KEY · 需要调用凭证</option><option value="none" ${item.auth_mode==='none'?'selected':''}>无需验证 · 公开访问</option></select><span id="auth-hint" class="field-hint">选择无需验证时，任何人都可以调用此接口。</span></label>
       </div>
+      <label class="field"><span class="field-label">每次成功调用价格（元）</span><input name="call_price" inputmode="decimal" value="${Number(item.price_micros||0)/1000000}" pattern="[0-9]+(\.[0-9]{1,6})?" required><span class="field-hint">填 0 为免费。付费接口须选择 KEY 认证，且密钥须绑定用户。</span></label>
       <label class="field"><span class="field-label">访问路径 <span aria-hidden="true">*</span></span><input name="path" required placeholder="/api/example/v1/status" value="${value('path')}" aria-describedby="path-hint"><span id="path-hint" class="field-hint">必须以 / 开头；只填路径，不要填插件名、完整网址或连续斜线。</span></label>
       <label class="field"><span class="field-label">说明</span><input name="description" value="${value('description')}" placeholder="简短描述这个接口的用途"></label>
       <label class="field"><span class="field-label">插件名称</span><input name="plugin" placeholder="your-plugin-name" value="${value('plugin')}" aria-describedby="plugin-hint"><span id="plugin-hint" class="field-hint">与访问路径分开填写；不使用插件时留空。</span></label>
@@ -310,6 +344,16 @@ function apiForm(item = {}) {
       <summary><span><strong>可靠性策略</strong><small>超时、重试与熔断</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body"><div class="grid-2"><label class="field"><span class="field-label">上游超时（毫秒）</span><input type="number" min="0" max="120000" name="upstream_timeout_ms" value="${value('upstream_timeout_ms','0')}"></label><label class="field"><span class="field-label">失败重试次数</span><input type="number" min="0" max="5" name="upstream_retries" value="${value('upstream_retries','0')}"><span class="field-hint">仅建议对幂等、安全方法启用。</span></label><label class="field"><span class="field-label">熔断阈值</span><input type="number" min="0" max="100" name="circuit_breaker_threshold" value="${value('circuit_breaker_threshold','0')}"><span class="field-hint">填 0 表示关闭。</span></label><label class="field"><span class="field-label">熔断恢复秒数</span><input type="number" min="0" max="3600" name="circuit_breaker_reset_seconds" value="${value('circuit_breaker_reset_seconds','30')}"></label></div></div>
     </details>
+    <details class="form-section form-section-collapsible" ${item.plugin_cache?.enabled ? 'open' : ''}>
+      <summary><span><strong>插件数据缓存</strong><small>将查询结果保存在数据库，减少重复计算</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+      <div class="form-section-body">
+        <label class="checkbox-field"><input type="checkbox" name="cache_enabled" ${item.plugin_cache?.enabled?'checked':''}><span>启用此接口的插件结果缓存</span></label>
+        <div class="grid-2"><label class="field"><span class="field-label">缓存有效期（秒）</span><input type="number" name="cache_ttl" min="1" max="604800" value="${Number(item.plugin_cache?.ttl_seconds)||300}" required><span class="field-hint">过期后重新执行插件，最长 7 天。</span></label><label class="field"><span class="field-label">最多缓存条目</span><input type="number" name="cache_limit" min="1" max="10000" value="${Number(item.plugin_cache?.max_entries)||1000}" required><span class="field-hint">达到上限时淘汰较早写入的结果。</span></label></div>
+        <label class="checkbox-field"><input type="checkbox" name="cache_post" ${item.plugin_cache?.cache_post?'checked':''}><span>同时缓存 POST 查询结果（仅适合只读查询）</span></label>
+        <p class="small">仅适用于插件接口。默认缓存 GET/HEAD 的成功结果，鉴权和配额仍按每次请求执行；不同调用密钥、请求参数不会混用缓存。浏览器和 CDN 仍不缓存业务响应。</p>
+        ${item.id && item.plugin ? '<button type="button" class="secondary" data-cache-manage>查看与清理缓存</button>':''}
+      </div>
+    </details>
     <details class="form-section form-section-collapsible" ${hasResponse ? 'open' : ''}>
       <summary><span><strong>响应与校验</strong><small>静态响应和 JSON Schema 均为可选</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body"><label class="field"><span class="field-label">响应状态码</span><input type="number" min="0" max="599" name="response_status" value="${value('response_status',item.response_body ? '200' : '0')}"><span class="field-hint">填 0 使用默认行为。</span></label><label class="field"><span class="field-label">静态响应 JSON</span><textarea name="response_body" placeholder='{"message":"ok"}'>${value('response_body')}</textarea></label><div class="grid-2"><label class="field"><span class="field-label">请求 JSON Schema</span><textarea name="request_schema" class="schema-input" placeholder='{"type":"object"}'>${jsonValue('request_schema')}</textarea></label><label class="field"><span class="field-label">响应 JSON Schema</span><textarea name="response_schema" class="schema-input" placeholder='{"type":"object"}'>${jsonValue('response_schema')}</textarea></label></div><label class="field"><span class="field-label">参数 JSON Schema</span><textarea name="parameters_schema" class="schema-input" placeholder='{"type":"object","properties":{"query":{"type":"object"}}}'>${jsonValue('parameters_schema')}</textarea><span class="field-hint">根对象可包含 query、path、header。</span></label></div>
@@ -318,6 +362,7 @@ function apiForm(item = {}) {
       <summary><span><strong>公开目录</strong><small>选择是否展示在网站首页</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body">
         <label class="checkbox-field"><input type="checkbox" name="public_visible" ${item.public_visible ? 'checked' : ''}><span>在公开前端展示此接口</span></label>
+        <label class="checkbox-field"><input type="checkbox" name="public_test_enabled" ${item.public_test_enabled?'checked':''}><span>允许已登录且有测试权限的用户在线测试</span></label><p class="small">仅公开、启用且已发布的接口可测试。测试会真实调用，可能消耗额度或修改数据。</p>
         <label class="field"><span class="field-label">公开标题</span><input name="public_title" maxlength="120" value="${value('public_title')}" placeholder="面向调用方的接口名称"></label>
         <label class="field"><span class="field-label">公开分类</span><input name="public_category" maxlength="48" value="${value('public_category')}" placeholder="例如：数据查询"></label>
         <label class="field"><span class="field-label">公开说明</span><textarea name="public_summary" maxlength="600" placeholder="仅填写可公开的用途说明，不要写内部地址、密码或 KEY">${value('public_summary')}</textarea></label>
@@ -341,10 +386,14 @@ function apiFormData(form) {
   }
   methodField.removeAttribute('aria-invalid');methodError.textContent='';methodError.classList.add('hidden');
   data.method = data.methods[0];
+  data.price_micros=moneyMicros(data.call_price);delete data.call_price;
   for (const key of ['request_schema', 'response_schema', 'parameters_schema']) { if (data[key]?.trim()) data[key] = JSON.parse(data[key]); else delete data[key]; }
   for (const key of ['rate_limit_per_minute', 'daily_quota', 'monthly_quota', 'response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
   data.strip_path = form.elements.strip_path.checked;
   data.public_visible = form.elements.public_visible.checked;
+  data.public_test_enabled = data.public_visible && form.elements.public_test_enabled.checked;
+  data.plugin_cache = {enabled:form.elements.cache_enabled.checked,ttl_seconds:Number(data.cache_ttl||form.elements.cache_ttl.value),max_entries:Number(data.cache_limit||form.elements.cache_limit.value),cache_post:form.elements.cache_enabled.checked && form.elements.cache_post.checked};
+  for(const key of ['cache_enabled','cache_ttl','cache_limit','cache_post'])delete data[key];
   return data;
 }
 
@@ -384,6 +433,7 @@ async function editAPI(id, apis) {
     card.querySelector('#api-form').outerHTML = apiForm(item);
     card.querySelector('#api-form').onsubmit = createAPI;
     card.querySelector('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
+    bindCacheFields(card.querySelector('#api-form'), id);
     $('#cancel-api-edit').onclick = () => renderAPIs();
     card.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth', block:'start'});
   } catch (error) { notice(error.message); }
@@ -522,14 +572,15 @@ function profileErrorMessage(error) {
 }
 
 function openProfileModal(user) {
-  if (!user || !state.token || $('#user-profile-modal')?._saving) return;
+  if (!user || !state.user || $('#user-profile-modal')?._saving) return;
   closeRoleModal(); closeProfileModal();
   const isSelf = user.id === state.user?.id;
+ if(isSelf){location.assign("/account");return;}
   const modal = document.createElement('div');
   modal.id = 'user-profile-modal'; modal.className = 'modal-backdrop'; modal.setAttribute('role', 'presentation');
   modal._previousFocus = document.activeElement; modal._previousInert = $('#app')?.inert || false;
   modal._previousOverflow = document.body.style.overflow;
-  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" aria-describedby="profile-impact" tabindex="-1"><div class="modal-heading"><div><h2 id="profile-modal-title">${isSelf ? '账号设置' : '编辑基本信息'}</h2><p class="small">${esc(user.username)} · ${isSelf ? '修改自己的登录信息' : '修改该用户的登录信息'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field" for="profile-username"><span class="field-label">用户名 <span aria-hidden="true">*</span></span><input id="profile-username" name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.username)}" autocomplete="username" spellcheck="false" aria-describedby="profile-username-hint"><span id="profile-username-hint" class="field-hint">原有用户名可保留；新用户名使用 3–64 位字母、数字、点、下划线或短横线。</span></label><label class="field" for="profile-email"><span class="field-label">邮箱（可选）</span><input id="profile-email" name="email" type="email" maxlength="254" value="${esc(user.email||'')}" autocomplete="email"><span class="field-hint">用于找回密码。未绑定邮箱时，请联系管理员。</span></label>${isSelf ? '<label class="field" for="profile-current-password"><span class="field-label">当前密码 <span aria-hidden="true">*</span></span><input id="profile-current-password" name="current_password" type="password" required maxlength="72" autocomplete="current-password"><span class="field-hint">修改账号信息需确认当前密码。</span></label>' : ''}<div class="field"><label class="field-label" for="profile-new-password">新密码（可选）</label><div class="password-input-row"><input id="profile-new-password" name="password" data-password-field type="password" maxlength="72" autocomplete="new-password" aria-describedby="profile-password-hint"><button type="button" class="secondary" data-toggle-password aria-label="显示新密码和确认密码" aria-pressed="false">显示</button></div><span id="profile-password-hint" class="field-hint">留空保留原密码。新密码为 8–72 个 UTF-8 字节。</span></div><label class="field" for="profile-password-confirm"><span class="field-label">确认新密码</span><input id="profile-password-confirm" name="password_confirm" data-password-field type="password" maxlength="72" autocomplete="new-password"></label><p id="profile-impact" class="profile-impact">${isSelf ? '用户名、邮箱或密码变更成功后，当前账号的全部会话将失效，请使用新信息重新登录。' : '用户名、邮箱或密码变更成功后，该用户的全部已有会话将失效。角色和账号状态保持不变。'}</p><p id="profile-edit-error" class="message" role="alert" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
+  modal.innerHTML = `<section class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" aria-describedby="profile-impact" tabindex="-1"><div class="modal-heading"><div><h2 id="profile-modal-title">${isSelf ? '账号设置' : '编辑基本信息'}</h2><p class="small">${esc(user.username)} · ${isSelf ? '修改自己的登录信息' : '修改该用户的登录信息'}</p></div><button type="button" class="modal-close" aria-label="关闭基本信息编辑">×</button></div><form id="profile-edit-form" class="form-stack"><label class="field" for="profile-username"><span class="field-label">用户名 <span aria-hidden="true">*</span></span><input id="profile-username" name="username" type="text" required minlength="3" maxlength="254" value="${esc(user.username)}" autocomplete="username" spellcheck="false" aria-describedby="profile-username-hint"><span id="profile-username-hint" class="field-hint">原有用户名可保留；新用户名使用 3–64 位字母、数字、点、下划线或短横线。</span></label><label class="field" for="profile-email"><span class="field-label">邮箱（可选）</span><input id="profile-email" name="email" type="email" maxlength="254" value="${esc(user.email||'')}" autocomplete="email"><span class="field-hint">用于找回密码。未绑定邮箱时，请联系管理员。</span></label>${true ? '<label class="field" for="profile-current-password"><span class="field-label">当前管理员密码 <span aria-hidden="true">*</span></span><input id="profile-current-password" name="current_password" type="password" required maxlength="72" autocomplete="current-password"><span class="field-hint">修改账号信息需确认当前密码。</span></label>' : ''}<div class="field"><label class="field-label" for="profile-new-password">新密码（可选）</label><div class="password-input-row"><input id="profile-new-password" name="password" data-password-field type="password" maxlength="72" autocomplete="new-password" aria-describedby="profile-password-hint"><button type="button" class="secondary" data-toggle-password aria-label="显示新密码和确认密码" aria-pressed="false">显示</button></div><span id="profile-password-hint" class="field-hint">留空保留原密码。新密码为 8–72 个 UTF-8 字节。</span></div><label class="field" for="profile-password-confirm"><span class="field-label">确认新密码</span><input id="profile-password-confirm" name="password_confirm" data-password-field type="password" maxlength="72" autocomplete="new-password"></label><p id="profile-impact" class="profile-impact">${isSelf ? '用户名、邮箱或密码变更成功后，当前账号的全部会话将失效，请使用新信息重新登录。' : '用户名、邮箱或密码变更成功后，该用户的全部已有会话将失效。角色和账号状态保持不变。'}</p><p id="profile-edit-error" class="message" role="alert" aria-live="polite" tabindex="-1"></p><div class="modal-actions"><button type="button" class="secondary" data-profile-modal-cancel>取消</button><button type="submit">保存基本信息</button></div></form></section>`;
   document.body.appendChild(modal);
   $('#app').inert = true; document.body.style.overflow = 'hidden';
   const close = () => closeProfileModal();
@@ -537,6 +588,9 @@ function openProfileModal(user) {
   modal.querySelector('[data-profile-modal-cancel]').onclick = close;
   modal.addEventListener('click', event => { if (event.target === modal) close(); });
   const form = modal.querySelector('#profile-edit-form');
+  const extra=document.createElement('section');extra.className='form-stack';extra.innerHTML='<label class="field"><span class="field-label">管理员动态码或恢复码</span><input name="totp_code" autocomplete="one-time-code" maxlength="64"><span class="field-hint">启用双重验证后必填。</span></label><div data-captcha></div><label class="field"><span class="field-label">新邮箱验证码</span><input name="verification_code" maxlength="6"></label><button type="button" class="secondary" data-email-code>发送新邮箱验证码</button>';form.querySelector('.modal-actions').before(extra);
+  let profileCaptcha;void mountAccountCaptcha(extra).then(c=>profileCaptcha=c).catch(e=>notice(e.message));
+  extra.querySelector('[data-email-code]').onclick=async()=>{try{const cfg=await api('/account/v1/options');if(cfg.turnstile)throw new Error('启用人机验证时，请由用户在用户中心自行修改邮箱。');const v=await api('/account/v1/send-code',{method:'POST',body:JSON.stringify({email:form.elements.email.value,purpose:'change-email'})});form._verification=v.verification_id;notice('验证码已发送至新邮箱',true)}catch(e){notice(e.message)}};
   [...form.elements].filter(element => element.tagName === 'INPUT').forEach(input => input.addEventListener('input', () => {
     input.setCustomValidity('');
     form.elements.password_confirm.setCustomValidity('');
@@ -560,16 +614,17 @@ function openProfileModal(user) {
     if (password !== confirmation) form.elements.password_confirm.setCustomValidity('两次输入的新密码不一致。');
     if (!form.reportValidity()) return;
     const data = {username: form.elements.username.value.trim(), email: form.elements.email.value.trim()};
-    if (isSelf) data.current_password = form.elements.current_password.value;
+    data.current_password = form.elements.current_password.value;
+    data.totp_code=form.elements.totp_code.value;data.turnstile_token=profileCaptcha?.value()||'';data.verification_id=form._verification||'';data.verification_code=form.elements.verification_code.value;
     if (password) data.password = password;
     modal._saving = true;
     const submit = form.querySelector('[type="submit"]'); submit.textContent = '保存中…';
     const controls = [...modal.querySelectorAll('input, button')]; controls.forEach(control => { control.disabled = true; });
     try {
       const result = await api(isSelf ? '/auth/v1/me' : `/admin/v1/users/${encodeURIComponent(user.id)}/profile`, {method:'PUT', body:JSON.stringify(data)});
-      closeProfileModal(true);
+      profileCaptcha?.reset();closeProfileModal(true);
       if (result.reauthentication_required) {
-        clearSession(); $('#username').value = result.user.username; $('#password').value = '';
+        clearSession(); broadcastAuth(); $('#username').value = result.user.username; $('#password').value = '';
         notice('信息已更新，请使用新的登录信息重新登录。', true, 'auth'); $('#password').focus();
         return;
       }
@@ -577,7 +632,7 @@ function openProfileModal(user) {
       notice(result.sessions_revoked ? '信息已更新，该用户的旧会话已失效。' : '信息未发生变化。', true);
       if (state.page === 'users') renderUsers();
     } catch (caught) {
-      if (modal.isConnected) { error.textContent = profileErrorMessage(caught); error.focus(); }
+      if (modal.isConnected) { profileCaptcha?.reset();error.textContent = profileErrorMessage(caught); error.focus(); }
     } finally {
       modal._saving = false;
       if (modal.isConnected) { controls.forEach(control => { control.disabled = false; }); submit.textContent = '保存基本信息'; }
@@ -589,6 +644,7 @@ function openProfileModal(user) {
 
 function userActions(user, roles) {
   const isSelf = user.id === state.user?.id;
+ if(isSelf){location.assign("/account");return;}
   const targetRoles = user.roles?.length ? user.roles : [user.role].filter(Boolean);
   const canManageTarget = can('user.manage') && (can('*') || (!isSelf && targetRoles.every(name => {
     const role = roles.find(candidate => candidate.name === name);
@@ -632,6 +688,7 @@ async function renderRoles() {
   try {
     const [roles, permissions] = await Promise.all([api('/admin/v1/roles'), api('/admin/v1/permissions')]);
     if (!page.isConnected) return;
+    state.cache.roleNames=Object.fromEntries(roles.map(r=>[r.name,r.display_name||r.name]));state.cache.permissionNames=Object.fromEntries(permissions.map(p=>[p.code,p.description||p.code]));
     page.innerHTML = `<div class="roles-page">
       <div class="table-wrap roles-table-wrap"><div class="toolbar table-toolbar"><h2>角色列表</h2><span class="badge">${roles.length} 个角色</span></div><table class="roles-table"><thead><tr><th scope="col">角色</th><th scope="col">说明</th><th scope="col">权限</th><th scope="col">操作</th></tr></thead><tbody>
       ${roles.map(role => { const locked=role.name==='super_admin'; return `<tr><td><strong title="${esc(role.name)}">${esc(roleLabel(role.name))}</strong>${roleLabels[role.name]?`<br><span class="small">${esc(role.name)}</span>`:''}</td><td>${esc(roleDescription(role))}</td><td>${rolePermissionsSummary(role.permissions||[])}</td><td>${can('*') ? (locked ? '<span class="small">系统保护</span>' : `<button type="button" class="secondary" data-role="${esc(role.name)}">编辑权限</button>`) : '<span class="small">只读</span>'}</td></tr>`; }).join('')}
@@ -912,6 +969,7 @@ async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode =
   form.elements.auth_mode.value = authMode === 'none' ? 'none' : 'api_key';
   form.elements.path.value = path;
   form.elements.plugin.value = pluginName;
+  form.elements.plugin.dispatchEvent(new Event('input'));
   form.scrollIntoView({behavior:'smooth', block:'start'});
   notice('已预填路径和插件名称；确认后保存草稿，再点击“发布”。', true);
 }
@@ -999,9 +1057,9 @@ function pluginRow(item, library = []) {
 async function uploadPlugin(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const headers = {}; if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const headers = {'X-API-Request':'1'};
   try {
-    const response = await fetch('/admin/v1/plugins', {method:'POST', headers, body:new FormData(form)});
+    const response = await fetch('/admin/v1/plugins', {method:'POST', headers, body:new FormData(form),credentials:'same-origin',cache:'no-store'});
     const body = await response.json().catch(() => ({}));
     if (response.status === 401) { clearSession(); throw new Error('登录已过期，请重新登录'); }
     if (!response.ok) {
@@ -1045,13 +1103,16 @@ $('#login-form').onsubmit = async (event) => {
   } catch (error) { notice(authErrorMessage(error), false, 'auth'); }
 };
 $('#logout').onclick = logout;
-$('#account-settings').onclick = () => openProfileModal(state.user);
+$('#account-settings').onclick = () => location.assign('/account');
 $('#refresh').onclick = () => withAction($('#refresh'), '刷新中…', renderPage);
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
 hydrateSession();
 
 let pendingResetToken = '';
 function openRecoveryModal(resetToken = '') {
+ if(resetToken){location.replace('/account#reset='+encodeURIComponent(resetToken));return;}
+ location.assign('/account?recover=1&return=admin');return;
+
   const old = $('#recovery-modal'); if (old?._saving) return; old?.remove();
   const resetting = Boolean(resetToken);
   const modal=document.createElement('div'); modal.id='recovery-modal'; modal.className='modal-backdrop';
@@ -1070,7 +1131,7 @@ function openRecoveryModal(resetToken = '') {
     const payload=resetting?{token:resetToken,password:form.elements.password.value}:{email:form.elements.email.value.trim()};
     const message=modal.querySelector('#recovery-message');modal._saving=true;const controls=[...modal.querySelectorAll('input,button')];controls.forEach(el=>el.disabled=true);
     try{await api(resetting?'/auth/v1/reset-password':'/auth/v1/forgot-password',{method:'POST',body:JSON.stringify(payload)});modal._saving=false;
-      if(resetting){close();clearSession();notice('密码已重置，请使用新密码登录。',true,'auth');$('#password').focus()}else{message.textContent='如果该邮箱已绑定有效账号，重置链接将发送到该邮箱，15 分钟内有效。';message.focus();form.querySelector('[type="submit"]').textContent='已提交';controls.filter(el=>el.hasAttribute('data-recovery-close')||el.classList.contains('modal-close')).forEach(el=>el.disabled=false)}
+      if(resetting){close();clearSession();broadcastAuth();notice('密码已重置，请使用新密码登录。',true,'auth');$('#password').focus()}else{message.textContent='如果该邮箱已绑定有效账号，重置链接将发送到该邮箱，15 分钟内有效。';message.focus();form.querySelector('[type="submit"]').textContent='已提交';controls.filter(el=>el.hasAttribute('data-recovery-close')||el.classList.contains('modal-close')).forEach(el=>el.disabled=false)}
     }catch(error){modal._saving=false;controls.forEach(el=>el.disabled=false);message.textContent=error.status===429?'请求太频繁，请一分钟后重试。':resetting?'链接无效、已过期或已使用，请重新找回密码。':'暂时无法发送，请稍后重试或联系管理员。';message.focus()}
   }}
   (modal.querySelector('input')||modal.querySelector('[data-recovery-close]')).focus();
@@ -1079,7 +1140,7 @@ async function initRecovery() {
   const match=location.hash.match(/^#reset=([0-9a-f]{64})$/);
   if(match){pendingResetToken=match[1];history.replaceState(null,'',location.pathname+location.search)}
   try{const result=await api('/auth/v1/recovery');state.recoveryEnabled=result.enabled===true}catch(_){state.recoveryEnabled=false}
-  $('#forgot-password').onclick=()=>openRecoveryModal();
+  $('#forgot-password').onclick=()=>location.assign('/account?recover=1&return=admin');
   if(pendingResetToken)openRecoveryModal(pendingResetToken);
 }
 
@@ -1158,3 +1219,52 @@ async function renderSiteSettings() {
   }catch(error){if(page.isConnected)page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`}
 }
 refreshSiteIdentity();
+
+function bindCacheFields(form, id) {
+  if(!form) return;
+  const plugin=form.elements.plugin, enabled=form.elements.cache_enabled;
+  const update=()=>{const available=Boolean(plugin?.value.trim());enabled.disabled=!available;if(!available)enabled.checked=false;for(const name of ['cache_ttl','cache_limit','cache_post'])form.elements[name].disabled=!enabled.checked;};
+  plugin?.addEventListener('input',update);enabled?.addEventListener('change',update);update();
+  form.querySelector('[data-cache-manage]')?.addEventListener('click',()=>void showPluginCache(id));
+}
+async function showPluginCache(id) {
+  if(!id)return;
+  const dialog=document.createElement('dialog');dialog.className='modal-card cache-dialog';
+  dialog.innerHTML='<div class="modal-heading"><h2>接口缓存</h2><button type="button" class="modal-close" aria-label="关闭缓存设置">×</button></div><p class="small" data-cache-info>正在读取…</p><form><label class="checkbox-field"><input type="checkbox" name="confirm"><span>我确认清理此接口的全部缓存结果</span></label><p class="message" role="alert"></p><div class="modal-actions"><button type="button" class="secondary" data-cache-close>关闭</button><button type="submit" class="danger" disabled>清理缓存</button></div></form>';
+  dialog.setAttribute('aria-label','接口缓存');document.body.appendChild(dialog);dialog.showModal();
+  let busy=false;const close=()=>{if(!busy){dialog.close();dialog.remove()}};
+  dialog.querySelector('.modal-close').onclick=close;dialog.querySelector('[data-cache-close]').onclick=close;dialog.oncancel=event=>{event.preventDefault();close()};
+  const form=dialog.querySelector('form'),confirm=form.elements.confirm,submit=form.querySelector('[type=submit]');
+  confirm.disabled=!can('api.write');confirm.onchange=()=>{submit.disabled=!confirm.checked||busy};
+  try {const data=await api(`/admin/v1/apis/${encodeURIComponent(id)}/cache`);if(dialog.isConnected)dialog.querySelector('[data-cache-info]').textContent=`有效缓存 ${data.stats.entries} 条，过期缓存 ${data.stats.expired} 条。有效期 ${data.config.ttl_seconds||0} 秒。`;}
+  catch(error){if(dialog.isConnected){dialog.querySelector('.message').textContent=error.message;confirm.disabled=true;}}
+  form.onsubmit=async event=>{event.preventDefault();if(busy||!confirm.checked)return;busy=true;confirm.disabled=true;
+    try {await withSubmitting(form,'清理中…',()=>api(`/admin/v1/apis/${encodeURIComponent(id)}/cache`,{method:'DELETE',body:JSON.stringify({confirm:true})}));busy=false;close();notice('接口缓存已清理',true);}
+    catch(error){dialog.querySelector('.message').textContent=error.message;busy=false;confirm.disabled=false;}
+  };
+}
+
+async function renderSessions(){
+ const page=$('#page');page.innerHTML='<div class="empty">读取登录会话…</div>';
+ try {
+  const users=can('user.sessions.manage')&&can('user.read')?await api('/admin/v1/users'):[state.user];
+  if(!page.isConnected)return;
+  page.innerHTML=`<section class="card"><div class="toolbar"><div><h2>登录会话</h2><p class="small">查看登录设备和来源，退出不再使用的会话。设备名称来自客户端声明，仅供参考。</p></div></div><label class="field"><span class="field-label">用户</span><select data-session-user>${users.map(u=>`<option value="${esc(u.id)}">${esc(u.username)}${u.id===state.user.id?'（我）':''}</option>`).join('')}</select></label><div data-session-results></div></section>`;
+  const select=page.querySelector('[data-session-user]');select.value=state.user.id;let epoch=0;
+  const load=async()=>{const run=++epoch;const userId=select.value,root=page.querySelector('[data-session-results]');root.innerHTML='<div class="empty">读取中…</div>';
+   try {const list=await api(`/admin/v1/users/${encodeURIComponent(userId)}/sessions`);if(!page.isConnected||run!==epoch)return;
+    root.innerHTML=list.length?`<div class="table-wrap"><table class="session-table"><thead><tr><th>设备</th><th>登录来源</th><th>时间</th><th>操作</th></tr></thead><tbody>${list.map(s=>`<tr><td><strong>${esc(s.device||'未知设备')}</strong>${s.current?'<span class="badge">当前会话</span>':''}<details><summary>设备详情</summary><p class="small">${esc(s.user_agent||'客户端未提供')}</p></details></td><td><code>${esc(s.login_ip||'未记录')}</code><p class="small">${s.ip_source==='trusted_proxy'?'可信代理转发':s.ip_source==='peer'?'直连地址':'来源未知'}</p><p class="small">最近来源：${esc(s.last_ip||'未记录')}</p></td><td><p class="small">登录：${esc(formatDate(s.created_at))}</p><p class="small">最近访问：${esc(formatDate(s.last_seen_at))}</p><p class="small">到期：${esc(formatDate(s.expires_at))}</p></td><td><button type="button" class="danger" data-revoke-session="${esc(s.id)}" data-current="${s.current?'1':'0'}">退出会话</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">暂无有效登录会话。</div>';
+    root.querySelectorAll('[data-revoke-session]').forEach(button=>button.onclick=()=>showSessionRevoke(userId,button.dataset.revokeSession,button.dataset.current==='1',load));
+   }catch(error){if(page.isConnected&&run===epoch)root.innerHTML=`<p class="message" role="alert">${esc(error.message)}</p>`}
+  };select.onchange=()=>void load();await load();
+ }catch(error){if(page.isConnected)page.innerHTML=`<p class="message" role="alert">${esc(error.message)}</p>`}
+}
+function showSessionRevoke(userId,id,current,refresh){
+ const dialog=document.createElement('dialog');dialog.className='modal-card cache-dialog';dialog.setAttribute('aria-label','退出登录会话');
+ dialog.innerHTML=`<div class="modal-heading"><h2>退出登录会话</h2></div><p>${current?'这是当前会话，退出后前后台均需重新登录。':'该设备的会话将立即失效，未使用的测试授权也会失效。'}</p><form><label class="checkbox-field"><input type="checkbox" name="confirm"><span>我确认退出此会话</span></label><p class="message" role="alert"></p><div class="modal-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit" class="danger" disabled>退出会话</button></div></form>`;
+ document.body.appendChild(dialog);dialog.showModal();let busy=false;const close=()=>{if(!busy){dialog.close();dialog.remove()}};dialog.oncancel=e=>{e.preventDefault();close()};dialog.querySelector('[data-close]').onclick=close;const form=dialog.querySelector('form'),submit=form.querySelector('[type=submit]');form.elements.confirm.onchange=()=>submit.disabled=!form.elements.confirm.checked;
+ form.onsubmit=async event=>{event.preventDefault();if(busy||!form.elements.confirm.checked)return;busy=true;
+  try {const data=await withSubmitting(form,'退出中…',()=>api(`/admin/v1/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})}));busy=false;close();if(data.current){clearSession();broadcastAuth()}else{notice('会话已退出',true);await refresh()}}
+  catch(error){dialog.querySelector('.message').textContent=error.message;busy=false;}
+ };
+}

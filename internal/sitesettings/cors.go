@@ -45,7 +45,7 @@ func (s *Service) PublicAPICORS(next http.Handler) http.Handler {
 				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", strings.Join(headers, ", "))
-				w.Header().Set("Access-Control-Expose-Headers", "Content-Type, X-Request-ID, Retry-After")
+				w.Header().Set("Access-Control-Expose-Headers", "Content-Type, X-Request-ID, Retry-After, X-Plugin-Cache")
 				if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 					w.WriteHeader(204)
 					return

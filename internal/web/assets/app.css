@@ -235,3 +235,12 @@ th{white-space:nowrap;padding-top:11px;padding-bottom:11px}td{line-height:1.45}t
 .version-status { border-color: #ffffff24; color: #dbe3f6; }
 .version-status .small { color: #bdc8e1; }
 .version-status + .account { margin-top: 0; }
+.cache-dialog { width: min(520px, calc(100vw - 32px)); border: 1px solid var(--line); color: var(--ink); padding: 24px; }
+.cache-dialog::backdrop { background: #17203370; }
+.cache-dialog .modal-actions { margin-top: 18px; }
+.session-table { min-width: 740px; }
+.session-table td { vertical-align: top; }
+.session-table details { max-width: 260px; margin-top: 8px; }
+.session-table details p { overflow-wrap: anywhere; }
+.session-table .badge { margin-left: 8px; }
+.settings-stack{display:grid;gap:24px}.settings-stack>.card{margin:0}.settings-stack select{max-width:100%}.settings-stack [data-wallet-detail]{border:1px solid var(--border,#dce1eb);padding:16px;border-radius:8px;background:var(--surface-subtle,#f8fafc)}

@@ -8,7 +8,7 @@ const api = { id: 'public-hash', title: '公开接口', summary: '独立公开�
 test('only allowlisted public fields survive the real DTO projection', () => {
   const result = projectCatalog({ version: 1, base_url: 'https://api.example.com', private_field: 'SECRET-top', apis: [{ ...api, upstream_url: 'SECRET-upstream', auth_config: { key: 'SECRET-key' }, response_body: 'SECRET-response', parameters: [{ name: 'q', location: 'query', type: 'string', required: true, default: 'SECRET-default' }], body: [] }] });
   assert.equal(JSON.stringify(result).includes('SECRET'), false);
-  assert.deepEqual(Object.keys(result.apis[0]).sort(), [...Object.keys(api),'methods','operations'].sort());
+  assert.deepEqual(Object.keys(result.apis[0]).sort(), [...Object.keys(api),'methods','operations','price_micros'].sort());
   assert.deepEqual(result.apis[0].parameters, [{ name: 'q', location: 'query', type: 'string', required: true }]);
 });
 

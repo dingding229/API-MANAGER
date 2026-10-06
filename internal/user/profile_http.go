@@ -56,6 +56,12 @@ func (h *HTTP) updateOwnProfile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.criticalGuard != nil {
+		if err := h.criticalGuard(r, "sensitive", request.TurnstileToken); err != nil {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	updated, changed, err := h.service.UpdateProfile(actor.ID, actor.ID, request)
 	if err != nil {
 		WriteProfileError(w, err)

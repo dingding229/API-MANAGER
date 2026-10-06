@@ -158,11 +158,11 @@ func (p *Postgres) CreateAPI(api model.API) error {
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO apis
-		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
+		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods())
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods(), cacheConfigDocument(api.PluginCache), api.PublicTestEnabled, api.PriceMicros)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -227,11 +227,11 @@ func (p *Postgres) updateAPI(ctx context.Context, tx pgx.Tx, api model.API) erro
 		return err
 	}
 	result, err := tx.Exec(ctx, `UPDATE apis SET
-		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27,public_visible=$28,public_title=$29,public_summary=$30,public_category=$31,methods=$32
+		name=$2,description=$3,method=$4,path=$5,auth_mode=$6,auth_config=$7,rate_limit_per_minute=$8,daily_quota=$9,monthly_quota=$10,response_status=$11,response_body=$12,request_schema=$13,response_schema=$14,parameters_schema=$15,plugin_name=$16,upstream_url=$17,upstream_path=$18,strip_path=$19,upstream_timeout_ms=$20,upstream_retries=$21,circuit_breaker_threshold=$22,circuit_breaker_reset_seconds=$23,enabled=$24,published_at=$25,updated_at=$26,upstream_auth_ref=$27,public_visible=$28,public_title=$29,public_summary=$30,public_category=$31,methods=$32,plugin_cache=$33,public_test_enabled=$34,price_micros=$35
 		WHERE id=$1`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods())
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods(), cacheConfigDocument(api.PluginCache), api.PublicTestEnabled, api.PriceMicros)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -252,16 +252,19 @@ func (p *Postgres) updateAPI(ctx context.Context, tx pgx.Tx, api model.API) erro
 	return nil
 }
 
-const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods FROM apis`
+const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros FROM apis`
 
 func scanAPI(row pgx.Row) (model.API, error) {
 	var api model.API
-	var authConfig, requestSchema, responseSchema, parametersSchema []byte
+	var authConfig, requestSchema, responseSchema, parametersSchema, pluginCache []byte
 	var pluginName string
 	if err := row.Scan(&api.ID, &api.Name, &api.Description, &api.Method, &api.Path, &api.AuthMode, &authConfig,
 		&api.RateLimitPerMinute, &api.DailyQuota, &api.MonthlyQuota, &api.ResponseStatus, &api.ResponseBody, &requestSchema, &responseSchema, &parametersSchema, &pluginName,
-		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory, &api.Methods); err != nil {
+		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory, &api.Methods, &pluginCache, &api.PublicTestEnabled, &api.PriceMicros); err != nil {
 		return model.API{}, err
+	}
+	if err := json.Unmarshal(pluginCache, &api.PluginCache); err != nil {
+		return model.API{}, fmt.Errorf("decode plugin cache config: %w", err)
 	}
 	api.Plugin = pluginName
 	api.RequestSchema = schemaRawMessage(requestSchema)
@@ -343,8 +346,8 @@ func (p *Postgres) DeleteAPI(id string) error {
 func (p *Postgres) CreateCredential(credential model.Credential) error {
 	ctx, cancel := dbContext()
 	defer cancel()
-	_, err := p.pool.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,revoked,expires_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
-		credential.ID, credential.Name, credential.Prefix, credential.Hash, credential.EncryptedKey, credential.Revoked, credential.ExpiresAt, credential.CreatedAt)
+	_, err := p.pool.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,revoked,expires_at,created_at,owner_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::uuid)`,
+		credential.ID, credential.Name, credential.Prefix, credential.Hash, credential.EncryptedKey, credential.Revoked, credential.ExpiresAt, credential.CreatedAt, credential.OwnerUserID)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -373,8 +376,8 @@ func (p *Postgres) RotateCredential(id, prefix, hash, encryptedKey string) (mode
 	defer cancel()
 	var credential model.Credential
 	err := p.pool.QueryRow(ctx, `UPDATE api_credentials SET prefix=$2,key_hash=$3,encrypted_key=$4 WHERE id=$1 AND revoked=FALSE
-		RETURNING id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at`, id, prefix, hash, encryptedKey).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt)
+		RETURNING id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'')`, id, prefix, hash, encryptedKey).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var revoked bool
 		if lookupErr := p.pool.QueryRow(ctx, `SELECT revoked FROM api_credentials WHERE id=$1`, id).Scan(&revoked); errors.Is(lookupErr, pgx.ErrNoRows) {
@@ -394,8 +397,8 @@ func (p *Postgres) GetCredential(id string) (model.Credential, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var credential model.Credential
-	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at FROM api_credentials WHERE id=$1`, id).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials WHERE id=$1`, id).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Credential{}, ErrNotFound
 	}
@@ -406,7 +409,7 @@ func (p *Postgres) GetCredential(id string) (model.Credential, error) {
 func (p *Postgres) ListCredentials() []model.Credential {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at FROM api_credentials ORDER BY created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials ORDER BY created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -414,7 +417,7 @@ func (p *Postgres) ListCredentials() []model.Credential {
 	result := make([]model.Credential, 0)
 	for rows.Next() {
 		var credential model.Credential
-		if err := rows.Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt); err == nil {
+		if err := rows.Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID); err == nil {
 			credential.KeyAvailable = credential.EncryptedKey != ""
 			result = append(result, credential)
 		}
@@ -426,8 +429,8 @@ func (p *Postgres) FindCredentialByHash(hash string) (model.Credential, bool) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var credential model.Credential
-	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at FROM api_credentials WHERE key_hash=$1`, hash).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials WHERE key_hash=$1`, hash).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
 	return credential, err == nil
 }
 
@@ -435,7 +438,8 @@ func dbContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
-func (p *Postgres) CreateUser(user model.User) error {
+func (p *Postgres) CreateUser(user model.User) error { return p.CreateIdentityUser(user, nil) }
+func (p *Postgres) CreateIdentityUser(user model.User, identity *model.Identity) error {
 	ctx, cancel := dbContext()
 	defer cancel()
 	tx, err := p.pool.Begin(ctx)
@@ -443,7 +447,7 @@ func (p *Postgres) CreateUser(user model.User) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO users(id,username,email,password_hash,role,status,created_at,updated_at) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8)`, user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
+	_, err = tx.Exec(ctx, `INSERT INTO users(id,username,email,password_hash,role,status,created_at,updated_at,nickname,email_verified) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,$7,$8,$9,$10)`, user.ID, user.Username, user.Email, user.PasswordHash, user.Role, user.Status, user.CreatedAt, user.UpdatedAt, user.Nickname, user.EmailVerified)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -468,6 +472,11 @@ func (p *Postgres) CreateUser(user model.User) error {
 			return err
 		}
 	}
+	if identity != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO external_identities(provider,subject,user_id) VALUES($1,$2,$3)`, identity.Provider, identity.Subject, user.ID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -475,12 +484,13 @@ func (p *Postgres) GetUserByUsername(username string) (model.User, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var user model.User
-	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE username=$1`, username).
-		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at,nickname,email_verified,auth_revision FROM users WHERE username=$1`, username).
+		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Nickname, &user.EmailVerified, &user.AuthRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, ErrNotFound
 	}
 	if err == nil {
+		user.UID = user.ID
 		user.Roles = p.userRoles(ctx, user.ID)
 		if len(user.Roles) > 0 {
 			user.Role = user.Roles[0]
@@ -493,12 +503,13 @@ func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var user model.User
-	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE email=$1`, email).
-		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at,nickname,email_verified,auth_revision FROM users WHERE email=$1`, email).
+		Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Nickname, &user.EmailVerified, &user.AuthRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, ErrNotFound
 	}
 	if err == nil {
+		user.UID = user.ID
 		user.Roles = p.userRoles(ctx, user.ID)
 		if len(user.Roles) > 0 {
 			user.Role = user.Roles[0]
@@ -510,7 +521,7 @@ func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 func (p *Postgres) ListUsers() []model.User {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT u.id,u.username,COALESCE(u.email,''),u.password_hash,u.role,u.status,u.created_at,u.updated_at,ARRAY(SELECT r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY r.name) FROM users u ORDER BY u.created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT u.id,u.username,COALESCE(u.email,''),u.password_hash,u.role,u.status,u.created_at,u.updated_at,u.nickname,u.email_verified,u.auth_revision,ARRAY(SELECT r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY r.name) FROM users u ORDER BY u.created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -518,7 +529,8 @@ func (p *Postgres) ListUsers() []model.User {
 	users := make([]model.User, 0)
 	for rows.Next() {
 		var user model.User
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Roles); err == nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Nickname, &user.EmailVerified, &user.AuthRevision, &user.Roles); err == nil {
+			user.UID = user.ID
 			if len(user.Roles) > 0 {
 				user.Role = user.Roles[0]
 			}
@@ -653,7 +665,7 @@ func (p *Postgres) EnsureRBAC() error {
 	}
 	defer tx.Rollback(ctx)
 	for _, permission := range DefaultPermissions() {
-		if _, err := tx.Exec(ctx, `INSERT INTO permissions(id,code,description) VALUES($1,$2,$3) ON CONFLICT(code) DO UPDATE SET description=EXCLUDED.description`, newUUID(), permission.Code, permission.Description); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO permissions(id,code,description) VALUES($1,$2,$3) ON CONFLICT(code) DO NOTHING`, newUUID(), permission.Code, permission.Description); err != nil {
 			return fmt.Errorf("seed permission %s: %w", permission.Code, err)
 		}
 	}
@@ -694,7 +706,7 @@ func ensureRoleTx(ctx context.Context, tx pgx.Tx, role model.Role) error {
 		if roleID == "" {
 			roleID = newUUID()
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO roles(id,name,description) VALUES($1,$2,$3)`, roleID, role.Name, role.Description); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO roles(id,name,description,display_name) VALUES($1,$2,$3,$4)`, roleID, role.Name, role.Description, role.DisplayName); err != nil {
 			return fmt.Errorf("create role %s: %w", role.Name, err)
 		}
 	} else if err != nil {
@@ -771,7 +783,7 @@ func (p *Postgres) ListPermissions() []model.Permission {
 func (p *Postgres) ListRoles() []model.Role {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT r.id,r.name,r.description,ARRAY(SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id ORDER BY p.code) FROM roles r WHERE r.tenant_id IS NULL ORDER BY r.name`)
+	rows, err := p.pool.Query(ctx, `SELECT r.id,r.name,r.description,r.display_name,ARRAY(SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id ORDER BY p.code) FROM roles r WHERE r.tenant_id IS NULL ORDER BY r.name`)
 	if err != nil {
 		return nil
 	}
@@ -779,7 +791,7 @@ func (p *Postgres) ListRoles() []model.Role {
 	roles := make([]model.Role, 0)
 	for rows.Next() {
 		var role model.Role
-		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.Permissions); err != nil {
+		if err := rows.Scan(&role.ID, &role.Name, &role.Description, &role.DisplayName, &role.Permissions); err != nil {
 			continue
 		}
 		if role.Name == "super_admin" && len(role.Permissions) == 0 {
@@ -794,7 +806,7 @@ func (p *Postgres) GetRoleByName(name string) (model.Role, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var role model.Role
-	if err := p.pool.QueryRow(ctx, `SELECT id,name,description FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&role.ID, &role.Name, &role.Description); errors.Is(err, pgx.ErrNoRows) {
+	if err := p.pool.QueryRow(ctx, `SELECT id,name,description,display_name FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&role.ID, &role.Name, &role.Description, &role.DisplayName); errors.Is(err, pgx.ErrNoRows) {
 		return model.Role{}, ErrNotFound
 	} else if err != nil {
 		return model.Role{}, err
@@ -909,13 +921,14 @@ func (p *Postgres) GetUserByID(id string) (model.User, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var user model.User
-	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at FROM users WHERE id=$1`, id).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+	err := p.pool.QueryRow(ctx, `SELECT id,username,COALESCE(email,''),password_hash,role,status,created_at,updated_at,nickname,email_verified,auth_revision FROM users WHERE id=$1`, id).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt, &user.Nickname, &user.EmailVerified, &user.AuthRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.User{}, ErrNotFound
 	}
 	if err != nil {
 		return model.User{}, err
 	}
+	user.UID = user.ID
 	user.Roles = p.userRoles(ctx, user.ID)
 	if len(user.Roles) > 0 {
 		user.Role = user.Roles[0]
@@ -1199,7 +1212,7 @@ func (p *Postgres) DeletePlugin(id string) error {
 func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT method,methods,path,auth_mode,request_schema,parameters_schema,public_visible,public_title,public_summary,public_category,enabled,published_at FROM apis WHERE public_visible=true AND enabled=true AND published_at IS NOT NULL ORDER BY public_category,public_title LIMIT 200`)
+	rows, err := p.pool.Query(ctx, `SELECT method,methods,path,auth_mode,request_schema,parameters_schema,public_visible,public_title,public_summary,public_category,enabled,published_at,public_test_enabled FROM apis WHERE public_visible=true AND enabled=true AND published_at IS NOT NULL ORDER BY public_category,public_title LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -1208,7 +1221,7 @@ func (p *Postgres) ListPublicAPIsChecked() ([]model.API, error) {
 	for rows.Next() {
 		var a model.API
 		var request, parameters []byte
-		if err := rows.Scan(&a.Method, &a.Methods, &a.Path, &a.AuthMode, &request, &parameters, &a.PublicVisible, &a.PublicTitle, &a.PublicSummary, &a.PublicCategory, &a.Enabled, &a.PublishedAt); err != nil {
+		if err := rows.Scan(&a.Method, &a.Methods, &a.Path, &a.AuthMode, &request, &parameters, &a.PublicVisible, &a.PublicTitle, &a.PublicSummary, &a.PublicCategory, &a.Enabled, &a.PublishedAt, &a.PublicTestEnabled); err != nil {
 			return nil, err
 		}
 		a.RequestSchema = schemaRawMessage(request)
@@ -1279,3 +1292,5 @@ func protectLastAdmin(ctx context.Context, tx pgx.Tx, id string, removing bool) 
 	}
 	return nil
 }
+
+func cacheConfigDocument(c model.PluginCacheConfig) []byte { data, _ := json.Marshal(c); return data }

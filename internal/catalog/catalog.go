@@ -20,12 +20,15 @@ type Catalog struct {
 	siteProvider func() model.PublicSiteInfo
 }
 type Operation struct {
+	PriceMicros    int64       `json:"price_micros"`
+	TestEnabled    bool        `json:"test_enabled"`
 	Method         string      `json:"method"`
 	Authentication string      `json:"authentication"`
 	Parameters     []Parameter `json:"parameters"`
 	Body           []Parameter `json:"body"`
 }
 type Document struct {
+	PriceMicros    int64       `json:"price_micros"`
 	Methods        []string    `json:"methods"`
 	Operations     []Operation `json:"operations"`
 	ID             string      `json:"id"`
@@ -114,7 +117,7 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if category == "" {
 				category = "通用接口"
 			}
-			d := Document{ID: hex.EncodeToString(digest[:8]), Title: a.PublicTitle, Summary: a.PublicSummary, Category: category, Method: method, Path: a.Path, Authentication: a.AuthMode, Parameters: make([]Parameter, 0), Body: make([]Parameter, 0)}
+			d := Document{PriceMicros: a.PriceMicros, ID: hex.EncodeToString(digest[:8]), Title: a.PublicTitle, Summary: a.PublicSummary, Category: category, Method: method, Path: a.Path, Authentication: a.AuthMode, Parameters: make([]Parameter, 0), Body: make([]Parameter, 0)}
 			// Export only property names/types/required flags. No example/default values,
 			// schema descriptions, response body, upstream or credential fields cross this boundary.
 			d.Body = fields(a.RequestSchema, "body")
@@ -142,7 +145,7 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			operation := Operation{Method: method, Authentication: d.Authentication, Parameters: d.Parameters, Body: d.Body}
+			operation := Operation{PriceMicros: a.PriceMicros, TestEnabled: a.PublicTestEnabled, Method: method, Authentication: d.Authentication, Parameters: d.Parameters, Body: d.Body}
 			if index, exists := grouped[a.Path]; exists {
 				duplicate := false
 				for _, existing := range result.APIs[index].Methods {

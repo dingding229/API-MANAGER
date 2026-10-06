@@ -17,6 +17,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -38,16 +39,18 @@ import (
 )
 
 type Gateway struct {
-	apiHostAllowed func(string) bool
-	credentials    upstream.Credentials
-	store          store.Store
-	plugins        *plugin.Registry
-	limiter        ratelimit.Limiter
-	logger         *slog.Logger
-	requests       atomic.Uint64
-	metrics        *observability.Metrics
-	breaker        *resilience.CircuitBreaker
-	productionMode bool
+	cacheEncryptionKey string
+	cacheLocks         [64]sync.Mutex
+	apiHostAllowed     func(string) bool
+	credentials        upstream.Credentials
+	store              store.Store
+	plugins            *plugin.Registry
+	limiter            ratelimit.Limiter
+	logger             *slog.Logger
+	requests           atomic.Uint64
+	metrics            *observability.Metrics
+	breaker            *resilience.CircuitBreaker
+	productionMode     bool
 }
 
 func New(s store.Store, plugins *plugin.Registry, limiter ratelimit.Limiter, logger *slog.Logger) *Gateway {
@@ -72,6 +75,24 @@ func (g *Gateway) SetProductionMode(enabled bool) { g.productionMode = enabled }
 func (g *Gateway) RequestCount() uint64 { return g.requests.Load() }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.serve(w, r, "", "", time.Time{})
+}
+
+// ServeTest is only wired to the session-scoped test controller, never an HTTP header.
+func (g *Gateway) ServeTest(w http.ResponseWriter, r *http.Request, apiID, userID string, expected time.Time) {
+	if apiID == "" || userID == "" {
+		writeJSONError(w, 403, "invalid test principal")
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), testActorKey{}, userID))
+	g.serve(w, r, apiID, userID, expected)
+}
+
+type testActorKey struct{}
+
+func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser string, expected time.Time) {
+	r = r.Clone(r.Context())
+	auth.StripUserSessionCookies(r)
 	started := time.Now()
 	g.requests.Add(1)
 	capture := newCaptureWriter(w)
@@ -93,7 +114,16 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := auth.Authorize(api, g.store, r); err != nil {
+	if testID != "" && (api.ID != testID || !api.PublicVisible || !api.PublicTestEnabled || !api.UpdatedAt.Equal(expected)) {
+		writeJSONError(capture, 403, "online test unavailable")
+		return
+	}
+	if err := func() error {
+		if testUser != "" {
+			return nil
+		}
+		return auth.Authorize(api, g.store, r)
+	}(); err != nil {
 		if g.metrics != nil {
 			g.metrics.IncAuthFailure()
 		}
@@ -132,6 +162,27 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := g.billingUser(r, testUser)
+	charge, chargeErr := g.reserveCall(r, api, userID)
+	if chargeErr != nil {
+		status := http.StatusServiceUnavailable
+		message := "账户结算服务不可用"
+		if errors.Is(chargeErr, store.ErrFunds) {
+			status = 402
+			message = "账户可用余额不足"
+		}
+		if errors.Is(chargeErr, store.ErrPlanQuota) {
+			status = 429
+			message = "套餐调用额度已用完"
+		}
+		if errors.Is(chargeErr, auth.ErrForbidden) {
+			status = 403
+			message = "付费接口需要绑定用户的调用 KEY"
+		}
+		writeJSONError(capture, status, message)
+		return
+	}
+	defer func() { g.finishCall(r, api, charge, capture.status, started) }()
 	var output http.ResponseWriter = capture
 	var responseValidation *responseValidator
 	if !apiSchema.IsEmpty(api.ResponseSchema) {
@@ -148,7 +199,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer release()
-		if err := handler.Handle(r.Context(), output, r, api); err != nil {
+		if err := g.handlePlugin(output, r, api, handler); err != nil {
 			if g.metrics != nil {
 				g.metrics.IncPluginFailure()
 			}
@@ -554,6 +605,9 @@ func matchPath(pattern, actual string) bool {
 }
 
 func clientIdentity(r *http.Request) string {
+	if actor, ok := r.Context().Value(testActorKey{}).(string); ok {
+		return "test:" + auth.HashAPIKey(actor)
+	}
 	value := r.Header.Get("X-API-Key")
 	if value == "" {
 		value = auth.ExtractAPIKey(r.Header.Get("Authorization"))
@@ -578,6 +632,7 @@ type captureWriter struct {
 func newCaptureWriter(w http.ResponseWriter) *captureWriter { return &captureWriter{ResponseWriter: w} }
 
 func (w *captureWriter) WriteHeader(status int) {
+	auth.StripSessionSetCookies(w.Header())
 	if w.wroteHeader {
 		return
 	}
@@ -660,3 +715,5 @@ func routeBefore(a, b, actual string) bool {
 }
 
 func (g *Gateway) SetAPIHostPolicy(allowed func(string) bool) { g.apiHostAllowed = allowed }
+
+func (g *Gateway) SetCacheEncryptionKey(key string) { g.cacheEncryptionKey = key }

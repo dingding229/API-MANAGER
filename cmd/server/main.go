@@ -16,7 +16,9 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 
+	"api-manager/internal/account"
 	"api-manager/internal/api"
+	"api-manager/internal/apitest"
 	"api-manager/internal/catalog"
 	"api-manager/internal/config"
 	"api-manager/internal/gateway"
@@ -155,8 +157,51 @@ func main() {
 	admin.SetSiteSettings(siteService)
 	authHandler := user.NewHTTP(userService)
 	authHandler.SetProductionMode(cfg.ProductionMode)
+	accounts := account.New(activeStore, userService, cfg.CredentialEncryptionKey, siteService, cfg.ProductionMode)
+	accounts.SetLimiter(limiter)
+	accounts.SetAdminPath(cfg.AdminPath)
+	if _, ok := activeStore.(store.AccountStore); ok {
+		authHandler.SetAccountHandler(accounts)
+		authHandler.SetCriticalGuard(accounts.Guard)
+		authHandler.SetResetGuard(accounts.ResetGuard)
+	}
 	gatewayHandler := gateway.NewWithMetrics(activeStore, plugins, limiter, logger, metrics)
 	gatewayHandler.SetUpstreamCredentials(upstreamCredentials)
+	gatewayHandler.SetCacheEncryptionKey(cfg.CredentialEncryptionKey)
+	if recon, ok := activeStore.(interface{ ReconcileCharges(context.Context) error }); ok {
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-rootCtx.Done():
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(rootCtx, 5*time.Second)
+					if err := recon.ReconcileCharges(ctx); err != nil {
+						logger.Error("billing reconciliation unavailable")
+					}
+					cancel()
+				}
+			}
+		}()
+	}
+	if cached, ok := activeStore.(store.PluginCacheStore); ok {
+		go func() {
+			ticker := time.NewTicker(15 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-rootCtx.Done():
+					return
+				case <-ticker.C:
+					ctx, cancel := context.WithTimeout(rootCtx, 2*time.Second)
+					_ = cached.PrunePluginCache(ctx, time.Now().UTC(), 1000)
+					cancel()
+				}
+			}
+		}()
+	}
 	gatewayHandler.SetProductionMode(cfg.ProductionMode)
 	gatewayHandler.SetAPIHostPolicy(siteService.AllowsAPIHost)
 
@@ -177,9 +222,13 @@ func main() {
 	mux := http.NewServeMux()
 	web.MountAdministrationWithSite(mux, cfg.AdminPath, admin, authHandler, siteService.Public)
 	mux.Handle("/api/", gatewayHandler)
+	tests := apitest.New(activeStore, userService, gatewayHandler, limiter, siteService.Public)
+	mux.Handle("/test/v1/prepare", tests)
+	mux.Handle("/test/v1/invoke", tests)
 	publicExport := catalog.New(activeStore, cfg.PublicAPIBaseURL)
 	publicExport.SetSiteProvider(siteService.Public)
 	mux.Handle("/public/v1/site", siteService)
+	mux.Handle("/account/v1/", accounts)
 	mux.Handle("/public/v1/catalog", publicExport)
 	publicHandler, err := publicweb.New(cfg.PublicUIDir, publicExport)
 	if err != nil {
@@ -213,6 +262,7 @@ func main() {
 	handler = httpx.SecurityHeaders(handler)
 	handler = httpx.Recover(logger, handler)
 	handler = httpx.CachePolicy(handler)
+	handler = httpx.ClientIdentity(cfg.TrustedProxyCIDRs, handler)
 	handler = httpx.RequestID(handler)
 	handler = observability.Middleware(handler)
 

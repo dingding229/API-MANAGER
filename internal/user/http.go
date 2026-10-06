@@ -12,22 +12,29 @@ import (
 )
 
 type HTTP struct {
-	service    *Service
-	production bool
+	resetGuard     func(*http.Request, string, string) (int64, error)
+	service        *Service
+	production     bool
+	accountHandler http.Handler
+	criticalGuard  func(*http.Request, string, string) error
 }
 
-func (h *HTTP) SetProductionMode(value bool) { h.production = value }
+func (h *HTTP) SetAccountHandler(handler http.Handler) { h.accountHandler = handler }
+func (h *HTTP) SetProductionMode(value bool)           { h.production = value }
 
-func NewHTTP(service *Service) *HTTP { return &HTTP{service: service} }
-func sessionToken(r *http.Request) string {
-	if len(r.Header.Values("Authorization")) != 1 || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") || r.Header.Get("X-API-Key") != "" {
-		return ""
-	}
-	return auth.ExtractAPIKey(r.Header.Get("Authorization"))
-}
+func NewHTTP(service *Service) *HTTP      { return &HTTP{service: service} }
+func sessionToken(r *http.Request) string { token, _ := auth.SessionToken(r); return token }
 func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.accountHandler != nil && (r.URL.Path == "/auth/v1/login" || r.URL.Path == "/test/v1/login" || strings.HasPrefix(r.URL.Path, "/account/v1/")) {
+		h.accountHandler.ServeHTTP(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/test/v1/") {
 		h.testing(w, r)
+		return
+	}
+	if _, cookieAuth := auth.SessionToken(r); cookieAuth && auth.UnsafeMethod(r.Method) && !auth.CookieMutationAllowed(r) && r.URL.Path != "/auth/v1/login" {
+		writeJSON(w, 403, map[string]string{"error": "请在本站重新提交操作。"})
 		return
 	}
 	switch {
@@ -69,7 +76,26 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.forgotPassword(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/reset-password":
 		h.resetPassword(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/session":
+		if len(r.Header.Values("Authorization")) != 1 {
+			writeJSON(w, 401, map[string]string{"error": "invalid credentials"})
+			return
+		}
+		if _, err := h.service.ValidateSession(sessionToken(r)); err != nil {
+			writeJSON(w, 401, map[string]string{"error": "invalid credentials"})
+			return
+		}
+		if r.Header.Get("Origin") != "" && !auth.CookieMutationAllowed(r) {
+			writeJSON(w, 403, map[string]string{"error": "请在本站重新登录。"})
+			return
+		}
+		setTestingCookie(w, r, sessionToken(r), h.production)
+		w.WriteHeader(204)
 	case r.Method == http.MethodPost && r.URL.Path == "/auth/v1/login":
+		if r.Header.Get("Origin") != "" && !auth.CookieMutationAllowed(r) {
+			writeJSON(w, 403, map[string]string{"error": "请在本站登录。"})
+			return
+		}
 		var request model.LoginRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 		decoder.DisallowUnknownFields()
@@ -81,7 +107,7 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if username == "" {
 			username = request.Email
 		}
-		user, token, err := h.service.Authenticate(username, request.Password)
+		user, token, err := h.service.AuthenticateRequest(username, request.Password, r)
 		if err != nil {
 			status := http.StatusServiceUnavailable
 			message := "authentication unavailable"
@@ -93,15 +119,23 @@ func (h *HTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, status, map[string]string{"error": message})
 			return
 		}
+		if previous := sessionToken(r); previous != "" && previous != token {
+			_ = h.service.Logout(previous)
+		}
 		h.service.RecordAudit(audit.Actor{ID: user.ID, Type: "user", Email: user.Username}, r, "auth.login", "user", user.ID, 200, nil)
 		setTestingCookie(w, r, token, h.production)
-		writeJSON(w, 200, map[string]any{"token": token, "user": user, "permissions": h.service.store.GetUserPermissions(user.ID)})
+		if r.Header.Get("X-API-Request") == "1" {
+			writeJSON(w, 200, map[string]any{"user": user, "permissions": h.service.store.GetUserPermissions(user.ID)})
+		} else {
+			writeJSON(w, 200, map[string]any{"token": token, "user": user, "permissions": h.service.store.GetUserPermissions(user.ID)})
+		}
 	case r.Method == http.MethodGet && r.URL.Path == "/auth/v1/me":
 		user, err := h.service.ValidateSession(sessionToken(r))
 		if err != nil {
 			writeJSON(w, 401, map[string]string{"error": "invalid credentials"})
 			return
 		}
+		h.service.TouchSession(sessionToken(r), r)
 		writeJSON(w, 200, h.service.Profile(user))
 	case r.Method == http.MethodPut && r.URL.Path == "/auth/v1/me":
 		h.updateOwnProfile(w, r)
@@ -127,4 +161,12 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (h *HTTP) SetCriticalGuard(guard func(*http.Request, string, string) error) {
+	h.criticalGuard = guard
+}
+
+func (h *HTTP) SetResetGuard(guard func(*http.Request, string, string) (int64, error)) {
+	h.resetGuard = guard
 }

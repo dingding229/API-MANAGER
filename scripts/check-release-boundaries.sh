@@ -14,7 +14,7 @@ unexpected=''
 for path in $(git ls-files --cached --others --exclude-standard); do
   [ -e "$path" ] || continue
   case "$path" in
-    .dockerignore|.env.example|.gitignore|Dockerfile|Dockerfile.release|Makefile|README.md|go.mod|go.sum|\
+    .dockerignore|.env.example|.gitignore|Dockerfile|Dockerfile.release|Makefile|README.md|PLUGIN_DEVELOPMENT.md|go.mod|go.sum|\
     docker-compose.yml|\
     .github/dependabot.yml|.github/workflows/ci.yml|\
     cmd/server/*|internal/*|configs/*|public-ui/*|deploy/helm/api-manager/*|\
@@ -40,5 +40,5 @@ fixture_refs=$(grep -RIlE 'game[-_ ]discount|gmae[-_ ]discount|wasm-demo|region=
   --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next --exclude='check-release-boundaries.sh' 2>/dev/null || true)
 [ -z "$fixture_refs" ] || fail "test integration references remain:\n$fixture_refs"
 
-markdown_files=$(find . \( -path './.git' -o -name node_modules -o -name .next \) -prune -o -type f -name '*.md' ! -path './README.md' -print)
-[ -z "$markdown_files" ] || fail "only the deployment README may remain:\n$markdown_files"
+markdown_files=$(find . \( -path './.git' -o -name node_modules -o -name .next \) -prune -o -type f -name '*.md' ! -path './README.md' ! -path './PLUGIN_DEVELOPMENT.md' -print)
+[ -z "$markdown_files" ] || fail "only the operational README and plugin development specification may remain:\n$markdown_files"

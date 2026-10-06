@@ -2,6 +2,7 @@ package user
 
 import (
 	"api-manager/internal/auth"
+	"api-manager/internal/httpx"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -45,11 +46,13 @@ type Store interface {
 }
 
 type Service struct {
-	bootstrapHash string
-	store         Store
-	ttl           time.Duration
-	recovery      *recovery
-	recoveryMu    sync.RWMutex
+	profileRequestGuard func(*http.Request, string, string) error
+	profileGuard        func(string, string, model.UpdateUserProfileRequest) error
+	bootstrapHash       string
+	store               Store
+	ttl                 time.Duration
+	recovery            *recovery
+	recoveryMu          sync.RWMutex
 }
 type sessionStore interface {
 	CreateSession(model.Session) error
@@ -91,6 +94,33 @@ func (s *Service) CreateWithRoles(username, password string, roles []string) (mo
 	return s.CreateWithContact(username, "", password, roles)
 }
 func (s *Service) CreateWithContact(username, email, password string, roles []string) (model.User, error) {
+	u, err := s.PrepareUser(username, email, password, roles)
+	if err != nil {
+		return u, err
+	}
+	return u, s.store.CreateUser(u)
+}
+func (s *Service) CreateVerifiedUser(username, email, nickname, password string, roles []string, identity *model.Identity) (model.User, error) {
+	u, err := s.PrepareUser(username, email, password, roles)
+	if err != nil {
+		return u, err
+	}
+	u.EmailVerified = true
+	if nickname != "" {
+		u.Nickname = nickname
+	}
+	if identity != nil {
+		creator, ok := s.store.(interface {
+			CreateIdentityUser(model.User, *model.Identity) error
+		})
+		if !ok {
+			return u, errors.New("identity storage unavailable")
+		}
+		return u, creator.CreateIdentityUser(u, identity)
+	}
+	return u, s.store.CreateUser(u)
+}
+func (s *Service) PrepareUser(username, email, password string, roles []string) (model.User, error) {
 	username, email = normalizeUsername(username), normalizeEmail(email)
 	if !validUsername(username) || (email != "" && !validEmail(email)) || !validPassword(password) {
 		return model.User{}, errors.New("valid username, optional email and password with 8 to 72 bytes are required")
@@ -109,10 +139,8 @@ func (s *Service) CreateWithContact(username, email, password string, roles []st
 		return model.User{}, fmt.Errorf("hash password: %w", err)
 	}
 	now := time.Now().UTC()
-	u := model.User{ID: ids.NewUUID(), Username: username, Email: email, PasswordHash: string(hash), Role: roles[0], Roles: roles, Status: "active", CreatedAt: now, UpdatedAt: now}
-	if err = s.store.CreateUser(u); err != nil {
-		return model.User{}, err
-	}
+	uid := ids.NewUUID()
+	u := model.User{UID: uid, ID: uid, Nickname: username, Username: username, Email: email, PasswordHash: string(hash), Role: roles[0], Roles: roles, Status: "active", CreatedAt: now, UpdatedAt: now}
 	return u, nil
 }
 
@@ -126,7 +154,18 @@ func (s *Service) Can(userID, permission string) bool {
 }
 
 func (s *Service) Profile(user model.User) map[string]any {
-	return map[string]any{"user": user, "permissions": s.store.GetUserPermissions(user.ID)}
+	names := map[string]string{}
+	for _, r := range s.store.ListRoles() {
+		names[r.Name] = r.DisplayName
+		if names[r.Name] == "" {
+			names[r.Name] = r.Name
+		}
+	}
+	permissions := map[string]string{}
+	for _, p := range s.store.ListPermissions() {
+		permissions[p.Code] = p.Description
+	}
+	return map[string]any{"user": user, "permissions": s.store.GetUserPermissions(user.ID), "level_names": names, "permission_names": permissions}
 }
 
 func (s *Service) ListUsers() []model.User                 { return s.store.ListUsers() }
@@ -231,6 +270,9 @@ func (s *Service) EnsureInitialAdmin(username, password string) error {
 }
 
 func (s *Service) Authenticate(username, password string) (model.User, string, error) {
+	return s.authenticate(username, password, nil)
+}
+func (s *Service) authenticate(username, password string, r *http.Request) (model.User, string, error) {
 	user, lookupErr := s.store.GetUserByUsername(strings.ToLower(strings.TrimSpace(username)))
 	hash := []byte(user.PasswordHash)
 	if lookupErr != nil || len(hash) == 0 {
@@ -240,6 +282,20 @@ func (s *Service) Authenticate(username, password string) (model.User, string, e
 	if lookupErr != nil || user.Status != "active" || passwordErr != nil {
 		return model.User{}, "", ErrInvalidCredentials
 	}
+	return s.StartSession(user, r)
+}
+func (s *Service) VerifyPassword(username, password string) (model.User, error) {
+	user, lookupErr := s.store.GetUserByUsername(strings.ToLower(strings.TrimSpace(username)))
+	hash := []byte(user.PasswordHash)
+	if lookupErr != nil || len(hash) == 0 {
+		hash = dummyPasswordHash
+	}
+	if bcrypt.CompareHashAndPassword(hash, []byte(password)) != nil || lookupErr != nil || user.Status != "active" {
+		return model.User{}, ErrInvalidCredentials
+	}
+	return user, nil
+}
+func (s *Service) StartSession(user model.User, r *http.Request) (model.User, string, error) {
 	sessions, ok := s.store.(sessionStore)
 	if !ok {
 		return model.User{}, "", errors.New("session storage unavailable")
@@ -249,7 +305,14 @@ func (s *Service) Authenticate(username, password string) (model.User, string, e
 		return model.User{}, "", err
 	}
 	token := "us_" + hex.EncodeToString(random)
-	if err := sessions.CreateSession(model.Session{Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedUsername: user.Username, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
+	created := time.Now().UTC()
+	info := httpx.ClientInfo{Source: "unknown"}
+	agent := ""
+	if r != nil {
+		info = httpx.Client(r)
+		agent = cleanAgent(r.UserAgent())
+	}
+	if err := sessions.CreateSession(model.Session{ID: ids.NewUUID(), CreatedAt: created, LastSeenAt: created, LoginIP: info.IP, LastIP: info.IP, PeerIP: info.PeerIP, IPSource: info.Source, UserAgent: agent, Device: deviceLabel(agent), Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedEmail: user.Email, AuthRevision: user.AuthRevision, AuthenticatedUsername: user.Username, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return model.User{}, "", ErrInvalidCredentials
 		}
@@ -281,4 +344,18 @@ func (s *Service) Logout(token string) error {
 		return errors.New("session storage unavailable")
 	}
 	return sessions.DeleteSession(auth.HashAPIKey(token))
+}
+
+func (s *Service) SetProfileGuard(guard func(string, string, model.UpdateUserProfileRequest) error) {
+	s.profileGuard = guard
+}
+
+func (s *Service) SetProfileRequestGuard(g func(*http.Request, string, string) error) {
+	s.profileRequestGuard = g
+}
+func (s *Service) VerifyProfileRequest(r *http.Request, token string) error {
+	if s.profileRequestGuard != nil {
+		return s.profileRequestGuard(r, "sensitive", token)
+	}
+	return nil
 }

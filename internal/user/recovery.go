@@ -15,6 +15,7 @@ import (
 
 	"api-manager/internal/audit"
 	"api-manager/internal/auth"
+	"api-manager/internal/httpx"
 	"api-manager/internal/model"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -145,15 +146,22 @@ func (h *HTTP) forgotPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "email recovery is not configured", "code": "recovery_unavailable"})
 		return
 	}
-	if !rec.allow(r.RemoteAddr) {
+	if !rec.allow(httpx.Client(r).IP) {
 		writeJSON(w, 429, map[string]string{"error": "too many recovery requests"})
 		return
 	}
 	var req struct {
-		Email string `json:"email"`
+		Email          string `json:"email"`
+		TurnstileToken string `json:"turnstile_token,omitempty"`
 	}
 	if !decodeRecovery(w, r, &req) {
 		return
+	}
+	if h.criticalGuard != nil {
+		if err := h.criticalGuard(r, "forgot_password", req.TurnstileToken); err != nil {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	email := normalizeEmail(req.Email)
 	if !validEmail(email) {
@@ -172,28 +180,51 @@ func (h *HTTP) resetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "email recovery is not configured"})
 		return
 	}
-	if !rec.allow(r.RemoteAddr) {
+	if !rec.allow(httpx.Client(r).IP) {
 		writeJSON(w, 429, map[string]string{"error": "too many recovery requests"})
 		return
 	}
 	var req struct {
-		Token    string `json:"token"`
-		Password string `json:"password"`
+		Token          string `json:"token"`
+		TOTPCode       string `json:"totp_code,omitempty"`
+		Password       string `json:"password"`
+		TurnstileToken string `json:"turnstile_token,omitempty"`
 	}
 	if !decodeRecovery(w, r, &req) {
 		return
+	}
+	if h.criticalGuard != nil {
+		if err := h.criticalGuard(r, "reset_password", req.TurnstileToken); err != nil {
+			writeJSON(w, 403, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	raw, err := hex.DecodeString(req.Token)
 	if err != nil || len(raw) != 32 || len(req.Token) != 64 || !validPassword(req.Password) {
 		writeJSON(w, 400, map[string]string{"error": "invalid reset token or password", "code": "invalid_reset"})
 		return
 	}
+	revision := int64(-1)
+	if h.resetGuard != nil {
+		revision, err = h.resetGuard(r, auth.HashAPIKey(req.Token), req.TOTPCode)
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"error": "重置链接或双重验证无效", "code": "invalid_reset"})
+			return
+		}
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), passwordHashCost)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "reset unavailable"})
 		return
 	}
-	id, err := h.service.store.(recoveryStore).CompletePasswordReset(auth.HashAPIKey(req.Token), string(hash))
+	var id string
+	if checked, ok := h.service.store.(interface {
+		CompletePasswordResetVerified(string, string, int64) (string, error)
+	}); ok && revision >= 0 {
+		id, err = checked.CompletePasswordResetVerified(auth.HashAPIKey(req.Token), string(hash), revision)
+	} else {
+		id, err = h.service.store.(recoveryStore).CompletePasswordReset(auth.HashAPIKey(req.Token), string(hash))
+	}
 	if err != nil {
 		writeJSON(w, 400, map[string]string{"error": "reset link is invalid or expired", "code": "invalid_reset"})
 		return

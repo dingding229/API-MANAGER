@@ -290,3 +290,12 @@ func validWebsiteOrigin(raw string) bool {
 	_, ok := canonicalAuthority(u.Host, u.Scheme)
 	return ok
 }
+
+func (s *Service) SendCode(ctx context.Context, to, code, purpose string) error {
+	snap := s.current.Load()
+	if snap.mailer == nil {
+		return errors.New("email service not configured")
+	}
+	return snap.mailer.SendVerification(ctx, to, code, purpose)
+}
+func (s *Service) MailAvailable() bool { return s.current.Load().mailer != nil }

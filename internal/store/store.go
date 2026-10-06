@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"api-manager/internal/model"
 )
@@ -62,4 +63,13 @@ type HealthStore interface {
 type PluginDataStore interface {
 	PutPluginData(model.PluginData) error
 	GetPluginData(pluginName, namespace, key string) (model.PluginData, error)
+}
+
+// PluginCacheStore is used by the trusted gateway, never exposed to WASM.
+type PluginCacheStore interface {
+	GetPluginCache(context.Context, string, string, time.Time) (model.PluginCacheEntry, error)
+	PutPluginCache(context.Context, model.PluginCacheEntry, int) error
+	ClearPluginCache(context.Context, string) error
+	PluginCacheStats(context.Context, string, time.Time) (model.PluginCacheStats, error)
+	PrunePluginCache(context.Context, time.Time, int) error
 }

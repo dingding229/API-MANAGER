@@ -39,12 +39,12 @@ func TestConsoleNavigationContainsOnlyApplicationFeatures(t *testing.T) {
 	w := httptest.NewRecorder()
 	Console().ServeHTTP(w, httptest.NewRequest("GET", "/admin/", nil))
 	html := w.Body.String()
-	for _, name := range []string{"总览", "接口管理", "调用凭证", "用户管理", "角色与权限", "插件", "运行观测", "审计日志", "网站设置"} {
+	for _, name := range []string{"总览", "接口管理", "调用凭证", "用户管理", "角色与权限", "插件", "运行观测", "审计日志", "登录会话", "网站设置", "会员与计费", "注册与登录"} {
 		if !strings.Contains(html, name) {
 			t.Fatalf("missing navigation %s", name)
 		}
 	}
-	if strings.Count(html, "data-page=") != 9 {
+	if strings.Count(html, "data-page=") != 12 {
 		t.Fatal("unexpected extra navigation entry")
 	}
 }

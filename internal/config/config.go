@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 )
 
 type Config struct {
+	TrustedProxyCIDRs                                                              []netip.Prefix
 	GitHubUpdateToken                                                              string
 	UpstreamCredentials                                                            string
 	HTTPAddr                                                                       string
@@ -56,6 +58,16 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	var trustedProxies []netip.Prefix
+	if raw := env("TRUSTED_PROXY_CIDRS", ""); raw != "" {
+		for _, value := range strings.Split(raw, ",") {
+			p, err := netip.ParsePrefix(strings.TrimSpace(value))
+			if err != nil || p.Bits() == 0 {
+				return Config{}, errors.New("TRUSTED_PROXY_CIDRS requires explicit non-wildcard CIDRs")
+			}
+			trustedProxies = append(trustedProxies, p)
+		}
+	}
 	secrets := make(map[string]string)
 	for _, name := range []string{"ADMIN_BOOTSTRAP_KEY", "CREDENTIAL_ENCRYPTION_KEY", "POSTGRES_DSN", "POSTGRES_PASSWORD", "REDIS_PASSWORD", "API_UPSTREAM_CREDENTIALS", "METRICS_TOKEN", "SMTP_PASSWORD", "GITHUB_UPDATE_TOKEN"} {
 		value, err := secret(name)
@@ -149,6 +161,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
+		TrustedProxyCIDRs:   trustedProxies,
 		GitHubUpdateToken:   secrets["GITHUB_UPDATE_TOKEN"],
 		UpstreamCredentials: secrets["API_UPSTREAM_CREDENTIALS"],
 		HTTPAddr:            env("HTTP_ADDR", ":8080"),

@@ -31,6 +31,8 @@ type Memory struct {
 	userRoles     map[string][]string
 	plugins       map[string]model.Plugin
 	pluginData    map[string]model.PluginData
+	pluginCache   map[string]model.PluginCacheEntry
+	testTickets   map[string]model.APITestTicket
 	auditLogs     []model.AuditLog
 	nextAuditID   int64
 }
@@ -139,6 +141,11 @@ func (m *Memory) DeleteAPI(id string) error {
 		return ErrNotFound
 	}
 	delete(m.apis, id)
+	for key, e := range m.pluginCache {
+		if e.APIID == id {
+			delete(m.pluginCache, key)
+		}
+	}
 	return nil
 }
 
@@ -212,6 +219,10 @@ func (m *Memory) FindCredentialByHash(hash string) (model.Credential, bool) {
 }
 
 func (m *Memory) CreateUser(user model.User) error {
+	user.UID = user.ID
+	if user.Nickname == "" {
+		user.Nickname = user.Username
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, existing := range m.users {

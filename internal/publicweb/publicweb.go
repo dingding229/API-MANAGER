@@ -52,7 +52,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			connect += " " + u.Scheme + "://" + u.Host
 		}
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src "+connect+"; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; connect-src "+connect+" https://challenges.cloudflare.com; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path == "/catalog.json" {
 		if r.Method != http.MethodGet {
@@ -69,7 +69,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/")
-	if r.URL.Path == "/" {
+	if r.URL.Path == "/account" || r.URL.Path == "/account/" {
+		name = "account.html"
+	} else if r.URL.Path == "/" {
 		name = "index.html"
 	} else if !strings.HasPrefix(name, "_next/static/") || !fs.ValidPath(name) || strings.ContainsAny(name, "\\\x00") {
 		http.NotFound(w, r)
@@ -86,7 +88,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if name != "index.html" {
+	if name != "index.html" && name != "account.html" {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	if name == "index.html" && h.siteProvider != nil {

@@ -28,6 +28,7 @@ func validPassword(value string) bool { return len(value) >= 8 && len(value) <= 
 // UpdateProfile separates self-service reauthentication from delegated user management.
 // Credential changes and revocation of all target sessions are a single storage operation.
 func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUserProfileRequest) (model.User, bool, error) {
+
 	actor, err := s.store.GetUserByID(actorID)
 	if err != nil || actor.Status != "active" {
 		return model.User{}, false, ErrProfileForbidden
@@ -60,6 +61,11 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 			return model.User{}, false, fmt.Errorf("%w: a valid email address is required", ErrInvalidProfile)
 		}
 	}
+	if s.profileGuard != nil {
+		if err := s.profileGuard(actorID, userID, request); err != nil {
+			return model.User{}, false, err
+		}
+	}
 	passwordHash := target.PasswordHash
 	if request.Password != nil {
 		if !validPassword(*request.Password) {
@@ -71,7 +77,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 		}
 		passwordHash = string(hash)
 	}
-	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{Username: username, Email: email, ExpectedEmail: target.Email, PasswordHash: passwordHash, ExpectedUsername: target.Username, ExpectedPasswordHash: target.PasswordHash})
+	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{ExpectedAuthRevision: target.AuthRevision, Username: username, Email: email, ExpectedEmail: target.Email, PasswordHash: passwordHash, ExpectedUsername: target.Username, ExpectedPasswordHash: target.PasswordHash, EmailVerified: request.Email != nil && s.profileGuard != nil})
 }
 
 func (s *Service) canEditProfile(actorID string, target model.User) bool {

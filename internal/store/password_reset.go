@@ -96,6 +96,9 @@ func (p *Postgres) DeletePasswordReset(hash string) error {
 	return err
 }
 func (p *Postgres) CompletePasswordReset(hash, newHash string) (string, error) {
+	return p.CompletePasswordResetVerified(hash, newHash, -1)
+}
+func (p *Postgres) CompletePasswordResetVerified(hash, newHash string, expectedRevision int64) (string, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	tx, err := p.pool.Begin(ctx)
@@ -113,9 +116,19 @@ func (p *Postgres) CompletePasswordReset(hash, newHash string) (string, error) {
 		return "", err
 	}
 	var name, email, password, status string
-	err = tx.QueryRow(ctx, `SELECT username,COALESCE(email,''),password_hash,status FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&name, &email, &password, &status)
+	var revision int64
+	err = tx.QueryRow(ctx, `SELECT username,COALESCE(email,''),password_hash,status,auth_revision FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&name, &email, &password, &status, &revision)
 	if err != nil {
 		return "", err
+	}
+	if expectedRevision >= 0 && expectedRevision != revision {
+		return "", ErrConflict
+	}
+	if expectedRevision < 0 {
+		var has bool
+		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_security WHERE user_id=$1 AND totp_secret<>'')`, id).Scan(&has); e != nil || has {
+			return "", ErrConflict
+		}
 	}
 	var r model.PasswordReset
 	err = tx.QueryRow(ctx, `SELECT username_snapshot,email_snapshot,password_hash_snapshot,expires_at FROM password_resets WHERE key_hash=$1 FOR UPDATE`, hash).Scan(&r.Username, &r.Email, &r.PasswordHash, &r.ExpiresAt)
@@ -128,7 +141,7 @@ func (p *Postgres) CompletePasswordReset(hash, newHash string) (string, error) {
 	if status != "active" || name != r.Username || email != r.Email || password != r.PasswordHash || !time.Now().Before(r.ExpiresAt) {
 		return "", ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `UPDATE users SET password_hash=$2,updated_at=NOW() WHERE id=$1`, id, newHash); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE users SET password_hash=$2,auth_revision=auth_revision+1,updated_at=NOW() WHERE id=$1`, id, newHash); err != nil {
 		return "", err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM password_resets WHERE user_id=$1`, id); err != nil {
