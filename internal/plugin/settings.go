@@ -95,6 +95,18 @@ func mergeSettings(old, patch map[string]any) map[string]any {
 		if child, ok := v.(map[string]any); ok {
 			prior, _ := old[k].(map[string]any)
 			out[k] = mergeSettings(prior, child)
+		} else if items, ok := v.([]any); ok {
+			prior, _ := old[k].([]any)
+			merged := make([]any, len(items))
+			for i, item := range items {
+				if child, ok := item.(map[string]any); ok && i < len(prior) {
+					base, _ := prior[i].(map[string]any)
+					merged[i] = mergeSettings(base, child)
+				} else {
+					merged[i] = item
+				}
+			}
+			out[k] = merged
 		} else {
 			out[k] = v
 		}
@@ -228,6 +240,9 @@ func validSettingsSchema(value any) bool {
 	switch v := value.(type) {
 	case map[string]any:
 		if v["writeOnly"] == true {
+			if v["type"] != "string" {
+				return false
+			}
 			if _, ok := v["default"]; ok {
 				return false
 			}

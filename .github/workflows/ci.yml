@@ -301,7 +301,7 @@ jobs:
           assert call('POST','/admin/v1/apis/'+route['id']+'/publish',session=session)[0]==200
           assert call('GET','/api/protected')[0]==401
           assert call('GET','/api/protected',session=session)[0]==401
-          status,credential=call('POST','/admin/v1/credentials',session=session,data={'name':'integration'})
+          status,credential=call('POST','/admin/v1/credentials',session=session,data={'name':'integration','current_password':password})
           assert status==201
           key=credential['api_key']
           assert call('GET','/api/protected',key=key)[0]==200
@@ -335,7 +335,7 @@ jobs:
           assert [a['methods'] for a in catalog['apis'] if a['path']=='/api/multi']==[['GET','POST','HEAD','OPTIONS']]
           status,audits=call('GET','/admin/v1/audit-logs',session=session)
           assert status==200 and audits['items']
-          assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',session=session)[0]==200
+          assert call('POST','/admin/v1/credentials/'+credential['credential']['id']+'/revoke',session=session,data={'current_password':password})[0]==200
           assert call('GET','/api/protected',key=key)[0]==401
           for item in (route,public):
               assert call('DELETE','/admin/v1/apis/'+item['id'],session=session)[0]==204

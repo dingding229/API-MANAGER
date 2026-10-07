@@ -38,3 +38,16 @@ func TestPluginSettingsRejectUnsafeSchemaAndRedactSecrets(t *testing.T) {
 		t.Fatal("revision did not change")
 	}
 }
+
+func TestRedactedArrayEditsPreserveOmittedSecrets(t *testing.T) {
+	old := map[string]any{"items": []any{map[string]any{"name": "one", "token": "secret"}}}
+	patch := map[string]any{"items": []any{map[string]any{"name": "edited"}}}
+	merged := mergeSettings(old, patch)
+	v := merged["items"].([]any)[0].(map[string]any)
+	if v["token"] != "secret" || v["name"] != "edited" {
+		t.Fatal("partial edit lost secrets")
+	}
+	if validSettingsSchema(map[string]any{"type": "boolean", "writeOnly": true}) {
+		t.Fatal("unsupported secret type accepted")
+	}
+}

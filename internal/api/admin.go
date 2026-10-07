@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"api-manager/internal/audit"
 	"api-manager/internal/auth"
@@ -128,6 +129,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if e = a.credentialGuard(r, step.CurrentPassword, step.TurnstileToken); e != nil {
 			writeJSON(w, 403, nil)
+			return
+		}
+		if e := a.auditor.RecordChecked(r.Context(), actor, r, "credential.manage.requested", "credential", r.URL.Path, 202, nil); e != nil {
+			writeJSON(w, 503, map[string]string{"error": "审计不可用，凭证未修改"})
 			return
 		}
 		r.Body = io.NopCloser(strings.NewReader(string(raw)))
@@ -544,7 +549,7 @@ func (a *Admin) createCredential(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if strings.TrimSpace(request.Name) == "" {
+	if strings.TrimSpace(request.Name) == "" || utf8.RuneCountInString(request.Name) > 64 || (request.ExpiresAt != nil && (!request.ExpiresAt.After(time.Now()) || request.ExpiresAt.After(time.Now().AddDate(5, 0, 0)))) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
@@ -559,12 +564,20 @@ func (a *Admin) createCredential(w http.ResponseWriter, r *http.Request) {
 	if owner == "" {
 		owner = actor.ID
 	}
-	if _, err := a.store.GetUserByID(owner); err != nil {
+	if target, err := a.store.GetUserByID(owner); err != nil || target.Status != "active" {
 		writeJSON(w, 400, map[string]string{"error": "凭据所属用户不存在"})
 		return
 	}
 	credential := model.Credential{OwnerUserID: owner, ID: newID("cred"), Name: request.Name, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encryptedKey, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
-	if err := a.store.CreateCredential(credential); err != nil {
+	var createErr error
+	if scoped, ok := a.store.(interface {
+		CreateOwnedCredential(context.Context, model.Credential) error
+	}); ok {
+		createErr = scoped.CreateOwnedCredential(r.Context(), credential)
+	} else {
+		createErr = a.store.CreateCredential(credential)
+	}
+	if err := createErr; err != nil {
 		writeStoreError(w, err)
 		return
 	}
