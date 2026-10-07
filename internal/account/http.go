@@ -21,6 +21,9 @@ import (
 )
 
 type payload struct {
+	TimeZone        *string    `json:"time_zone,omitempty"`
+	ReturnTo        string     `json:"return_to"`
+	AllowedIPRanges []string   `json:"allowed_ip_ranges"`
 	UserID          string     `json:"user_id,omitempty"`
 	Username        string     `json:"username"`
 	Email           string     `json:"email"`
@@ -64,7 +67,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "/account/v1/options" && r.Method == "GET" {
-		write(w, 200, map[string]any{"time_zone": s.siteInfo().TimeZone, "website_url": s.siteInfo().WebsiteURL, "admin_path": s.adminPath, "registration": cfg.RegistrationEnabled && s.mail.MailAvailable(), "email_login": cfg.EmailLoginEnabled && s.mail.MailAvailable(), "github": cfg.GitHubEnabled, "google": cfg.GoogleEnabled, "turnstile": cfg.TurnstileEnabled, "turnstile_site_key": cfg.TurnstileSiteKey})
+		write(w, 200, map[string]any{"time_zone": s.siteInfo().TimeZone, "website_url": s.siteInfo().WebsiteURL, "admin_path": s.adminPath, "registration": cfg.RegistrationEnabled && s.mail.MailAvailable(), "registration_enabled": cfg.RegistrationEnabled, "mail_available": s.mail.MailAvailable(), "allowed_email_domains": cfg.AllowedEmailDomains, "email_login": cfg.EmailLoginEnabled && s.mail.MailAvailable(), "github": cfg.GitHubEnabled, "google": cfg.GoogleEnabled, "telegram": cfg.TelegramEnabled, "turnstile": cfg.TurnstileEnabled, "turnstile_site_key": cfg.TurnstileSiteKey})
+		return
+	}
+	if strings.HasPrefix(path, "/account/v1/onboarding") {
+		s.onboarding(w, r, cfg)
 		return
 	}
 	if strings.HasPrefix(path, "/account/v1/oauth/") {
@@ -176,7 +183,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		roles := s.store.ListRoles()
-		write(w, 200, map[string]any{"user": u, "uid": u.ID, "nickname": a.Nickname, "email_verified": a.EmailVerified, "totp_enabled": a.TOTPSecret != "", "levels": roles, "permissions": s.users.Profile(u)["permissions"]})
+		write(w, 200, map[string]any{"user": u, "uid": u.ID, "nickname": a.Nickname, "email_verified": a.EmailVerified, "totp_enabled": a.TOTPSecret != "", "time_zone": func() string {
+			if a.TimeZone != "" {
+				return a.TimeZone
+			}
+			return s.siteInfo().TimeZone
+		}(), "personal_time_zone": a.TimeZone, "levels": roles, "permissions": s.store.GetUserPermissions(u.ID)})
 		return
 	}
 	if path == "/account/v1/basic" && r.Method == "PUT" {
@@ -188,7 +200,30 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, 400, map[string]string{"error": "昵称须为 1–64 个字符"})
 			return
 		}
-		if err = s.accounts.UpdateBasics(r.Context(), u.ID, strings.TrimSpace(req.Nickname)); err != nil {
+		if req.TimeZone != nil {
+			zone := *req.TimeZone
+			if len(zone) > 80 || zone == "Local" || strings.ContainsAny(zone, "\\\r\n\t ") {
+				write(w, 400, map[string]string{"error": "请选择有效时区"})
+				return
+			}
+			if zone != "" {
+				if _, e := model.NormalizeTimeZone(zone); e != nil {
+					write(w, 400, map[string]string{"error": "请选择有效时区"})
+					return
+				}
+			}
+			st, ok := s.store.(interface {
+				UpdatePersonalBasics(context.Context, string, string, string) error
+			})
+			if !ok {
+				write(w, 503, nil)
+				return
+			}
+			err = st.UpdatePersonalBasics(r.Context(), u.ID, strings.TrimSpace(req.Nickname), zone)
+		} else {
+			err = s.accounts.UpdateBasics(r.Context(), u.ID, strings.TrimSpace(req.Nickname))
+		}
+		if err != nil {
 			write(w, 503, map[string]string{"error": "资料暂不可保存"})
 			return
 		}
@@ -267,12 +302,21 @@ func (s *Service) sendCode(w http.ResponseWriter, r *http.Request, cfg model.Sec
 		write(w, 400, map[string]string{"error": "邮箱或邮件服务不可用"})
 		return
 	}
-	if err := s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, "email_code"); err != nil {
+	if err := func() error {
+		if req.Purpose == "verify-email" || req.Purpose == "change-email" {
+			return nil
+		}
+		return s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, "email_code")
+	}(); err != nil {
 		write(w, 403, map[string]string{"error": err.Error()})
 		return
 	}
 	if req.Purpose != "register" && req.Purpose != "email-login" && req.Purpose != "verify-email" && req.Purpose != "change-email" {
 		write(w, 400, map[string]string{"error": "验证码用途不正确"})
+		return
+	}
+	if req.Purpose == "register" && !emailDomainAllowed(cfg, req.Email) {
+		write(w, 400, map[string]string{"error": "邮箱后缀不在允许注册的范围内"})
 		return
 	}
 	if (req.Purpose == "register" && !cfg.RegistrationEnabled) || (req.Purpose == "email-login" && !cfg.EmailLoginEnabled) {
@@ -291,6 +335,18 @@ func (s *Service) sendCode(w http.ResponseWriter, r *http.Request, cfg model.Sec
 		u, e := s.users.ValidateSession(token)
 		if e != nil || u.Email != req.Email || !s.users.Can(u.ID, "account.profile") {
 			write(w, 403, map[string]string{"error": "只能验证自己的邮箱"})
+			return
+		}
+	}
+	if req.Purpose == "change-email" || req.Purpose == "verify-email" {
+		token, _ := auth.SessionToken(r)
+		u, e := s.users.ValidateSession(token)
+		if e != nil {
+			write(w, 401, nil)
+			return
+		}
+		if s.limiter != nil && !s.limiter.Allow("account-email-user:"+u.ID, 3, time.Hour, time.Now()) {
+			write(w, 429, map[string]string{"error": "验证码发送过于频繁"})
 			return
 		}
 	}
@@ -335,6 +391,10 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request, cfg model.Sec
 	}
 	var req payload
 	if !read(w, r, &req) {
+		return
+	}
+	if !emailDomainAllowed(cfg, req.Email) {
+		write(w, 400, map[string]string{"error": "邮箱后缀不在允许注册的范围内"})
 		return
 	}
 	if err := s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, "register"); err != nil {

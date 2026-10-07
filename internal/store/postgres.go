@@ -158,11 +158,11 @@ func (p *Postgres) CreateAPI(api model.API) error {
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO apis
-		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)`,
+		(id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros,owner_user_id)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)`,
 		api.ID, api.Name, api.Description, api.Method, api.Path, api.AuthMode, authConfig,
 		api.RateLimitPerMinute, api.DailyQuota, api.MonthlyQuota, api.ResponseStatus, api.ResponseBody, schemaDocument(api.RequestSchema), schemaDocument(api.ResponseSchema), schemaDocument(api.ParametersSchema),
-		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods(), cacheConfigDocument(api.PluginCache), api.PublicTestEnabled, api.PriceMicros)
+		api.Plugin, api.UpstreamURL, api.UpstreamPath, api.StripPath, api.UpstreamTimeoutMS, api.UpstreamRetries, api.CircuitThreshold, api.CircuitResetSecs, api.Enabled, api.PublishedAt, api.CreatedAt, api.UpdatedAt, api.UpstreamAuthRef, api.PublicVisible, api.PublicTitle, api.PublicSummary, api.PublicCategory, api.HTTPMethods(), cacheConfigDocument(api.PluginCache), api.PublicTestEnabled, api.PriceMicros, api.OwnerUserID)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -252,7 +252,7 @@ func (p *Postgres) updateAPI(ctx context.Context, tx pgx.Tx, api model.API) erro
 	return nil
 }
 
-const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros FROM apis`
+const apiSelect = `SELECT id,name,description,method,path,auth_mode,auth_config,rate_limit_per_minute,daily_quota,monthly_quota,response_status,response_body,request_schema,response_schema,parameters_schema,plugin_name,upstream_url,upstream_path,strip_path,upstream_timeout_ms,upstream_retries,circuit_breaker_threshold,circuit_breaker_reset_seconds,enabled,published_at,created_at,updated_at,upstream_auth_ref,public_visible,public_title,public_summary,public_category,methods,plugin_cache,public_test_enabled,price_micros,owner_user_id FROM apis`
 
 func scanAPI(row pgx.Row) (model.API, error) {
 	var api model.API
@@ -260,7 +260,7 @@ func scanAPI(row pgx.Row) (model.API, error) {
 	var pluginName string
 	if err := row.Scan(&api.ID, &api.Name, &api.Description, &api.Method, &api.Path, &api.AuthMode, &authConfig,
 		&api.RateLimitPerMinute, &api.DailyQuota, &api.MonthlyQuota, &api.ResponseStatus, &api.ResponseBody, &requestSchema, &responseSchema, &parametersSchema, &pluginName,
-		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory, &api.Methods, &pluginCache, &api.PublicTestEnabled, &api.PriceMicros); err != nil {
+		&api.UpstreamURL, &api.UpstreamPath, &api.StripPath, &api.UpstreamTimeoutMS, &api.UpstreamRetries, &api.CircuitThreshold, &api.CircuitResetSecs, &api.Enabled, &api.PublishedAt, &api.CreatedAt, &api.UpdatedAt, &api.UpstreamAuthRef, &api.PublicVisible, &api.PublicTitle, &api.PublicSummary, &api.PublicCategory, &api.Methods, &pluginCache, &api.PublicTestEnabled, &api.PriceMicros, &api.OwnerUserID); err != nil {
 		return model.API{}, err
 	}
 	if err := json.Unmarshal(pluginCache, &api.PluginCache); err != nil {
@@ -346,8 +346,8 @@ func (p *Postgres) DeleteAPI(id string) error {
 func (p *Postgres) CreateCredential(credential model.Credential) error {
 	ctx, cancel := dbContext()
 	defer cancel()
-	_, err := p.pool.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,revoked,expires_at,created_at,owner_user_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::uuid)`,
-		credential.ID, credential.Name, credential.Prefix, credential.Hash, credential.EncryptedKey, credential.Revoked, credential.ExpiresAt, credential.CreatedAt, credential.OwnerUserID)
+	_, err := p.pool.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,revoked,expires_at,created_at,owner_user_id,allowed_ip_ranges) VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULLIF($9,'')::uuid,$10)`,
+		credential.ID, credential.Name, credential.Prefix, credential.Hash, credential.EncryptedKey, credential.Revoked, credential.ExpiresAt, credential.CreatedAt, credential.OwnerUserID, ipRangesJSON(credential.AllowedIPRanges))
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") {
 			return ErrConflict
@@ -360,7 +360,7 @@ func (p *Postgres) CreateCredential(credential model.Credential) error {
 func (p *Postgres) UpdateCredential(credential model.Credential) error {
 	ctx, cancel := dbContext()
 	defer cancel()
-	result, err := p.pool.Exec(ctx, `UPDATE api_credentials SET name=$2,revoked=$3,expires_at=$4 WHERE id=$1`, credential.ID, credential.Name, credential.Revoked, credential.ExpiresAt)
+	result, err := p.pool.Exec(ctx, `UPDATE api_credentials SET name=$2,revoked=$3,expires_at=$4,allowed_ip_ranges=$5 WHERE id=$1`, credential.ID, credential.Name, credential.Revoked, credential.ExpiresAt, ipRangesJSON(credential.AllowedIPRanges))
 	if err != nil {
 		return fmt.Errorf("update credential: %w", err)
 	}
@@ -376,8 +376,8 @@ func (p *Postgres) RotateCredential(id, prefix, hash, encryptedKey string) (mode
 	defer cancel()
 	var credential model.Credential
 	err := p.pool.QueryRow(ctx, `UPDATE api_credentials SET prefix=$2,key_hash=$3,encrypted_key=$4 WHERE id=$1 AND revoked=FALSE
-		RETURNING id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'')`, id, prefix, hash, encryptedKey).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
+		RETURNING id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,''),allowed_ip_ranges`, id, prefix, hash, encryptedKey).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID, &credential.AllowedIPRanges)
 	if errors.Is(err, pgx.ErrNoRows) {
 		var revoked bool
 		if lookupErr := p.pool.QueryRow(ctx, `SELECT revoked FROM api_credentials WHERE id=$1`, id).Scan(&revoked); errors.Is(lookupErr, pgx.ErrNoRows) {
@@ -397,8 +397,8 @@ func (p *Postgres) GetCredential(id string) (model.Credential, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var credential model.Credential
-	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials WHERE id=$1`, id).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
+	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,''),allowed_ip_ranges FROM api_credentials WHERE id=$1`, id).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID, &credential.AllowedIPRanges)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Credential{}, ErrNotFound
 	}
@@ -409,7 +409,7 @@ func (p *Postgres) GetCredential(id string) (model.Credential, error) {
 func (p *Postgres) ListCredentials() []model.Credential {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials ORDER BY created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,''),allowed_ip_ranges FROM api_credentials ORDER BY created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -417,7 +417,7 @@ func (p *Postgres) ListCredentials() []model.Credential {
 	result := make([]model.Credential, 0)
 	for rows.Next() {
 		var credential model.Credential
-		if err := rows.Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID); err == nil {
+		if err := rows.Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID, &credential.AllowedIPRanges); err == nil {
 			credential.KeyAvailable = credential.EncryptedKey != ""
 			result = append(result, credential)
 		}
@@ -429,8 +429,8 @@ func (p *Postgres) FindCredentialByHash(hash string) (model.Credential, bool) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var credential model.Credential
-	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,encrypted_key,revoked,created_at,expires_at,COALESCE(owner_user_id::text,'') FROM api_credentials WHERE key_hash=$1`, hash).
-		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.EncryptedKey, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID)
+	err := p.pool.QueryRow(ctx, `SELECT id,name,prefix,key_hash,revoked,created_at,expires_at,COALESCE(owner_user_id::text,''),allowed_ip_ranges FROM api_credentials WHERE key_hash=$1`, hash).
+		Scan(&credential.ID, &credential.Name, &credential.Prefix, &credential.Hash, &credential.Revoked, &credential.CreatedAt, &credential.ExpiresAt, &credential.OwnerUserID, &credential.AllowedIPRanges)
 	return credential, err == nil
 }
 
@@ -521,7 +521,7 @@ func (p *Postgres) GetUserByEmail(email string) (model.User, error) {
 func (p *Postgres) ListUsers() []model.User {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT u.id,u.username,COALESCE(u.email,''),u.password_hash,u.role,u.status,u.created_at,u.updated_at,u.nickname,u.email_verified,u.auth_revision,ARRAY(SELECT r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY r.name) FROM users u ORDER BY u.created_at ASC`)
+	rows, err := p.pool.Query(ctx, `SELECT u.id,u.username,COALESCE(u.email,''),u.password_hash,u.role,u.status,u.created_at,u.updated_at,u.nickname,u.email_verified,u.auth_revision,ARRAY(SELECT r.name FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY r.name) FROM users u WHERE u.deleted_at IS NULL ORDER BY u.created_at ASC`)
 	if err != nil {
 		return nil
 	}
@@ -852,6 +852,10 @@ func (p *Postgres) AssignUserRoles(userID string, roles []string) error {
 	if err = protectLastAdmin(ctx, tx, userID, !containsSuperAdmin(roles)); err != nil {
 		return err
 	}
+	var deleted bool
+	if e := tx.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM users WHERE id=$1`, userID).Scan(&deleted); e != nil || deleted {
+		return ErrNotFound
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id=$1`, userID); err != nil {
 		return err
 	}
@@ -951,7 +955,7 @@ func (p *Postgres) UpdateUserStatus(id, status string) error {
 	if err = protectLastAdmin(ctx, tx, id, status == "disabled"); err != nil {
 		return err
 	}
-	result, err := tx.Exec(ctx, `UPDATE users SET status=$2,updated_at=NOW() WHERE id=$1`, id, status)
+	result, err := tx.Exec(ctx, `UPDATE users SET status=$2,updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL`, id, status)
 	if err != nil {
 		return err
 	}
@@ -1298,3 +1302,23 @@ func protectLastAdmin(ctx context.Context, tx pgx.Tx, id string, removing bool) 
 }
 
 func cacheConfigDocument(c model.PluginCacheConfig) []byte { data, _ := json.Marshal(c); return data }
+
+// Reduce database transfer and heap allocation for owner-scoped management lists.
+func (p *Postgres) ListOwnedAPIsChecked(owner string) ([]model.API, error) {
+	ctx, cancel := dbContext()
+	defer cancel()
+	rows, e := p.pool.Query(ctx, apiSelect+` WHERE owner_user_id=$1 ORDER BY created_at ASC`, owner)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	list := []model.API{}
+	for rows.Next() {
+		v, e := scanAPI(rows)
+		if e != nil {
+			return nil, e
+		}
+		list = append(list, v)
+	}
+	return list, rows.Err()
+}

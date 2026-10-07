@@ -71,8 +71,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
 	if r.URL.Path == "/account" || r.URL.Path == "/account/" {
 		name = "account.html"
+	} else if r.URL.Path == "/login" || r.URL.Path == "/login/" {
+		name = "login.html"
+	} else if r.URL.Path == "/complete-registration" || r.URL.Path == "/complete-registration/" {
+		name = "complete-registration.html"
+	} else if r.URL.Path == "/register" || r.URL.Path == "/register/" {
+		name = "register.html"
 	} else if r.URL.Path == "/playground" || r.URL.Path == "/playground/" {
 		name = "playground.html"
+	} else if r.URL.Path == "/guide" || r.URL.Path == "/guide/" {
+		name = "guide.html"
 	} else if r.URL.Path == "/docs" || r.URL.Path == "/docs/" {
 		name = "docs.html"
 	} else if r.URL.Path == "/" {
@@ -92,7 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if name != "index.html" && name != "account.html" && name != "playground.html" && name != "docs.html" {
+	if name != "index.html" && name != "account.html" && name != "playground.html" && name != "docs.html" && name != "guide.html" && name != "login.html" && name != "register.html" && name != "complete-registration.html" {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	if name == "index.html" && h.siteProvider != nil {

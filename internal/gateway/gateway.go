@@ -114,6 +114,7 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser
 		return
 	}
 
+	r = auth.ResolveRequestCredential(r, g.store)
 	userID := g.billingUser(r, testUser)
 	var charge model.Charge
 	defer func() { g.finishCall(r, api, charge, userID, capture.status, started) }()

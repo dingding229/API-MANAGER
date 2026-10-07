@@ -139,6 +139,10 @@ func main() {
 	admin := api.NewAdminWithUserManagementAndPluginManager(activeStore, plugins, userService, pluginManager, logger)
 	admin.SetVersionChecker(version.NewChecker(cfg.GitHubUpdateToken))
 	admin.SetCredentialEncryptionKey(cfg.CredentialEncryptionKey)
+	if err := admin.LoadVersionSettings(rootCtx); err != nil {
+		logger.Error("load version source settings failed")
+		os.Exit(1)
+	}
 	admin.SetProductionMode(cfg.ProductionMode)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)

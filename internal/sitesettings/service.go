@@ -2,6 +2,7 @@ package sitesettings
 
 import (
 	"api-manager/internal/auth"
+	"api-manager/internal/mailtemplates"
 	"api-manager/internal/model"
 	"api-manager/internal/store"
 	netsecurity "api-manager/internal/upstream/security"
@@ -79,7 +80,7 @@ func New(ctx context.Context, s Store, key string, defaults model.SiteSettings, 
 func (s *Service) View() model.SiteSettingsView {
 	snap := s.current.Load()
 	r := snap.record
-	return model.SiteSettingsView{Version: r.Version, Site: r.Settings.Site, SMTP: r.Settings.SMTP, SMTPPasswordSet: snap.password != "", RecoveryEnabled: snap.mailer != nil, UpdatedAt: r.UpdatedAt}
+	return model.SiteSettingsView{MailTemplates: r.Settings.MailTemplates, Version: r.Version, Site: r.Settings.Site, SMTP: r.Settings.SMTP, SMTPPasswordSet: snap.password != "", RecoveryEnabled: snap.mailer != nil, UpdatedAt: r.UpdatedAt}
 }
 func (s *Service) Public() model.PublicSiteInfo { return s.current.Load().record.Settings.Site }
 func (s *Service) Save(req model.UpdateSiteSettingsRequest) (model.SiteSettingsView, error) {
@@ -112,7 +113,12 @@ func (s *Service) Save(req model.UpdateSiteSettingsRequest) (model.SiteSettingsV
 	if req.Site.TimeZone == "" {
 		req.Site.TimeZone = model.DefaultTimeZone
 	}
-	record := model.SiteSettingsRecord{Settings: model.SiteSettings{Site: req.Site, SMTP: req.SMTP}, UpdatedAt: time.Now().UTC()}
+	templates := old.record.Settings.MailTemplates
+	if req.MailTemplates != nil {
+		templates = *req.MailTemplates
+	}
+	templates = mailtemplates.FillDefaults(templates)
+	record := model.SiteSettingsRecord{Settings: model.SiteSettings{MailTemplates: templates, Site: req.Site, SMTP: req.SMTP}, UpdatedAt: time.Now().UTC()}
 	prepared, err := s.prepare(record, password)
 	if err != nil {
 		return model.SiteSettingsView{}, err
@@ -151,7 +157,11 @@ func (s *Service) prepare(record model.SiteSettingsRecord, password string) (*sn
 	if record.Settings.Site.TimeZone == "" {
 		record.Settings.Site.TimeZone = model.DefaultTimeZone
 	}
+	record.Settings.MailTemplates = mailtemplates.FillDefaults(record.Settings.MailTemplates)
 	cfg := record.Settings
+	if e := mailtemplates.Validate(cfg.MailTemplates); e != nil {
+		return nil, ErrInvalid
+	}
 	if err := Validate(cfg, password); err != nil {
 		return nil, err
 	}
@@ -173,6 +183,9 @@ func (s *Service) prepare(record model.SiteSettingsRecord, password string) (*sn
 		// Same public-address pinning boundary as upstream proxies; never probe Redis,
 		// PostgreSQL, loopback, metadata services or a rebound private DNS address.
 		target := &url.URL{Scheme: "https", Host: net.JoinHostPort(cfg.SMTP.Host, strconv.Itoa(cfg.SMTP.Port))}
+		mailer.SiteName = cfg.Site.Name
+		mailer.SiteURL = cfg.Site.WebsiteURL
+		mailer.Templates = cfg.MailTemplates
 		mailer.DialContext = netsecurity.DialContext(nil, "", target)
 		snap.mailer = mailer
 	}

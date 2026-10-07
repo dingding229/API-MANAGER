@@ -33,15 +33,16 @@ type Mail interface {
 	MailAvailable() bool
 }
 type Service struct {
-	limiter    ratelimit.Limiter
-	store      store.Store
-	accounts   store.AccountStore
-	users      *user.Service
-	key        string
-	mail       Mail
-	production bool
-	client     *http.Client
-	adminPath  string
+	telegramCache telegramKeyCache
+	limiter       ratelimit.Limiter
+	store         store.Store
+	accounts      store.AccountStore
+	users         *user.Service
+	key           string
+	mail          Mail
+	production    bool
+	client        *http.Client
+	adminPath     string
 }
 
 func New(s store.Store, u *user.Service, key string, mail Mail, production bool) *Service {
@@ -66,13 +67,14 @@ func (s *Service) settings(ctx context.Context) (model.SecuritySettings, error) 
 		if e != nil {
 			return cfg, e
 		}
-		var secrets struct{ Turnstile, GitHub, Google string }
+		var secrets struct{ Turnstile, GitHub, Google, Telegram string }
 		if e = json.Unmarshal([]byte(raw), &secrets); e != nil {
 			return cfg, e
 		}
 		cfg.TurnstileSecret = secrets.Turnstile
 		cfg.GitHubSecret = secrets.GitHub
 		cfg.GoogleSecret = secrets.Google
+		cfg.TelegramSecret = secrets.Telegram
 	}
 	if provider, ok := s.mail.(interface{ Public() model.PublicSiteInfo }); ok {
 		if origin := provider.Public().WebsiteURL; origin != "" {
@@ -257,6 +259,9 @@ func auditActor(u model.User) audit.Actor {
 func (s *Service) SetLimiter(l ratelimit.Limiter) { s.limiter = l }
 
 func (s *Service) Guard(r *http.Request, action, token string) error {
+	if action == "sensitive" || action == "oauth" {
+		return nil
+	}
 	cfg, err := s.settings(r.Context())
 	if err != nil {
 		return err
@@ -297,13 +302,7 @@ func (s *Service) reauthenticate(r *http.Request, u model.User, req payload) err
 	return s.reauthenticateAction(r, u, req, "sensitive")
 }
 func (s *Service) reauthenticateAction(r *http.Request, u model.User, req payload, action string) error {
-	cfg, err := s.settings(r.Context())
-	if err != nil {
-		return err
-	}
-	if err = s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, action); err != nil {
-		return err
-	}
+	var err error
 	if _, err = s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
 		return err
 	}

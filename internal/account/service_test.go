@@ -580,3 +580,153 @@ func TestPostgresAuthenticationUsesWebsiteOriginAndTurnstileHostname(t *testing.
 		t.Fatal("domain change not propagated", err)
 	}
 }
+
+func TestPostgresIPPolicyRequiresOwnerAndPasswordAndPreservesRotation(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated database not configured")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, e := store.NewPostgres(context.Background(), dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	us := user.NewService(p)
+	u, e := us.Create("net-user-"+ids.NewUUID()[:8], "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, e := us.Create("net-other-"+ids.NewUUID()[:8], "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, token, _ := us.Authenticate(u.Username, "Password888")
+	_, otoken, _ := us.Authenticate(other.Username, "Password888")
+	key := model.Credential{ID: ids.NewUUID(), OwnerUserID: u.ID, Name: "network", Hash: auth.HashAPIKey("test-secret"), Prefix: "ak_test", CreatedAt: time.Now()}
+	if e = p.CreateOwnedCredential(context.Background(), key); e != nil {
+		t.Fatal(e)
+	}
+	s := New(p, us, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
+	call := func(session, password string, ranges []string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"confirm": true, "current_password": password, "allowed_ip_ranges": ranges})
+		r := httptest.NewRequest("PUT", "https://example.test/account/v1/keys/"+key.ID+"/ip-policy", strings.NewReader(string(body)))
+		r.Header.Set("Authorization", "Bearer "+session)
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-API-Request", "1")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := call(otoken, "Password888", []string{"8.8.8.8"}); w.Code != 404 {
+		t.Fatal("cross owner policy change", w.Code)
+	}
+	if w := call(token, "", []string{"8.8.8.8"}); w.Code != 403 {
+		t.Fatal("reauth omitted", w.Code)
+	}
+	if w := call(token, "Password888", []string{"bad"}); w.Code != 400 {
+		t.Fatal("invalid policy", w.Code)
+	}
+	if w := call(token, "Password888", []string{"8.8.8.8"}); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	updated, _ := p.GetCredential(key.ID)
+	if len(updated.AllowedIPRanges) != 1 || updated.AllowedIPRanges[0] != "8.8.8.8/32" {
+		t.Fatal(updated)
+	}
+	updated.Revoked = true
+	if e = p.UpdateCredential(updated); e != nil {
+		t.Fatal(e)
+	}
+	if w := call(token, "Password888", nil); w.Code != 400 {
+		t.Fatal("revoked credential policy changed", w.Code)
+	}
+}
+
+func TestPostgresPersonalTimeZonePersistsWithoutResettingUsage(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated database required")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, e := store.NewPostgres(context.Background(), dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	us := user.NewService(p)
+	u, e := us.Create("zone-user-"+ids.NewUUID()[:8], "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, token, _ := us.Authenticate(u.Username, "Password888")
+	s := New(p, us, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
+	ctx := context.Background()
+	plan := model.Plan{ID: ids.NewUUID(), Name: "zone-test", Days: 30, Hourly: 100, Daily: 1000, Monthly: 10000, Enabled: true}
+	if e = p.SavePlan(ctx, plan); e != nil {
+		t.Fatal(e)
+	}
+	sub, e := p.PurchasePlan(ctx, u.ID, plan.ID, ids.NewUUID())
+	if e != nil {
+		t.Fatal(e)
+	}
+	charge, e := p.BeginCharge(ctx, u.ID, "zone-api", 0, ids.NewUUID(), time.Now())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = p.FinishCharge(ctx, charge, true); e != nil {
+		t.Fatal(e)
+	}
+	before, _ := p.Usage(ctx, u.ID, time.Now())
+	call := func(method, body string) *httptest.ResponseRecorder {
+		path := "/account/v1/basic"
+		if method == "GET" {
+			path = "/account/v1/me"
+		}
+		r := httptest.NewRequest(method, "https://example.test"+path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-API-Request", "1")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("PUT", `{"nickname":"显示名称","time_zone":"America/New_York"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w := call("GET", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"personal_time_zone":"America/New_York"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	a, e := p.Account(ctx, u.ID)
+	if e != nil || a.TimeZone != "America/New_York" {
+		t.Fatal(a, e)
+	}
+	current, e := p.Subscription(ctx, u.ID)
+	if e != nil || current.ID != sub.ID || current.TimeZone != sub.TimeZone {
+		t.Fatal("billing changed", current, e)
+	}
+	after, _ := p.Usage(ctx, u.ID, time.Now())
+	for k, v := range before {
+		if after[k] != v {
+			t.Fatal("quota reset", before, after)
+		}
+	}
+	if _, e = us.ValidateSession(token); e != nil {
+		t.Fatal("display preference revoked session")
+	}
+	if w := call("PUT", `{"nickname":"显示名称","time_zone":"bad/zone"}`); w.Code != 400 {
+		t.Fatal("invalid timezone accepted", w.Code)
+	}
+	if w := call("PUT", `{"nickname":"显示名称","time_zone":""}`); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	a, _ = p.Account(ctx, u.ID)
+	if a.TimeZone != "" {
+		t.Fatal("default preference not restored")
+	}
+}

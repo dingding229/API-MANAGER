@@ -1,6 +1,7 @@
 package api
 
 import (
+	"api-manager/internal/mailtemplates"
 	"api-manager/internal/model"
 	"api-manager/internal/plugin"
 	"api-manager/internal/sitesettings"
@@ -74,5 +75,52 @@ func TestWebsiteSettingsSuperAdminOnly(t *testing.T) {
 	admin.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("tenant administrator can use mail endpoint")
+	}
+}
+
+func TestMailPreviewTokenIsSessionBoundSingleUseAndSandboxed(t *testing.T) {
+	m := store.NewMemory()
+	us := user.NewService(m)
+	if e := us.EnsureInitialAdmin("preview-admin", "Password888"); e != nil {
+		t.Fatal(e)
+	}
+	_, token, _ := us.Authenticate("preview-admin", "Password888")
+	a := NewAdminWithUserManagement(m, plugin.NewRegistry(), us, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service, e := sitesettings.New(context.Background(), m, "template-encryption-key-0123456789", sitesettings.Defaults(), "", us)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a.SetSiteSettings(service)
+	body, _ := json.Marshal(map[string]any{"template": mailtemplates.Defaults().Verification})
+	r := httptest.NewRequest("POST", "https://example.test/admin/v1/settings/email/preview", strings.NewReader(string(body)))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	a.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var result map[string]string
+	json.Unmarshal(w.Body.Bytes(), &result)
+	if !strings.HasPrefix(result["preview_url"], "/admin/v1/settings/email/preview/") {
+		t.Fatal(result)
+	}
+	get := func(authToken string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "https://example.test"+result["preview_url"], nil)
+		if authToken != "" {
+			r.Header.Set("Authorization", "Bearer "+authToken)
+		}
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, r)
+		return w
+	}
+	if w := get(""); w.Code != 401 {
+		t.Fatal("public mail preview", w.Code)
+	}
+	w = get(token)
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'none'") || w.Header().Get("X-Frame-Options") != "" {
+		t.Fatal(w.Code, w.Header())
+	}
+	if w := get(token); w.Code != 404 {
+		t.Fatal("preview replay", w.Code)
 	}
 }

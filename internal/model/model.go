@@ -6,6 +6,7 @@ import (
 )
 
 type API struct {
+	OwnerUserID        string            `json:"owner_user_id,omitempty"`
 	PriceMicros        int64             `json:"price_micros"`
 	PublicTestEnabled  bool              `json:"-"`
 	PublicVisible      bool              `json:"public_visible"`
@@ -91,22 +92,24 @@ type OpenAPIImportRequest struct {
 }
 
 type Credential struct {
-	OwnerUsername string     `json:"owner_username,omitempty"`
-	OwnerNickname string     `json:"owner_nickname,omitempty"`
-	OwnerEmail    string     `json:"owner_email,omitempty"`
-	OwnerUserID   string     `json:"owner_user_id,omitempty"`
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	Prefix        string     `json:"prefix"`
-	Hash          string     `json:"-"`
-	EncryptedKey  string     `json:"-"`
-	KeyAvailable  bool       `json:"api_key_available"`
-	Revoked       bool       `json:"revoked"`
-	CreatedAt     time.Time  `json:"created_at"`
-	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	AllowedIPRanges []string   `json:"allowed_ip_ranges"`
+	OwnerUsername   string     `json:"owner_username,omitempty"`
+	OwnerNickname   string     `json:"owner_nickname,omitempty"`
+	OwnerEmail      string     `json:"owner_email,omitempty"`
+	OwnerUserID     string     `json:"owner_user_id,omitempty"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Prefix          string     `json:"prefix"`
+	Hash            string     `json:"-"`
+	EncryptedKey    string     `json:"-"`
+	KeyAvailable    bool       `json:"api_key_available"`
+	Revoked         bool       `json:"revoked"`
+	CreatedAt       time.Time  `json:"created_at"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
 type CreateCredentialRequest struct {
+	AllowedIPRanges []string   `json:"allowed_ip_ranges"`
 	CurrentPassword string     `json:"current_password,omitempty"`
 	TurnstileToken  string     `json:"turnstile_token,omitempty"`
 	OwnerUserID     string     `json:"owner_user_id,omitempty"`

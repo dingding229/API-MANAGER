@@ -44,6 +44,7 @@ type UserManager interface {
 }
 
 type Admin struct {
+	mailPreviews            mailPreviewCache
 	credentialGuard         func(*http.Request, string, string) error
 	versionChecker          *version.Checker
 	siteSettings            *sitesettings.Service
@@ -103,9 +104,20 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		active.TouchSession(token, r)
 	}
 	r = r.WithContext(context.WithValue(r.Context(), auditActorContextKey{}, actor))
+	account, e := a.store.GetUserByID(actor.ID)
+	if e != nil {
+		writeJSON(w, 503, nil)
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), requestAccountKey{}, account))
+	r = r.WithContext(context.WithValue(r.Context(), requestPermissionsKey{}, a.store.GetUserPermissions(actor.ID)))
 	if permission := requiredPermission(r); permission != "" && !a.hasPermission(r, permission) {
 		a.recordAudit(r, "auth.permission.denied", "admin", "", http.StatusForbidden, map[string]any{"required": permission})
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "insufficient permission", "required": permission})
+		return
+	}
+
+	if !a.authorizeAPIOwner(w, r) || !a.authorizeSharedPlugin(w, r) {
 		return
 	}
 
@@ -148,6 +160,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 410, map[string]string{"error": "请在用户中心管理登录会话"})
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/version":
 		writeJSON(w, 200, version.Current())
+	case r.URL.Path == "/admin/v1/version/settings" && (r.Method == "GET" || r.Method == "PUT"):
+		a.versionSettings(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/version/check":
 		if a.versionChecker == nil {
 			writeJSON(w, 200, version.Current())
@@ -156,6 +170,10 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.URL.Path == "/admin/v1/settings" && (r.Method == http.MethodGet || r.Method == http.MethodPut):
 		a.siteSettingsHandler(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/settings/email/preview/") && r.Method == "GET":
+		a.showMailPreview(w, r)
+	case r.URL.Path == "/admin/v1/settings/email/preview" && r.Method == "POST":
+		a.previewMailTemplate(w, r)
 	case r.URL.Path == "/admin/v1/settings/smtp/test" && r.Method == http.MethodPost:
 		a.testSiteSMTP(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/overview":
@@ -175,7 +193,7 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/apis/") && strings.HasSuffix(r.URL.Path, "/cache") && (r.Method == http.MethodGet || r.Method == http.MethodDelete):
 		a.pluginCache(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/apis":
-		a.listAPIs(w)
+		a.listAPIs(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/apis":
 		a.createAPI(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/openapi.json":
@@ -222,6 +240,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.deletePlugin(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.Contains(r.URL.Path, "/sessions"):
 		a.manageSessions(w, r)
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/admin/v1/users/"):
+		a.deleteUser(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/users":
 		a.listUsers(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/users":
@@ -260,13 +280,26 @@ func (a *Admin) requestActor(r *http.Request) (audit.Actor, bool) {
 }
 func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 	actor, ok := r.Context().Value(auditActorContextKey{}).(audit.Actor)
-	return ok && actor.Type == "user" && a.userManager != nil && a.userManager.Can(actor.ID, permission)
+	if !ok || actor.Type != "user" || a.userManager == nil {
+		return false
+	}
+	if permissions, ok := r.Context().Value(requestPermissionsKey{}).([]string); ok {
+		for _, v := range permissions {
+			if v == "*" || v == permission {
+				return true
+			}
+		}
+		return false
+	}
+	return a.userManager.Can(actor.ID, permission)
 }
 
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
-	case path == "/admin/v1/overview" || path == "/admin/v1/version":
+	case path == "/admin/v1/version/settings":
+		return "*"
+	case path == "/admin/v1/overview" || path == "/admin/v1/version" || path == "/admin/v1/version/check":
 		return "api.read"
 	case strings.HasPrefix(path, "/admin/v1/users/") && strings.Contains(path, "/sessions"):
 		return ""
@@ -302,6 +335,8 @@ func requiredPermission(r *http.Request) string {
 		return "plugin.read"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/plugins/"), path == "/admin/v1/plugin-library/install" && r.Method == http.MethodPost, path == "/admin/v1/plugin-library" && r.Method == http.MethodPost:
 		return "plugin.manage"
+	case strings.HasPrefix(path, "/admin/v1/users/") && r.Method == "DELETE":
+		return "user.delete"
 	case path == "/admin/v1/users" && r.Method == http.MethodGet:
 		return "user.read"
 	case strings.HasPrefix(path, "/admin/v1/users/") && strings.HasSuffix(path, "/profile") && r.Method == http.MethodPut:
@@ -317,13 +352,13 @@ func requiredPermission(r *http.Request) string {
 	}
 }
 
-func (a *Admin) listAPIs(w http.ResponseWriter) {
-	items, err := a.listAPIsChecked()
+func (a *Admin) listAPIs(w http.ResponseWriter, r *http.Request) {
+	items, err := a.listAPIsForActor(r)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "list APIs unavailable"})
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, a.visibleAPIs(r, items))
 }
 
 func (a *Admin) listAPIsChecked() ([]model.API, error) {
@@ -362,6 +397,7 @@ func (a *Admin) createAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	api := apiFromRequest(newID("api"), request, now, now)
+	api.OwnerUserID = a.actorID(r)
 	if err := a.store.CreateAPI(api); err != nil {
 		writeStoreError(w, err)
 		return
@@ -401,6 +437,7 @@ func (a *Admin) updateAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated := apiFromRequest(current.ID, request, current.CreatedAt, time.Now().UTC())
+	updated.OwnerUserID = current.OwnerUserID
 	updated.Enabled, updated.PublishedAt = current.Enabled, current.PublishedAt
 	if err := a.store.UpdateAPI(updated); err != nil {
 		writeStoreError(w, err)
@@ -513,6 +550,12 @@ func (a *Admin) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.ID = parts[0]
+	if current, e := a.store.GetAPI(api.ID); e == nil {
+		api.OwnerUserID = current.OwnerUserID
+	} else {
+		writeStoreError(w, e)
+		return
+	}
 	if err := a.checkRouteConflict(api.ID, api.Method, api.Path); err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
@@ -560,6 +603,11 @@ func (a *Admin) createCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor, _ := r.Context().Value(auditActorContextKey{}).(audit.Actor)
+	ranges, e := auth.NormalizeIPRanges(request.AllowedIPRanges)
+	if e != nil {
+		writeJSON(w, 400, map[string]string{"error": e.Error()})
+		return
+	}
 	owner := request.OwnerUserID
 	if owner == "" {
 		owner = actor.ID
@@ -568,7 +616,7 @@ func (a *Admin) createCredential(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "凭据所属用户不存在"})
 		return
 	}
-	credential := model.Credential{OwnerUserID: owner, ID: newID("cred"), Name: request.Name, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encryptedKey, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
+	credential := model.Credential{AllowedIPRanges: ranges, OwnerUserID: owner, ID: newID("cred"), Name: request.Name, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encryptedKey, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: request.ExpiresAt}
 	var createErr error
 	if scoped, ok := a.store.(interface {
 		CreateOwnedCredential(context.Context, model.Credential) error
@@ -1181,6 +1229,7 @@ func (a *Admin) importOpenAPI(w http.ResponseWriter, r *http.Request) {
 				errorsList = append(errorsList, map[string]string{"path": path, "method": method, "error": err.Error()})
 				continue
 			}
+			api.OwnerUserID = a.actorID(r)
 			if err := a.store.CreateAPI(api); err != nil {
 				errorsList = append(errorsList, map[string]string{"path": path, "method": method, "error": "API already exists or could not be saved"})
 				continue
@@ -1383,15 +1432,15 @@ func normalizeOpenAPINullable(value any) {
 	}
 }
 
-func (a *Admin) exportOpenAPI(w http.ResponseWriter, _ *http.Request) {
+func (a *Admin) exportOpenAPI(w http.ResponseWriter, r *http.Request) {
 	paths := map[string]map[string]any{}
-	apis, err := a.listAPIsChecked()
+	apis, err := a.listAPIsForActor(r)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "export APIs unavailable"})
 		return
 	}
 	sort.Slice(apis, func(i, j int) bool { return apis[i].Path < apis[j].Path })
-	for _, api := range apis {
+	for _, api := range a.visibleAPIs(r, apis) {
 		for _, selectedMethod := range api.HTTPMethods() {
 			method := strings.ToLower(selectedMethod)
 			if paths[api.Path] == nil {

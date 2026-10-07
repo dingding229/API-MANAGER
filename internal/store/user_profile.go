@@ -15,7 +15,10 @@ func (m *Memory) UpdateUserProfile(id string, change model.UserProfileUpdate) (m
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	u, ok := m.users[id]
-	if !ok {
+	if !ok || u.Status == "deleted" {
+		return model.User{}, false, ErrNotFound
+	}
+	if u.Status == "deleted" {
 		return model.User{}, false, ErrNotFound
 	}
 	if u.AuthRevision != change.ExpectedAuthRevision || u.Username != change.ExpectedUsername || u.Email != change.ExpectedEmail || u.PasswordHash != change.ExpectedPasswordHash {
@@ -66,6 +69,9 @@ func (p *Postgres) UpdateUserProfile(id string, change model.UserProfileUpdate) 
 	}
 	if err != nil {
 		return model.User{}, false, err
+	}
+	if u.Status == "deleted" {
+		return model.User{}, false, ErrNotFound
 	}
 	if u.AuthRevision != change.ExpectedAuthRevision || u.Username != change.ExpectedUsername || u.Email != change.ExpectedEmail || u.PasswordHash != change.ExpectedPasswordHash {
 		return model.User{}, false, ErrConflict

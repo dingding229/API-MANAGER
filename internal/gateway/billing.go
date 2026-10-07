@@ -17,7 +17,7 @@ func (g *Gateway) billingUser(r *http.Request, testUser string) string {
 	if testUser != "" {
 		return testUser
 	}
-	if c, ok := auth.ValidateAPIKey(g.store, auth.RequestKey(r)); ok {
+	if c, ok := auth.RequestCredential(r, g.store); ok && auth.CredentialIPAllowed(c, r) {
 		return c.OwnerUserID
 	}
 	return ""
@@ -65,7 +65,7 @@ func (g *Gateway) finishCall(r *http.Request, a model.API, c model.Charge, userI
 		price = c.PriceMicros
 	}
 	credentialID := ""
-	if key, ok := auth.ValidateAPIKey(g.store, auth.RequestKey(r)); ok {
+	if key, ok := auth.RequestCredential(r, g.store); ok {
 		credentialID = key.ID
 	}
 	if err := st.SaveCallLog(ctx, model.CallLog{TraceID: func() string {

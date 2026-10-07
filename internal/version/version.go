@@ -16,7 +16,7 @@ import (
 
 // Release builds replace these values via -ldflags. Local builds are never
 // reported as a verified release, even when their base version matches a tag.
-var Version = "0.3.35-dev"
+var Version = "0.3.36-dev"
 var Revision = "development"
 var BuiltAt = ""
 
@@ -52,6 +52,20 @@ type Checker struct {
 func NewChecker(token string) *Checker {
 	return &Checker{token: token, client: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("redirect refused") }}}
 }
+func (c *Checker) SetToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = token
+	c.expires = time.Time{}
+	c.cached = Info{}
+}
+func (c *Checker) TokenConfigured() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.token != "" }
+
+var errCredentialMissing = errors.New("credential_missing")
+var errCredentialInvalid = errors.New("credential_invalid")
+var errSourceDenied = errors.New("source_denied")
+var errRateLimited = errors.New("rate_limited")
+
 func parts(v string) ([3]int, bool) {
 	m := stable.FindStringSubmatch(v)
 	var p [3]int
@@ -91,6 +105,25 @@ func (c *Checker) Check(ctx context.Context) Info {
 	defer cancel()
 	latest, err := c.fetch(ctx)
 	ttl := 5 * time.Minute
+	if err != nil {
+		switch {
+		case errors.Is(err, errCredentialMissing):
+			info.Status = "credential_required"
+			info.Message = "请在网站设置中配置私有仓库读取凭据。"
+		case errors.Is(err, errCredentialInvalid):
+			info.Status = "credential_invalid"
+			info.Message = "仓库读取凭据无效或已过期，请更新凭据。"
+		case errors.Is(err, errSourceDenied):
+			info.Status = "access_denied"
+			info.Message = "读取被拒绝，请确认凭据可访问 API-MANAGER 私有仓库。"
+		case errors.Is(err, errRateLimited):
+			info.Status = "rate_limited"
+			info.Message = "版本来源请求过于频繁，请稍后再试。"
+		default:
+			info.Status = "unavailable"
+			info.Message = "版本来源暂不可用，请检查服务器网络后重试。"
+		}
+	}
 	if err == nil {
 		ttl = time.Hour
 		info.Latest = strings.TrimPrefix(latest, "v")
@@ -138,6 +171,22 @@ func (c *Checker) fetch(ctx context.Context) (string, error) {
 		}
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, (256<<10)+1))
 		_ = resp.Body.Close()
+		switch resp.StatusCode {
+		case 401:
+			return "", errCredentialInvalid
+		case 404:
+			if c.token == "" {
+				return "", errCredentialMissing
+			}
+			return "", errSourceDenied
+		case 403:
+			if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+				return "", errRateLimited
+			}
+			return "", errSourceDenied
+		case 429:
+			return "", errRateLimited
+		}
 		if readErr != nil || len(data) > 256<<10 || resp.StatusCode != 200 {
 			return "", errors.New("version source unavailable")
 		}

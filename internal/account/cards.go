@@ -198,6 +198,7 @@ func (s *Service) cards(w http.ResponseWriter, r *http.Request, u model.User) {
 }
 func (s *Service) outputCards(w http.ResponseWriter, b model.CardBatch, purpose string) {
 	codes := []string{}
+	items := []map[string]any{}
 	for _, c := range b.Cards {
 		if purpose == "all" || (purpose == "used" && c.Status == "used") || (purpose == "unused" && c.Status == "unused") {
 			v, e := auth.DecryptSecret(s.key+":cards", c.EncryptedCode)
@@ -206,7 +207,8 @@ func (s *Service) outputCards(w http.ResponseWriter, b model.CardBatch, purpose 
 				return
 			}
 			codes = append(codes, v)
+			items = append(items, map[string]any{"id": c.ID, "code": v, "status": c.Status, "redeemed_by": c.RedeemedBy, "redeemed_username": c.RedeemedUsername, "redeemed_nickname": c.RedeemedNickname, "redeemed_at": c.RedeemedAt, "expires_at": b.ExpiresAt})
 		}
 	}
-	write(w, 200, map[string]any{"batch": b, "codes": codes})
+	write(w, 200, map[string]any{"batch": b, "codes": codes, "items": items})
 }

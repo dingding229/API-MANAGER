@@ -160,3 +160,23 @@ func TestHomeAndDocumentationRoutesAreDistinctAndPrivateCached(t *testing.T) {
 		}
 	}
 }
+
+func TestNewAuthenticationPagesAreServedNoStore(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"index.html", "login.html", "register.html", "guide.html", "complete-registration.html"} {
+		if e := os.WriteFile(filepath.Join(dir, name), []byte(name), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	h, e := New(dir, http.NotFoundHandler())
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, path := range []string{"/login", "/register", "/guide", "/complete-registration"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 200 || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+			t.Fatal(path, w.Code, w.Header())
+		}
+	}
+}

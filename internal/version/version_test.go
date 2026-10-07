@@ -59,7 +59,7 @@ func TestUnavailableNeverMeansLatest(t *testing.T) {
 		c := NewChecker("")
 		c.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) { return versionSource(tc.body, tc.status), nil })
 		info := c.Check(context.Background())
-		if info.Status != "unavailable" || info.Latest != "" {
+		if (info.Status != "credential_required" && info.Status != "rate_limited" && info.Status != "unavailable") || info.Latest != "" {
 			t.Fatal(info)
 		}
 	}
@@ -112,5 +112,31 @@ func TestVersionStatesDistinguishReleaseAndDevelopment(t *testing.T) {
 	})
 	if c.Check(context.Background()).Status != "unavailable" || calls != 1 {
 		t.Fatal("redirect followed")
+	}
+}
+
+func TestVersionCredentialUpdatesInvalidateCacheWithoutDisclosure(t *testing.T) {
+	c := NewChecker("")
+	c.client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") == "Bearer read-only-token" {
+			return versionSource(`[{"name":"v9.9.9"}]`, 200), nil
+		}
+		return versionSource(`{}`, 404), nil
+	})
+	if c.Check(context.Background()).Status != "credential_required" {
+		t.Fatal("missing credential not explained")
+	}
+	c.SetToken("read-only-token")
+	v := c.Check(context.Background())
+	if v.Latest != "9.9.9" {
+		t.Fatal(v)
+	}
+	data, _ := json.Marshal(v)
+	if strings.Contains(string(data), "read-only-token") {
+		t.Fatal("credential leaked")
+	}
+	c.SetToken("")
+	if c.Check(context.Background()).Latest != "" {
+		t.Fatal("stale credential check retained")
 	}
 }

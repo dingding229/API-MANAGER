@@ -2,6 +2,7 @@ package api
 
 import (
 	"api-manager/internal/audit"
+	"api-manager/internal/mailtemplates"
 	"api-manager/internal/model"
 	"api-manager/internal/sitesettings"
 	"api-manager/internal/store"
@@ -34,7 +35,7 @@ func (a *Admin) requireSiteOwner(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func decodeSiteJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(target) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		writeJSON(w, 400, map[string]string{"error": "invalid settings JSON"})
@@ -53,6 +54,16 @@ func (a *Admin) siteSettingsHandler(w http.ResponseWriter, r *http.Request) {
 	var request model.UpdateSiteSettingsRequest
 	if !decodeSiteJSON(w, r, &request) {
 		return
+	}
+	if request.MailTemplates != nil {
+		if e := mailtemplates.Validate(*request.MailTemplates); e != nil {
+			writeJSON(w, 400, map[string]string{"error": e.Error()})
+			return
+		}
+		if a.credentialGuard == nil || a.credentialGuard(r, request.CurrentPassword, "") != nil {
+			writeJSON(w, 403, map[string]string{"error": "保存邮件模板前请验证管理员密码"})
+			return
+		}
 	}
 	domain, err := sitesettings.NormalizeAPIDomain(request.Site.APIDomain)
 	if err != nil {
@@ -110,4 +121,32 @@ func (a *Admin) testSiteSMTP(w http.ResponseWriter, r *http.Request) {
 	}
 	a.recordAudit(r, "settings.smtp.test", "site", "global", 200, nil)
 	writeJSON(w, 200, map[string]string{"message": "SMTP 服务器已接受测试邮件，请检查收件箱及垃圾邮件"})
+}
+
+func (a *Admin) previewMailTemplate(w http.ResponseWriter, r *http.Request) {
+	if !a.requireSiteOwner(w, r) {
+		return
+	}
+	var q struct {
+		Template model.EmailTemplate `json:"template"`
+	}
+	if !decodeSiteJSON(w, r, &q) {
+		return
+	}
+	site := a.siteSettings.Public()
+	origin := site.WebsiteURL
+	if origin == "" {
+		origin = "https://example.test"
+	}
+	subject, body, e := mailtemplates.Render(q.Template, map[string]string{"site_name": site.Name, "email": "preview@example.test", "code": "123456", "purpose": "邮箱验证", "expires_minutes": "10", "reset_url": origin + "/login#reset=preview-sample", "site_url": origin})
+	if e != nil {
+		writeJSON(w, 400, map[string]string{"error": e.Error()})
+		return
+	}
+	previewURL := a.issueMailPreview(r, body)
+	if previewURL == "" {
+		writeJSON(w, 429, nil)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"subject": subject, "preview_url": previewURL})
 }

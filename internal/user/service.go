@@ -165,7 +165,11 @@ func (s *Service) Profile(user model.User) map[string]any {
 	for _, p := range s.store.ListPermissions() {
 		permissions[p.Code] = p.Description
 	}
-	return map[string]any{"user": user, "permissions": s.store.GetUserPermissions(user.ID), "level_names": names, "permission_names": permissions}
+	zone := ""
+	if st, ok := s.store.(interface{ PersonalTimeZone(string) (string, error) }); ok {
+		zone, _ = st.PersonalTimeZone(user.ID)
+	}
+	return map[string]any{"personal_time_zone": zone, "user": user, "permissions": s.store.GetUserPermissions(user.ID), "level_names": names, "permission_names": permissions}
 }
 
 func (s *Service) ListUsers() []model.User                 { return s.store.ListUsers() }

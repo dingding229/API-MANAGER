@@ -45,7 +45,7 @@ func (s *Service) identities(w http.ResponseWriter, r *http.Request, u model.Use
 		return
 	}
 	provider := strings.TrimPrefix(r.URL.Path, "/account/v1/identities/")
-	if provider != "github" && provider != "google" {
+	if provider != "github" && provider != "google" && provider != "telegram" {
 		write(w, 400, map[string]string{"error": "授权服务无效"})
 		return
 	}

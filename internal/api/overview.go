@@ -8,11 +8,12 @@ import (
 func (a *Admin) overview(w http.ResponseWriter, r *http.Request) {
 	resources := map[string]any{}
 	if a.hasPermission(r, "api.read") {
-		items, err := a.listAPIsChecked()
+		items, err := a.listAPIsForActor(r)
 		if err != nil {
 			writeStoreError(w, err)
 			return
 		}
+		items = a.visibleAPIs(r, items)
 		published := 0
 		for _, v := range items {
 			if v.Enabled {

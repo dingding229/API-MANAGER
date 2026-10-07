@@ -108,6 +108,10 @@ func (s *Service) portal(w http.ResponseWriter, r *http.Request, u model.User) {
 		write(w, 200, list)
 		return
 	}
+	if strings.HasPrefix(path, "/account/v1/keys/") && strings.HasSuffix(path, "/ip-policy") && r.Method == "PUT" {
+		s.keyIPPolicy(w, r, u, false)
+		return
+	}
 	if path == "/account/v1/keys" && r.Method == "POST" {
 		var req payload
 		if !read(w, r, &req) {
@@ -189,6 +193,10 @@ func billingError(err error) string {
 }
 func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cfg model.SecuritySettings) {
 	path := r.URL.Path
+	if strings.HasPrefix(path, "/account/v1/admin/keys/") && strings.HasSuffix(path, "/ip-policy") && r.Method == "PUT" {
+		s.keyIPPolicy(w, r, u, true)
+		return
+	}
 	if path == "/account/v1/admin/card-plans" && r.Method == "GET" {
 		v, e := s.store.(store.BillingStore).Plans(r.Context(), true)
 		if e != nil {
@@ -295,7 +303,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 		return
 	}
 	if path == "/account/v1/admin/settings" && r.Method == "GET" {
-		write(w, 200, map[string]any{"settings": cfg, "github_secret_set": cfg.GitHubSecret != "", "google_secret_set": cfg.GoogleSecret != "", "turnstile_secret_set": cfg.TurnstileSecret != "", "mail_available": s.mail.MailAvailable()})
+		write(w, 200, map[string]any{"settings": cfg, "github_secret_set": cfg.GitHubSecret != "", "google_secret_set": cfg.GoogleSecret != "", "telegram_secret_set": cfg.TelegramSecret != "", "turnstile_secret_set": cfg.TurnstileSecret != "", "mail_available": s.mail.MailAvailable()})
 		return
 	}
 	if path == "/account/v1/admin/settings" && r.Method == "PUT" {
@@ -303,6 +311,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			TurnstileToken  string                 `json:"turnstile_token"`
 			Settings        model.SecuritySettings `json:"settings"`
 			GitHubSecret    string                 `json:"github_secret"`
+			TelegramSecret  string                 `json:"telegram_secret"`
 			GoogleSecret    string                 `json:"google_secret"`
 			TurnstileSecret string                 `json:"turnstile_secret"`
 			CurrentPassword string                 `json:"current_password"`
@@ -315,20 +324,33 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			write(w, 403, map[string]string{"error": "请验证当前管理员密码"})
 			return
 		}
-		if e := s.verifyTurnstile(r.Context(), r, cfg, request.TurnstileToken, "sensitive"); e != nil {
+		if e := s.Guard(r, "sensitive", request.TurnstileToken); e != nil {
 			write(w, 403, map[string]string{"error": e.Error()})
 			return
 		}
 		next := request.Settings
+		if next.AllowedEmailDomains == nil {
+			next.AllowedEmailDomains = cfg.AllowedEmailDomains
+		}
+		domains, e := normalizeEmailDomains(next.AllowedEmailDomains)
+		if e != nil {
+			write(w, 400, map[string]string{"error": e.Error()})
+			return
+		}
+		next.AllowedEmailDomains = domains
 		if next.Version != cfg.Version {
 			write(w, 409, map[string]string{"error": "设置已被更新，请刷新"})
 			return
 		}
 		next.GitHubSecret = cfg.GitHubSecret
 		next.GoogleSecret = cfg.GoogleSecret
+		next.TelegramSecret = cfg.TelegramSecret
 		next.TurnstileSecret = cfg.TurnstileSecret
 		if request.GitHubSecret != "" {
 			next.GitHubSecret = request.GitHubSecret
+		}
+		if request.TelegramSecret != "" {
+			next.TelegramSecret = request.TelegramSecret
 		}
 		if request.GoogleSecret != "" {
 			next.GoogleSecret = request.GoogleSecret
@@ -340,7 +362,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			write(w, 400, map[string]string{"error": e.Error()})
 			return
 		}
-		raw, _ := json.Marshal(struct{ Turnstile, GitHub, Google string }{next.TurnstileSecret, next.GitHubSecret, next.GoogleSecret})
+		raw, _ := json.Marshal(struct{ Turnstile, GitHub, Google, Telegram string }{next.TurnstileSecret, next.GitHubSecret, next.GoogleSecret, next.TelegramSecret})
 		encrypted, e := auth.EncryptSecret(s.key+":authentication", string(raw))
 		if e != nil {
 			write(w, 503, map[string]string{"error": "安全配置不可保存"})
@@ -411,7 +433,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			write(w, 403, map[string]string{"error": "重新验证失败"})
 			return
 		}
-		if e := s.verifyTurnstile(r.Context(), r, cfg, request.TurnstileToken, "sensitive"); e != nil {
+		if e := s.Guard(r, "sensitive", request.TurnstileToken); e != nil {
 			write(w, 403, map[string]string{"error": e.Error()})
 			return
 		}
@@ -460,7 +482,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 func validateSettings(cfg model.SecuritySettings, roles interface {
 	GetRoleByName(string) (model.Role, error)
 }) error {
-	if cfg.RegistrationEnabled || cfg.GitHubEnabled || cfg.GoogleEnabled || cfg.TurnstileEnabled {
+	if cfg.RegistrationEnabled || cfg.GitHubEnabled || cfg.GoogleEnabled || cfg.TelegramEnabled || cfg.TurnstileEnabled {
 		u, e := url.Parse(cfg.WebsiteURL)
 		if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 			return errors.New("开放注册或第三方登录须配置 HTTPS 网站地址")
@@ -485,6 +507,9 @@ func validateSettings(cfg model.SecuritySettings, roles interface {
 	}
 	if cfg.GitHubEnabled && (cfg.GitHubClientID == "" || cfg.GitHubSecret == "") {
 		return errors.New("GitHub 登录配置不完整")
+	}
+	if cfg.TelegramEnabled && (cfg.TelegramClientID == "" || cfg.TelegramSecret == "") {
+		return errors.New("Telegram 登录配置不完整")
 	}
 	if cfg.GoogleEnabled && (cfg.GoogleClientID == "" || cfg.GoogleSecret == "") {
 		return errors.New("Google 登录配置不完整")

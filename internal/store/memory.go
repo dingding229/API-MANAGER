@@ -16,26 +16,27 @@ var (
 )
 
 type Memory struct {
-	siteSettings  model.SiteSettingsRecord
-	bootstrapHash string
-	bootstrapUsed bool
-	mu            sync.RWMutex
-	apis          map[string]model.API
-	credentials   map[string]model.Credential
-	users         map[string]model.User
-	sessions      map[string]model.Session
-	resets        map[string]model.PasswordReset
-	releases      map[string][]model.Release
-	permissions   map[string]model.Permission
-	roles         map[string]model.Role
-	deletedRoles  map[string]bool
-	userRoles     map[string][]string
-	plugins       map[string]model.Plugin
-	pluginData    map[string]model.PluginData
-	pluginCache   map[string]model.PluginCacheEntry
-	testTickets   map[string]model.APITestTicket
-	auditLogs     []model.AuditLog
-	nextAuditID   int64
+	versionSettings model.VersionCheckSettings
+	siteSettings    model.SiteSettingsRecord
+	bootstrapHash   string
+	bootstrapUsed   bool
+	mu              sync.RWMutex
+	apis            map[string]model.API
+	credentials     map[string]model.Credential
+	users           map[string]model.User
+	sessions        map[string]model.Session
+	resets          map[string]model.PasswordReset
+	releases        map[string][]model.Release
+	permissions     map[string]model.Permission
+	roles           map[string]model.Role
+	deletedRoles    map[string]bool
+	userRoles       map[string][]string
+	plugins         map[string]model.Plugin
+	pluginData      map[string]model.PluginData
+	pluginCache     map[string]model.PluginCacheEntry
+	testTickets     map[string]model.APITestTicket
+	auditLogs       []model.AuditLog
+	nextAuditID     int64
 }
 
 func NewMemory() *Memory {
@@ -112,6 +113,7 @@ func (m *Memory) updateAPI(api model.API) error {
 			return ErrConflict
 		}
 	}
+	api.OwnerUserID = m.apis[api.ID].OwnerUserID
 	m.apis[api.ID] = api
 	return nil
 }
@@ -280,6 +282,9 @@ func (m *Memory) ListUsers() []model.User {
 	defer m.mu.RUnlock()
 	users := make([]model.User, 0, len(m.users))
 	for _, user := range m.users {
+		if user.Status == "deleted" {
+			continue
+		}
 		user.Roles = append([]string(nil), m.userRoles[user.ID]...)
 		users = append(users, user)
 	}
@@ -290,7 +295,13 @@ func (m *Memory) ListUsers() []model.User {
 func (m *Memory) CountUsers() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return len(m.users)
+	count := 0
+	for _, u := range m.users {
+		if u.Status != "deleted" {
+			count++
+		}
+	}
+	return count
 }
 
 func (m *Memory) CreateRelease(api model.API) (model.Release, error) {
@@ -344,7 +355,7 @@ func (m *Memory) UpdateUserStatus(id, status string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	user, ok := m.users[id]
-	if !ok {
+	if !ok || user.Status == "deleted" {
 		return ErrNotFound
 	}
 	if status == "disabled" && m.lastActiveAdmin(id) {
@@ -442,7 +453,7 @@ func (m *Memory) GetRoleByName(name string) (model.Role, error) {
 func (m *Memory) AssignUserRoles(userID string, roles []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.users[userID]; !ok {
+	if u, ok := m.users[userID]; !ok || u.Status == "deleted" {
 		return ErrNotFound
 	}
 	if !containsSuperAdmin(roles) && m.lastActiveAdmin(userID) {

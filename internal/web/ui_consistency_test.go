@@ -84,7 +84,7 @@ const $=()=>page;const state={page:'settings',user:{roles:['super_admin']}};
 const cfg={version:1,site:{},smtp:{},smtp_password_set:false,recovery_enabled:false};
 const api=async(path,options)=>{if(!options)return cfg;const e=Error('save failed');e.status=409;throw e};
 const withSubmitting=async(form,text,action)=>action();const esc=String;const siteSettingInput=()=>'';const siteSettingArea=()=>'';
-const refreshSiteIdentity=async()=>{};const initRecovery=async()=>{};const notice=()=>{};
+const renderMailTemplateEditor=()=>{};const renderVersionSettings=async()=>{};const refreshSiteIdentity=async()=>{};const initRecovery=async()=>{};const notice=()=>{};
 class FormData {constructor(form){this.form=form}entries(){return Object.values(this.form.elements).map(f=>[f.name,f.value])[Symbol.iterator]()}}
 `+settings+`
 (async()=>{await renderSiteSettings();await form.onsubmit({preventDefault(){}});assert.equal(form._saving,false);assert.ok(message.textContent.includes('其他管理员'));assert.equal(elements.smtp_password.disabled,true);assert.equal(elements.name.disabled,false);assert.equal(elements.smtp_host.disabled,false);assert.equal(visibility.disabled,false);assert.equal(elements.name.value,'preview');})().catch(e=>{console.error(e);process.exit(1)});`)
@@ -193,7 +193,7 @@ func TestCredentialDialogsAuditDetailsAndXSSSafeSinks(t *testing.T) {
 		t.Fatal(e)
 	}
 	source := string(extra)
-	for _, safe := range []string{"pre.textContent=", "code.textContent=result.api_key", "data-key-op=\"rotate\"", "data-create-key", "card.manage"} {
+	for _, safe := range []string{"cell.textContent=text", "code.textContent=result.api_key", "data-key-op=\"rotate\"", "data-create-key", "card.manage"} {
 		if safe == "card.manage" {
 			continue
 		}
@@ -216,25 +216,9 @@ func TestCredentialDialogsAuditDetailsAndXSSSafeSinks(t *testing.T) {
 	}
 }
 
-func TestUserManagementUsesSingleRowSecondaryMenu(t *testing.T) {
-	raw, e := assets.ReadFile("assets/app.js")
-	if e != nil {
-		t.Fatal(e)
-	}
-	s := string(raw)
-	start := strings.Index(s, "function userActions(")
-	end := strings.Index(s[start:], "async function renderUsers")
-	actions := s[start : start+end]
-	for _, field := range []string{"user-action-menu", "更多操作", "data-user-usage", "data-bind-user-plan", "data-user-status"} {
-		if !strings.Contains(actions, field) {
-			t.Fatal("missing permission-bound action", field)
-		}
-	}
-	css, e := assets.ReadFile("assets/app.css")
-	if e != nil {
-		t.Fatal(e)
-	}
-	if !strings.Contains(string(css), ".user-table .actions{flex-wrap:nowrap!important") {
-		t.Fatal("user actions can wrap")
-	}
+func TestUserManagementUsesDirectActionsWithoutHiddenMenu(t *testing.T) {
+ source:=consoleFunction(t,"function userActions(","async function renderUsers")
+ if strings.Contains(source,"更多操作")||strings.Contains(source,"<details") {t.Fatal("user operations hidden in dropdown")}
+ for _,name:=range []string{"data-user-profile","data-user-roles","data-bind-user-plan","data-user-usage","data-user-delete"}{if !strings.Contains(source,name){t.Fatal("missing direct user action",name)}}
+ raw,e:=assets.ReadFile("assets/app.js");if e!=nil{t.Fatal(e)};if !strings.Contains(string(raw),"user-actions-row"){t.Fatal("direct operations have no dedicated full-width row")}
 }

@@ -7,9 +7,12 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/mail"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +159,43 @@ func TestSMTPHungGreetingRespectsCancellation(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Fatal("SMTP request ignored cancellation")
+	}
+}
+
+func TestSMTPMessageCarriesHTMLAndPlainAlternative(t *testing.T) {
+	raw, e := smtpMessage("from@example.test", "to@example.test", "HTML test", "fallback text", "<h1>HTML email</h1>")
+	if e != nil {
+		t.Fatal(e)
+	}
+	message, e := mail.ReadMessage(strings.NewReader(raw))
+	if e != nil {
+		t.Fatal(e)
+	}
+	kind, p, e := mime.ParseMediaType(message.Header.Get("Content-Type"))
+	if e != nil || kind != "multipart/alternative" {
+		t.Fatal(kind, e)
+	}
+	reader := multipart.NewReader(message.Body, p["boundary"])
+	var kinds []string
+	for {
+		part, e := reader.NextPart()
+		if e == io.EOF {
+			break
+		}
+		if e != nil {
+			t.Fatal(e)
+		}
+		data, _ := io.ReadAll(part)
+		decoded, e := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+		if e != nil {
+			t.Fatal(e)
+		}
+		kinds = append(kinds, part.Header.Get("Content-Type"))
+		if len(kinds) == 2 && !strings.Contains(string(decoded), "<h1>HTML email</h1>") {
+			t.Fatal("HTML missing")
+		}
+	}
+	if len(kinds) != 2 || !strings.HasPrefix(kinds[0], "text/plain") || !strings.HasPrefix(kinds[1], "text/html") {
+		t.Fatal(kinds)
 	}
 }

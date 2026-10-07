@@ -8,19 +8,20 @@ import { requestExample } from '../lib/catalog';
 export function useTestingSession() {
   const [username, setUsername] = useState('');
   const [checking, setChecking] = useState(true);
+  const [allowedApiIds,setAllowedApiIds]=useState<string[]|null>(null);
   const [canTest,setCanTest]=useState(false);const [canTestWrite,setCanTestWrite]=useState(false);
   const sessionEpoch = useRef(0);
   async function refresh(signal?: AbortSignal) {
     const epoch=++sessionEpoch.current;
     const response = await fetch('/test/v1/session', { credentials: 'same-origin', cache: 'no-store', signal: signal || AbortSignal.timeout(8000) });
     if(signal?.aborted) throw new Error('登录检查已取消。');
-    if (response.status === 401) { if(epoch===sessionEpoch.current){setUsername('');setCanTest(false);setCanTestWrite(false)} return false; }
+    if (response.status === 401) { if(epoch===sessionEpoch.current){setUsername('');setAllowedApiIds(null);setCanTest(false);setCanTestWrite(false)} return false; }
     if (!response.ok) throw new Error('无法确认登录状态，请稍后重试。');
     const data = await response.json();
     if (typeof data.username !== 'string' || !data.username) throw new Error('无法确认登录状态。');
     if(signal?.aborted) throw new Error('登录检查已取消。');
     if(epoch!==sessionEpoch.current) return false;
-    setUsername(data.username);setCanTest(data.can_test===true);setCanTestWrite(data.can_test_write===true); return true;
+    setAllowedApiIds(Array.isArray(data.allowed_api_ids)?data.allowed_api_ids.filter((id:unknown)=>typeof id==='string'):null);setUsername(data.username);setCanTest(data.can_test===true);setCanTestWrite(data.can_test_write===true); return true;
   }
   useEffect(() => {
     let controller: AbortController | null = null; let disposed=false; let pending=false;
@@ -32,45 +33,18 @@ export function useTestingSession() {
     return()=>{disposed=true;controller?.abort();clearInterval(timer);window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);channel?.close()};
   }, []);
   function changed(name: string) { sessionEpoch.current++;setUsername(name); const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('api-manager-auth'):null;channel?.postMessage('changed');channel?.close(); }
-  return { username, checking, refresh, canTest,canTestWrite,setUsername: changed };
+  return { username, checking, refresh, allowedApiIds, canTest,canTestWrite,setUsername: changed };
 }
 export type TestingSession = ReturnType<typeof useTestingSession>;
 
-export function SessionControl({ session }: { session: TestingSession }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const form = useRef<HTMLFormElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const lock = useRef(false);
-  async function authenticate(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (lock.current) return; lock.current = true; setBusy(true); setError('');
-    const fields = new FormData(event.currentTarget);
-    const password = String(fields.get('password') || '');
-    try {
-      const options=await fetch('/account/v1/options',{cache:'no-store',credentials:'same-origin',signal:AbortSignal.timeout(8000)}).then(r=>r.json());
-      if(options.turnstile){location.assign('/account?return=docs');return;}
-      const response = await fetch('/test/v1/login', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-API-Request': '1' }, body: JSON.stringify({ username: fields.get('username'), password }), signal: AbortSignal.timeout(10000) });
-      const data = await response.json();
-      if(data.mfa_required){form.current?.reset();location.assign('/account?mfa=1&return=docs');return;}
-      if (!response.ok || typeof data.username !== 'string') throw new Error(data.error || '登录未完成，请稍后重试。');
-      if(!await session.refresh()) throw new Error('浏览器未能保存安全登录状态，请使用 HTTPS 网站地址。');
-      session.setUsername(data.username); form.current?.reset(); dialog.current?.close();
-    } catch (error) { setError(error instanceof Error ? error.message : '登录未完成。'); }
-    finally { if (form.current) { const input = form.current.querySelector<HTMLInputElement>('[name=password]'); if (input) input.value = ''; } lock.current = false; setBusy(false); }
-  }
-  async function logout() {
-    if (lock.current) return; lock.current = true; setBusy(true); setError('');
-    try {
-      const response = await fetch('/test/v1/logout', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'X-API-Request': '1' }, signal: AbortSignal.timeout(8000) });
-      if (!response.ok) throw new Error('退出未完成，请稍后重试。');
-      session.setUsername('');
-    } catch (error) { setError(error instanceof Error ? error.message : '退出未完成。'); }
-    finally { lock.current = false; setBusy(false); }
-  }
-  function close() { if (busy) return; form.current?.reset(); setError(''); dialog.current?.close(); }
-  return <div className="session-control">{session.username ? <><span className="session-username" title={session.username}>{session.username}</span><button type="button" className="quiet-button" onClick={() => void logout()} disabled={busy}><LogOut size={15} aria-hidden="true" /><span>退出</span></button>{error && <span className="session-error" role="alert">{error}</span>}</> : <button type="button" className="quiet-button" disabled={session.checking} onClick={() => { setError(''); dialog.current?.showModal(); }}><LogIn size={15} aria-hidden="true" /><span>{session.checking ? '检查登录…' : '登录'}</span></button>}
-    <dialog ref={dialog} className="testing-login" aria-labelledby="testing-login-title" onCancel={event => { event.preventDefault(); close(); }}><div className="testing-login-head"><h2 id="testing-login-title">登录账号</h2><button type="button" className="icon-button" aria-label="关闭登录" disabled={busy} onClick={close}><X size={18} aria-hidden="true" /></button></div><p>使用已有账号登录后，可查看账户信息并使用在线测试。</p><a href="/account?return=docs" target="_blank" rel="noopener noreferrer">注册、邮箱登录与双重验证</a><form ref={form} onSubmit={event => void authenticate(event)}><label>用户名<input name="username" autoComplete="username" required maxLength={80} disabled={busy} autoFocus /></label><label>密码<input name="password" type="password" autoComplete="current-password" required maxLength={128} disabled={busy} /></label>{error && <p className="example-error" role="alert">{error}</p>}<button className="primary-button" type="submit" disabled={busy}>{busy ? '登录中…' : '登录'}</button></form></dialog>
-  </div>;
+export function SessionControl({ session, returnTo='docs' }: { session: TestingSession; returnTo?:'home'|'docs'|'guide'|'playground' }) {
+ const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ async function logout(){if(busy)return;setBusy(true);setError('');try{
+  const response=await fetch('/test/v1/logout',{method:'POST',credentials:'same-origin',cache:'no-store',redirect:'error',headers:{'X-API-Request':'1'},signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw Error('退出未完成，请稍后重试。');
+  await session.refresh();const channel=new BroadcastChannel('api-manager-auth');channel.postMessage('changed');channel.close();
+ }catch(e){setError(e instanceof Error?e.message:'退出未完成')}finally{setBusy(false)}}
+ return <div className="session-control">{session.username?<><span className="session-username" title={session.username}>{session.username}</span><button type="button" className="quiet-button" disabled={busy} onClick={()=>void logout()}><LogOut size={15} aria-hidden="true"/><span>退出</span></button></>:session.checking?<span className="session-checking" role="status">确认登录中…</span>:<a className="quiet-button" href={'/login?return='+returnTo}><LogIn size={15} aria-hidden="true"/><span>登录</span></a>}{!session.checking&&!session.username&&<a className="quiet-button" href={'/register?return='+returnTo}>注册</a>}{error&&<span className="session-error" role="alert">{error}</span>}</div>
 }
 
 export function TestPanel({ api, origin, method, values, session, onBusyChange }: { onBusyChange: (value: boolean) => void; api: ApiDoc; origin: string; method: string; values: Record<string, string>; session: TestingSession }) {

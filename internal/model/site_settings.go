@@ -30,9 +30,19 @@ type SMTPSettings struct {
 	From     string `json:"from"`
 	ResetURL string `json:"reset_url"`
 }
+type EmailTemplate struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
+}
+type EmailTemplates struct {
+	Verification EmailTemplate `json:"verification"`
+	Reset        EmailTemplate `json:"reset"`
+	Test         EmailTemplate `json:"test"`
+}
 type SiteSettings struct {
-	Site PublicSiteInfo `json:"site"`
-	SMTP SMTPSettings   `json:"smtp"`
+	MailTemplates EmailTemplates `json:"mail_templates"`
+	Site          PublicSiteInfo `json:"site"`
+	SMTP          SMTPSettings   `json:"smtp"`
 }
 type SiteSettingsRecord struct {
 	Version               int64
@@ -41,6 +51,7 @@ type SiteSettingsRecord struct {
 	UpdatedAt             time.Time
 }
 type SiteSettingsView struct {
+	MailTemplates   EmailTemplates `json:"mail_templates"`
 	Version         int64          `json:"version"`
 	Site            PublicSiteInfo `json:"site"`
 	SMTP            SMTPSettings   `json:"smtp"`
@@ -49,9 +60,11 @@ type SiteSettingsView struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 type UpdateSiteSettingsRequest struct {
-	Version           int64          `json:"version"`
-	Site              PublicSiteInfo `json:"site"`
-	SMTP              SMTPSettings   `json:"smtp"`
-	SMTPPassword      *string        `json:"smtp_password,omitempty"`
-	ClearSMTPPassword bool           `json:"clear_smtp_password"`
+	CurrentPassword   string          `json:"current_password,omitempty"`
+	MailTemplates     *EmailTemplates `json:"mail_templates,omitempty"`
+	Version           int64           `json:"version"`
+	Site              PublicSiteInfo  `json:"site"`
+	SMTP              SMTPSettings    `json:"smtp"`
+	SMTPPassword      *string         `json:"smtp_password,omitempty"`
+	ClearSMTPPassword bool            `json:"clear_smtp_password"`
 }

@@ -73,8 +73,12 @@ func Authorize(api model.API, s interface {
 	if api.AuthMode != "api_key" {
 		return ErrUnauthorized
 	}
-	if _, valid := ValidateAPIKey(s, RequestKey(r)); !valid {
+	credential, valid := RequestCredential(r, s)
+	if !valid {
 		return ErrUnauthorized
+	}
+	if !CredentialIPAllowed(credential, r) {
+		return ErrForbidden
 	}
 	return nil
 }

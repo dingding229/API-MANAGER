@@ -71,23 +71,28 @@ type CallLog struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 type SecuritySettings struct {
-	Version             int64  `json:"version"`
-	RegistrationEnabled bool   `json:"registration_enabled"`
-	EmailLoginEnabled   bool   `json:"email_login_enabled"`
-	TurnstileEnabled    bool   `json:"turnstile_enabled"`
-	TurnstileSiteKey    string `json:"turnstile_site_key"`
-	TurnstileSecret     string `json:"-"`
-	TurnstileHost       string `json:"turnstile_host"`
-	GitHubEnabled       bool   `json:"github_enabled"`
-	GitHubClientID      string `json:"github_client_id"`
-	GitHubSecret        string `json:"-"`
-	GoogleEnabled       bool   `json:"google_enabled"`
-	GoogleClientID      string `json:"google_client_id"`
-	GoogleSecret        string `json:"-"`
-	WebsiteURL          string `json:"website_url"`
-	DefaultRole         string `json:"default_role"`
+	AllowedEmailDomains []string `json:"allowed_email_domains"`
+	Version             int64    `json:"version"`
+	RegistrationEnabled bool     `json:"registration_enabled"`
+	EmailLoginEnabled   bool     `json:"email_login_enabled"`
+	TurnstileEnabled    bool     `json:"turnstile_enabled"`
+	TurnstileSiteKey    string   `json:"turnstile_site_key"`
+	TurnstileSecret     string   `json:"-"`
+	TurnstileHost       string   `json:"turnstile_host"`
+	GitHubEnabled       bool     `json:"github_enabled"`
+	GitHubClientID      string   `json:"github_client_id"`
+	GitHubSecret        string   `json:"-"`
+	TelegramEnabled     bool     `json:"telegram_enabled"`
+	TelegramClientID    string   `json:"telegram_client_id"`
+	TelegramSecret      string   `json:"-"`
+	GoogleEnabled       bool     `json:"google_enabled"`
+	GoogleClientID      string   `json:"google_client_id"`
+	GoogleSecret        string   `json:"-"`
+	WebsiteURL          string   `json:"website_url"`
+	DefaultRole         string   `json:"default_role"`
 }
 type AccountRecord struct {
+	TimeZone           string
 	UserID             string
 	Nickname           string
 	EmailVerified      bool
@@ -115,4 +120,10 @@ type CallLogPage struct {
 	Total    int64     `json:"total"`
 	Page     int       `json:"page"`
 	PageSize int       `json:"page_size"`
+}
+
+// Private version source credential is never part of a public settings DTO.
+type VersionCheckSettings struct {
+	Version        int64
+	EncryptedToken string
 }

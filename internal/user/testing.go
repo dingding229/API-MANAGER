@@ -64,7 +64,13 @@ func (h *HTTP) testing(w http.ResponseWriter, r *http.Request) {
 			setTestingCookie(w, r, testingToken(r), h.production)
 		}
 		h.service.TouchSession(testingToken(r), r)
-		writeJSON(w, 200, map[string]any{"username": u.Username, "can_test": h.service.Can(u.ID, "api.test"), "can_test_write": h.service.Can(u.ID, "api.test")})
+		scope, e := h.service.TestingScope(u)
+		if e != nil {
+			writeJSON(w, 503, nil)
+			return
+		}
+		canTest := h.service.Can(u.ID, "api.test")
+		writeJSON(w, 200, map[string]any{"username": u.Username, "can_test": canTest, "can_test_write": canTest, "allowed_api_ids": scope})
 	case r.Method == http.MethodPost && r.URL.Path == "/test/v1/login":
 		var req struct {
 			Username string `json:"username"`

@@ -29,7 +29,7 @@ type AccountStore interface {
 func (p *Postgres) Account(ctx context.Context, id string) (model.AccountRecord, error) {
 	var a model.AccountRecord
 	a.UserID = id
-	err := p.pool.QueryRow(ctx, `SELECT nickname,email_verified FROM users WHERE id=$1`, id).Scan(&a.Nickname, &a.EmailVerified)
+	err := p.pool.QueryRow(ctx, `SELECT nickname,email_verified,time_zone FROM users WHERE id=$1`, id).Scan(&a.Nickname, &a.EmailVerified, &a.TimeZone)
 	if err != nil {
 		return a, err
 	}
@@ -245,7 +245,7 @@ func (p *Postgres) ActiveSession(ctx context.Context, id, hash string) (bool, er
 	return ok, err
 }
 func (p *Postgres) OwnCredentials(ctx context.Context, id string) ([]model.Credential, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,revoked,expires_at,created_at,(encrypted_key<>'') FROM api_credentials WHERE owner_user_id=$1 ORDER BY revoked ASC,created_at DESC LIMIT 100`, id)
+	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,revoked,expires_at,created_at,allowed_ip_ranges,(encrypted_key<>'') FROM api_credentials WHERE owner_user_id=$1 ORDER BY revoked ASC,created_at DESC LIMIT 100`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (p *Postgres) OwnCredentials(ctx context.Context, id string) ([]model.Crede
 	list := []model.Credential{}
 	for rows.Next() {
 		var v model.Credential
-		if err = rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Revoked, &v.ExpiresAt, &v.CreatedAt, &v.KeyAvailable); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Revoked, &v.ExpiresAt, &v.CreatedAt, &v.AllowedIPRanges, &v.KeyAvailable); err != nil {
 			return nil, err
 		}
 		v.OwnerUserID = id
@@ -290,7 +290,7 @@ func (p *Postgres) CreateOwnedCredential(ctx context.Context, c model.Credential
 	if active >= 20 {
 		return ErrConflict
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,created_at,owner_user_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, c.ID, c.Name, c.Prefix, c.Hash, c.EncryptedKey, c.CreatedAt, c.OwnerUserID)
+	_, err = tx.Exec(ctx, `INSERT INTO api_credentials(id,name,prefix,key_hash,encrypted_key,created_at,owner_user_id,allowed_ip_ranges) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, c.ID, c.Name, c.Prefix, c.Hash, c.EncryptedKey, c.CreatedAt, c.OwnerUserID, ipRangesJSON(c.AllowedIPRanges))
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func (p *Postgres) CreateOwnedCredential(ctx context.Context, c model.Credential
 }
 
 func (p *Postgres) CredentialDirectory(ctx context.Context) ([]model.Credential, error) {
-	rows, err := p.pool.Query(ctx, `SELECT c.id,c.owner_user_id::text,COALESCE(u.username,''),COALESCE(u.nickname,''),COALESCE(u.email,''),c.name,c.prefix,c.revoked,c.created_at,c.expires_at,(c.encrypted_key<>'') FROM api_credentials c LEFT JOIN users u ON u.id=c.owner_user_id ORDER BY c.created_at DESC LIMIT 5000`)
+	rows, err := p.pool.Query(ctx, `SELECT c.id,c.owner_user_id::text,COALESCE(u.username,''),COALESCE(u.nickname,''),COALESCE(u.email,''),c.name,c.prefix,c.revoked,c.created_at,c.expires_at,c.allowed_ip_ranges,(c.encrypted_key<>'') FROM api_credentials c LEFT JOIN users u ON u.id=c.owner_user_id ORDER BY c.created_at DESC LIMIT 5000`)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (p *Postgres) CredentialDirectory(ctx context.Context) ([]model.Credential,
 	for rows.Next() {
 		var c model.Credential
 		var owner *string
-		if err = rows.Scan(&c.ID, &owner, &c.OwnerUsername, &c.OwnerNickname, &c.OwnerEmail, &c.Name, &c.Prefix, &c.Revoked, &c.CreatedAt, &c.ExpiresAt, &c.KeyAvailable); err != nil {
+		if err = rows.Scan(&c.ID, &owner, &c.OwnerUsername, &c.OwnerNickname, &c.OwnerEmail, &c.Name, &c.Prefix, &c.Revoked, &c.CreatedAt, &c.ExpiresAt, &c.AllowedIPRanges, &c.KeyAvailable); err != nil {
 			return nil, err
 		}
 		if owner != nil {

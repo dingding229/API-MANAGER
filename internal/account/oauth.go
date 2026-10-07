@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-type oauthState struct{ Provider, Verifier, Redirect, UserID, SessionHash, Fingerprint string }
+type oauthState struct{ Provider, Verifier, Redirect, UserID, SessionHash, Fingerprint, ReturnTo, Nonce string }
 
 func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.SecuritySettings) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/account/v1/oauth/"), "/")
@@ -25,7 +25,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		return
 	}
 	provider := parts[0]
-	enabled := provider == "github" && cfg.GitHubEnabled || provider == "google" && cfg.GoogleEnabled
+	enabled := provider == "github" && cfg.GitHubEnabled || provider == "google" && cfg.GoogleEnabled || provider == "telegram" && cfg.TelegramEnabled
 	if !enabled {
 		write(w, 403, map[string]string{"error": "此登录方式未开放"})
 		return
@@ -42,6 +42,13 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		endpoint = "https://oauth2.googleapis.com/token"
 		scope = "openid email profile"
 	}
+	if provider == "telegram" {
+		clientID = cfg.TelegramClientID
+		secret = cfg.TelegramSecret
+		authorize = telegramIssuer + "/auth"
+		endpoint = telegramIssuer + "/token"
+		scope = "openid profile"
+	}
 	redirect := strings.TrimRight(cfg.WebsiteURL, "/") + "/account/v1/oauth/" + provider + "/callback"
 	cookieName := "api_manager_oauth_" + provider
 	if parts[1] == "start" {
@@ -53,17 +60,13 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		if !read(w, r, &request) {
 			return
 		}
-		if e := s.verifyTurnstile(r.Context(), r, cfg, request.TurnstileToken, "oauth"); e != nil {
-			write(w, 403, map[string]string{"error": e.Error()})
-			return
-		}
 		verifier := randomHex(32)
 		nonce := randomHex(32)
 		if verifier == "" || nonce == "" {
 			write(w, 503, map[string]string{"error": "授权随机数不可用"})
 			return
 		}
-		saved := oauthState{Provider: provider, Verifier: verifier, Redirect: redirect}
+		saved := oauthState{Provider: provider, Verifier: verifier, Redirect: redirect, ReturnTo: oauthReturn(request.ReturnTo, s.adminPath), Nonce: nonce}
 		if request.Purpose == "link" {
 			token, _ := auth.SessionToken(r)
 			u, e := s.users.ValidateSession(token)
@@ -96,6 +99,9 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		}
 		hash := sha256.Sum256([]byte(verifier))
 		query := url.Values{"client_id": {clientID}, "redirect_uri": {redirect}, "response_type": {"code"}, "scope": {scope}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(hash[:])}, "code_challenge_method": {"S256"}}
+		if provider == "telegram" {
+			query.Set("nonce", nonce)
+		}
 		// SameSite=Lax is required for the cross-site provider callback, not the main session.
 		http.SetCookie(w, &http.Cookie{Name: cookieName, Value: nonce, Path: "/account/v1/oauth/" + provider, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 300})
 		write(w, 200, map[string]string{"url": authorize + "?" + query.Encode()})
@@ -132,7 +138,13 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		return
 	}
 	values := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}, "client_id": {clientID}, "client_secret": {secret}, "code_verifier": {saved.Verifier}}
+	if provider == "telegram" {
+		values.Del("client_secret")
+	}
 	req, _ := http.NewRequestWithContext(r.Context(), "POST", endpoint, strings.NewReader(values.Encode()))
+	if provider == "telegram" {
+		req.SetBasicAuth(clientID, secret)
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	resp, err := s.client.Do(req)
@@ -142,6 +154,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 	}
 	var exchange struct {
 		AccessToken string `json:"access_token"`
+		IDToken     string `json:"id_token"`
 	}
 	err = json.NewDecoder(io.LimitReader(resp.Body, 32<<10)).Decode(&exchange)
 	_ = resp.Body.Close()
@@ -149,7 +162,12 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		write(w, 403, map[string]string{"error": "授权兑换失败"})
 		return
 	}
-	subject, email, nickname, err := s.providerIdentity(r, provider, exchange.AccessToken)
+	var subject, email, nickname string
+	if provider == "telegram" {
+		subject, nickname, err = s.telegramIdentity(r.Context(), exchange.IDToken, clientID, saved.Nonce)
+	} else {
+		subject, email, nickname, err = s.providerIdentity(r, provider, exchange.AccessToken)
+	}
 	if err != nil {
 		write(w, 403, map[string]string{"error": "第三方未提供可验证的账号资料"})
 		return
@@ -179,12 +197,20 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 	if err == nil {
 		u, err = s.store.GetUserByID(id)
 	} else if errors.Is(err, store.ErrNotFound) {
+		if provider == "telegram" {
+			s.beginTelegramOnboarding(w, r, cfg, subject, nickname, saved.ReturnTo)
+			return
+		}
 		if !cfg.RegistrationEnabled {
 			write(w, 403, map[string]string{"error": "新用户注册尚未开放"})
 			return
 		}
 		if _, exists := s.store.GetUserByEmail(email); exists == nil {
 			write(w, 409, map[string]string{"error": "邮箱已有账号，请先使用原方式登录。不会自动合并账号。"})
+			return
+		}
+		if !emailDomainAllowed(cfg, email) {
+			write(w, 403, map[string]string{"error": "此邮箱后缀不在允许注册范围内"})
 			return
 		}
 		role := cfg.DefaultRole
@@ -226,7 +252,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: "api_manager_mfa", Value: challenge, Path: "/account/v1", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 300})
-		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account?mfa=1", 303)
+		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account?mfa=1&return="+url.QueryEscape(rReturn(saved.ReturnTo, s.adminPath)), 303)
 		return
 	}
 	_, session, err := s.users.StartSession(u, r)
@@ -235,7 +261,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		return
 	}
 	user.SetSessionCookie(w, r, session, s.production)
-	http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account", 303)
+	http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+saved.ReturnTo, 303)
 }
 func (s *Service) providerIdentity(r *http.Request, provider, token string) (string, string, string, error) {
 	url := "https://api.github.com/user"
@@ -287,4 +313,35 @@ func (s *Service) providerIdentity(r *http.Request, provider, token string) (str
 		}
 	}
 	return "", "", "", errors.New("unverified email")
+}
+
+func oauthReturn(v, adminPath string) string {
+	switch v {
+	case "home":
+		return "/"
+	case "docs":
+		return "/docs"
+	case "guide":
+		return "/guide"
+	case "playground":
+		return "/playground"
+	case "admin":
+		return adminPath + "/"
+	}
+	return "/account"
+}
+func rReturn(path, adminPath string) string {
+	switch path {
+	case "/":
+		return "home"
+	case "/docs":
+		return "docs"
+	case "/guide":
+		return "guide"
+	case "/playground":
+		return "playground"
+	case adminPath + "/":
+		return "admin"
+	}
+	return ""
 }

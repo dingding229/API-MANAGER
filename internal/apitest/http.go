@@ -100,7 +100,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a, target, ok := h.resolve(body.Request)
-	if !ok {
+	if !ok || !testOwnerAllowed(u, a) {
 		reply(w, 403, "此接口未开放在线测试，或调用方式已经变化。")
 		return
 	}
@@ -199,7 +199,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 401, "登录会话已退出。")
 		return
 	}
-	if !h.users.Can(u.ID, "api.test") {
+	if !h.users.Can(u.ID, "api.test") || !testOwnerAllowed(u, a) {
 		reply(w, 403, "账号权限已变化。")
 		return
 	}
@@ -315,4 +315,13 @@ func (b *bounded) Write(data []byte) (int, error) {
 		_, _ = b.body.Write(data[:min(remaining, len(data))])
 	}
 	return len(data), nil
+}
+
+func testOwnerAllowed(u model.User, a model.API) bool {
+	developer, admin := u.Role == "api_developer", u.Role == "super_admin"
+	for _, r := range u.Roles {
+		developer = developer || r == "api_developer"
+		admin = admin || r == "super_admin"
+	}
+	return !developer || admin || (a.OwnerUserID != "" && a.OwnerUserID == u.ID)
 }

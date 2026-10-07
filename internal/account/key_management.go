@@ -75,6 +75,11 @@ func (s *Service) adminKeys(w http.ResponseWriter, r *http.Request, u model.User
 	}
 }
 func (s *Service) createKey(w http.ResponseWriter, r *http.Request, u model.User, owner string, req payload) {
+	ranges, err := auth.NormalizeIPRanges(req.AllowedIPRanges)
+	if err != nil {
+		write(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
 	name := strings.TrimSpace(req.KeyName)
 	if name == "" || utf8.RuneCountInString(name) > 64 || (req.ExpiresAt != nil && (!req.ExpiresAt.After(time.Now()) || req.ExpiresAt.After(time.Now().AddDate(5, 0, 0)))) {
 		write(w, 400, map[string]string{"error": "凭据名称须为 1–64 个字符，有效期须在未来五年内"})
@@ -94,7 +99,7 @@ func (s *Service) createKey(w http.ResponseWriter, r *http.Request, u model.User
 		write(w, 503, nil)
 		return
 	}
-	v := model.Credential{ID: ids.NewUUID(), OwnerUserID: owner, Name: name, Prefix: secret[:10], Hash: auth.HashAPIKey(secret), EncryptedKey: encrypted, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: req.ExpiresAt}
+	v := model.Credential{AllowedIPRanges: ranges, ID: ids.NewUUID(), OwnerUserID: owner, Name: name, Prefix: secret[:10], Hash: auth.HashAPIKey(secret), EncryptedKey: encrypted, KeyAvailable: true, CreatedAt: time.Now().UTC(), ExpiresAt: req.ExpiresAt}
 	st, ok := s.store.(interface {
 		CreateOwnedCredential(context.Context, model.Credential) error
 	})
@@ -149,13 +154,6 @@ func (s *Service) ReauthenticateAdmin(r *http.Request, password, token string) e
 	session, _ := auth.SessionToken(r)
 	u, e := s.users.ValidateSession(session)
 	if e != nil {
-		return e
-	}
-	cfg, e := s.settings(r.Context())
-	if e != nil {
-		return e
-	}
-	if e = s.verifyTurnstile(r.Context(), r, cfg, token, "sensitive"); e != nil {
 		return e
 	}
 	_, e = s.users.VerifyPassword(u.Username, password)

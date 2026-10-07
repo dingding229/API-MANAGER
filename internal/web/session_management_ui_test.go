@@ -11,7 +11,7 @@ func TestPersonalSessionsAndKeysHaveOnlyUserCenterEntry(t *testing.T) {
 	if strings.Contains(string(html), `data-page="sessions"`) || strings.Contains(string(js), "renderSessions") || strings.Contains(string(js), "/sessions") {
 		t.Fatal("duplicated personal session page retained")
 	}
-	if !strings.Contains(string(js), `window.open('/account'`) {
+	if !strings.Contains(string(js), `location.assign('/account'`) {
 		t.Fatal("user-center entry missing")
 	}
 	if !strings.Contains(string(html), `id="login-view" class="auth-shell hidden"`) || !strings.Contains(string(js), `$('#auth-loading')?.classList.add('hidden')`) {
