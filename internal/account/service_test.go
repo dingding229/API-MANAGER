@@ -234,7 +234,7 @@ func TestPostgresPaidGatewayKeyIsolationAndRefund(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	uname := "billing-" + ids.NewUUID()
+	uname := "billing-" + ids.NewUUID()[:8]
 	u, e := users.CreateWithContact(uname, uname+"@example.test", "TestPass888", []string{"member"})
 	if e != nil {
 		t.Fatal(e)
@@ -243,7 +243,7 @@ func TestPostgresPaidGatewayKeyIsolationAndRefund(t *testing.T) {
 	if _, e = p.AdjustBalance(ctx, u.ID, 1000, "credit:"+u.ID, "test"); e != nil {
 		t.Fatal(e)
 	}
-	raw := "ak_" + ids.NewUUID()
+	raw := "ak_" + ids.NewUUID()[:8]
 	c := model.Credential{ID: ids.NewUUID(), OwnerUserID: u.ID, Name: "owned", Prefix: "ak_test", Hash: auth.HashAPIKey(raw), CreatedAt: time.Now()}
 	if e = p.CreateCredential(c); e != nil {
 		t.Fatal(e)
@@ -292,7 +292,7 @@ func TestPostgresPaidGatewayKeyIsolationAndRefund(t *testing.T) {
 	if e != nil || len(logs) != 2 {
 		t.Fatal(logs, e)
 	}
-	other := "ak_" + ids.NewUUID()
+	other := "ak_" + ids.NewUUID()[:8]
 	if e = p.CreateCredential(model.Credential{ID: ids.NewUUID(), Name: "legacy", Hash: auth.HashAPIKey(other), CreatedAt: now}); e != nil {
 		t.Fatal(e)
 	}
@@ -322,11 +322,11 @@ func TestPostgresOwnKeyRevealAndLogsCannotCrossUsers(t *testing.T) {
 	if e = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member"}, ""); e != nil {
 		t.Fatal(e)
 	}
-	owner, e := users.Create("key-owner-"+ids.NewUUID(), "Password888", "member")
+	owner, e := users.Create("key-owner-"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := users.Create("key-other-"+ids.NewUUID(), "Password888", "member")
+	other, e := users.Create("key-other-"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -339,7 +339,7 @@ func TestPostgresOwnKeyRevealAndLogsCannotCrossUsers(t *testing.T) {
 		t.Fatal(e)
 	}
 	s := New(p, users, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
-	secret := "ak_" + ids.NewUUID()
+	secret := "ak_" + ids.NewUUID()[:8]
 	encrypted, e := auth.EncryptSecret(s.key, secret)
 	if e != nil {
 		t.Fatal(e)
@@ -401,11 +401,11 @@ func TestPostgresUserCenterSessionAdministrationIsScoped(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	admin, e := users.Create("session-admin-"+ids.NewUUID(), "Password888", "super_admin")
+	admin, e := users.Create("session-admin-"+ids.NewUUID()[:8], "Password888", "super_admin")
 	if e != nil {
 		t.Fatal(e)
 	}
-	member, e := users.Create("session-member-"+ids.NewUUID(), "Password888", "member")
+	member, e := users.Create("session-member-"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -476,7 +476,7 @@ func TestPostgresAdminOperationsDoNotRequireOTPButLoginStillDoes(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	u, e := users.Create("otp-admin-"+ids.NewUUID(), "Password888", "super_admin")
+	u, e := users.Create("otp-admin-"+ids.NewUUID()[:8], "Password888", "super_admin")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -520,7 +520,7 @@ func TestPostgresAdminOperationsDoNotRequireOTPButLoginStillDoes(t *testing.T) {
 		s.ServeHTTP(w, r)
 		return w
 	}
-	target, e := users.Create("grant-user-"+ids.NewUUID(), "Password888", "member")
+	target, e := users.Create("grant-user-"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
+import './styles.css';
 
 export const metadata: Metadata = {
   title: 'API Manager · 开放接口目录',

@@ -21,7 +21,7 @@ func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	if _, err := service.Create("eight-byte-user", "12345678", "member"); err != nil {
 		t.Fatalf("8-byte password was rejected: %v", err)
 	}
-	created, err := service.Create("valid@example.com", "123456789012", "member")
+	created, err := service.Create("valid-user", "123456789012", "member")
 	if err != nil {
 		t.Fatalf("12-byte password was rejected: %v", err)
 	}

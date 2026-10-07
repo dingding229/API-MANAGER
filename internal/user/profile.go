@@ -22,7 +22,7 @@ func validEmail(value string) bool {
 	address, err := mail.ParseAddress(value)
 	return err == nil && address.Address == value && strings.Contains(value, "@") && len(value) <= 254 && !strings.ContainsAny(value, "\r\n\x00")
 }
-func validUsername(value string) bool { return usernamePattern.MatchString(value) || validEmail(value) }
+func validUsername(value string) bool { return usernamePattern.MatchString(value) }
 func validPassword(value string) bool { return len(value) >= 8 && len(value) <= 72 }
 
 // UpdateProfile separates self-service reauthentication from delegated user management.
@@ -38,6 +38,9 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 		return model.User{}, false, err
 	}
 	if actorID == userID {
+		if !request.AdminOperation && !s.Can(actorID, "account.security") {
+			return model.User{}, false, ErrProfileForbidden
+		}
 		if len(request.CurrentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(target.PasswordHash), []byte(request.CurrentPassword)) != nil {
 			return model.User{}, false, ErrCurrentPassword
 		}
@@ -50,7 +53,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	username := target.Username
 	if request.Username != nil {
 		username = normalizeUsername(*request.Username)
-		if !validUsername(username) {
+		if username != target.Username && !validUsername(username) {
 			return model.User{}, false, fmt.Errorf("%w: use a 3 to 64 character username or a valid email address", ErrInvalidProfile)
 		}
 	}
@@ -77,7 +80,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 		}
 		passwordHash = string(hash)
 	}
-	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{ExpectedAuthRevision: target.AuthRevision, Username: username, Email: email, ExpectedEmail: target.Email, PasswordHash: passwordHash, ExpectedUsername: target.Username, ExpectedPasswordHash: target.PasswordHash, EmailVerified: request.Email != nil && s.profileGuard != nil})
+	return s.store.UpdateUserProfile(userID, model.UserProfileUpdate{ExpectedAuthRevision: target.AuthRevision, Username: username, Email: email, ExpectedEmail: target.Email, PasswordHash: passwordHash, ExpectedUsername: target.Username, ExpectedPasswordHash: target.PasswordHash, EmailVerified: request.Email != nil && s.profileGuard != nil && !request.AdminOperation})
 }
 
 func (s *Service) canEditProfile(actorID string, target model.User) bool {

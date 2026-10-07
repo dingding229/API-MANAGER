@@ -16,6 +16,7 @@ type Handler interface {
 }
 
 type Registry struct {
+	settings map[string]settingSnapshot
 	mu       sync.RWMutex
 	handlers map[string]Handler
 }

@@ -113,39 +113,37 @@ func (s *Service) portal(w http.ResponseWriter, r *http.Request, u model.User) {
 		if !read(w, r, &req) {
 			return
 		}
-		if strings.TrimSpace(req.KeyName) == "" || utf8.RuneCountInString(req.KeyName) > 64 {
-			write(w, 400, map[string]string{"error": "请填写凭据名称"})
+		if e := s.reauthenticate(r, u, req); e != nil {
+			write(w, 403, map[string]string{"error": "请验证当前密码与双重验证"})
 			return
 		}
-		if err := s.reauthenticate(r, u, req); err != nil {
-			write(w, 403, map[string]string{"error": "请重新验证当前密码与双重验证"})
+		s.createKey(w, r, u, u.ID, req)
+		return
+	}
+	if strings.HasPrefix(path, "/account/v1/keys/") && strings.HasSuffix(path, "/rotate") && r.Method == "POST" {
+		var req payload
+		if !read(w, r, &req) {
 			return
 		}
-		raw := randomHex(24)
-		if raw == "" {
-			write(w, 503, map[string]string{"error": "随机密钥不可用"})
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/account/v1/keys/"), "/rotate")
+		key, e := s.store.GetCredential(id)
+		if e != nil || key.OwnerUserID != u.ID {
+			write(w, 404, nil)
 			return
 		}
-		key := "ak_" + raw
-		encrypted, e := auth.EncryptSecret(s.key, key)
-		if e != nil {
-			write(w, 503, map[string]string{"error": "凭据暂不可创建"})
+		if !req.Confirm {
+			write(w, 400, nil)
 			return
 		}
-		v := model.Credential{ID: ids.NewUUID(), OwnerUserID: u.ID, Name: req.KeyName, Prefix: key[:10], Hash: auth.HashAPIKey(key), EncryptedKey: encrypted, CreatedAt: time.Now().UTC()}
-		creator, ok := s.store.(interface {
-			CreateOwnedCredential(context.Context, model.Credential) error
-		})
-		if !ok {
-			write(w, 503, map[string]string{"error": "凭据创建服务不可用"})
+		if e = s.reauthenticate(r, u, req); e != nil {
+			write(w, 403, nil)
 			return
 		}
-		if e = creator.CreateOwnedCredential(r.Context(), v); e != nil {
-			write(w, 503, map[string]string{"error": "凭据创建失败；每个用户最多 20 个有效凭据"})
+		if e = audit.New(s.store, nil).RecordChecked(r.Context(), auditActor(u), r, "credential.rotate.requested", "credential", id, 202, nil); e != nil {
+			write(w, 503, nil)
 			return
 		}
-		s.users.RecordAudit(auditActor(u), r, "account.key.create", "credential", v.ID, 201, nil)
-		write(w, 201, map[string]any{"credential": v, "api_key": key})
+		s.rotateKey(w, r, u, key)
 		return
 	}
 	if strings.HasPrefix(path, "/account/v1/keys/") && strings.HasSuffix(path, "/reveal") && r.Method == "POST" {
@@ -191,6 +189,27 @@ func billingError(err error) string {
 }
 func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cfg model.SecuritySettings) {
 	path := r.URL.Path
+	if path == "/account/v1/admin/card-plans" && r.Method == "GET" {
+		v, e := s.store.(store.BillingStore).Plans(r.Context(), true)
+		if e != nil {
+			write(w, 503, nil)
+		} else {
+			write(w, 200, v)
+		}
+		return
+	}
+	if strings.HasPrefix(path, "/account/v1/admin/cards") {
+		s.cards(w, r, u)
+		return
+	}
+	if path == "/account/v1/admin/usage" && r.Method == "GET" {
+		s.userUsage(w, r)
+		return
+	}
+	if strings.HasPrefix(path, "/account/v1/admin/keys") {
+		s.adminKeys(w, r, u)
+		return
+	}
 	if path == "/account/v1/admin/plan-assignment" && r.Method == "POST" {
 		s.assignPlan(w, r, u)
 		return

@@ -71,6 +71,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
 	if r.URL.Path == "/account" || r.URL.Path == "/account/" {
 		name = "account.html"
+	} else if r.URL.Path == "/playground" || r.URL.Path == "/playground/" {
+		name = "playground.html"
 	} else if r.URL.Path == "/" {
 		name = "index.html"
 	} else if !strings.HasPrefix(name, "_next/static/") || !fs.ValidPath(name) || strings.ContainsAny(name, "\\\x00") {
@@ -88,7 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if name != "index.html" && name != "account.html" {
+	if name != "index.html" && name != "account.html" && name != "playground.html" {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
 	if name == "index.html" && h.siteProvider != nil {

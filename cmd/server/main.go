@@ -122,6 +122,7 @@ func main() {
 	plugins := plugin.NewRegistry()
 	defer func() { _ = plugins.Close(context.Background()) }()
 	pluginManager := plugin.NewManagerWithOptions(activeStore, plugins, cfg.PluginDir, cfg.PluginMaxBytes, logger, plugin.Options{DatabaseWritesEnabled: cfg.PluginDatabaseWrites})
+	pluginManager.SetSettingsKey(cfg.CredentialEncryptionKey)
 	if err := pluginManager.LoadEnabled(rootCtx); err != nil {
 		logger.Error("some managed WASM plugins failed to load", "error", err)
 	}
@@ -160,6 +161,7 @@ func main() {
 	accounts := account.New(activeStore, userService, cfg.CredentialEncryptionKey, siteService, cfg.ProductionMode)
 	accounts.SetLimiter(limiter)
 	accounts.SetAdminPath(cfg.AdminPath)
+	admin.SetCredentialGuard(accounts.ReauthenticateAdmin)
 	if _, ok := activeStore.(store.AccountStore); ok {
 		authHandler.SetAccountHandler(accounts)
 		authHandler.SetCriticalGuard(accounts.Guard)

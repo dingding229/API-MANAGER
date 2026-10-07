@@ -16,7 +16,7 @@ import (
 
 // Release builds replace these values via -ldflags. Local builds are never
 // reported as a verified release, even when their base version matches a tag.
-var Version = "0.3.30-dev"
+var Version = "0.3.31-dev"
 var Revision = "development"
 var BuiltAt = ""
 

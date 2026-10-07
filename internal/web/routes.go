@@ -13,7 +13,7 @@ func ValidAdminPath(value string) bool {
 	if len(value) > 100 || !adminPathPattern.MatchString(value) {
 		return false
 	}
-	for _, path := range []string{"/api", "/auth", "/test", "/account", "/health", "/metrics", "/public", "/ui", "/_next", "/catalog.json", "/admin/v1"} {
+	for _, path := range []string{"/api", "/auth", "/test", "/account", "/playground", "/health", "/metrics", "/public", "/ui", "/_next", "/catalog.json", "/admin/v1"} {
 		if value == path || strings.HasPrefix(value, path+"/") {
 			return false
 		}

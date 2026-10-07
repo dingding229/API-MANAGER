@@ -36,6 +36,7 @@ type PluginStore interface {
 }
 
 type Manager struct {
+	settingsKey           string
 	store                 PluginStore
 	registry              *Registry
 	root                  string
@@ -161,6 +162,9 @@ func (m *Manager) Enable(ctx context.Context, id string) (model.Plugin, error) {
 	if hasCapability(manifest, "database_write") && !m.databaseWritesEnabled {
 		return model.Plugin{}, errors.New("plugin requests database_write but plugin database writes are disabled")
 	}
+	if err := m.activateSettings(ctx, id); err != nil {
+		return model.Plugin{}, err
+	}
 	if err := m.registry.LoadWASMBytes(ctx, manifestBytes, wasmBytes); err != nil {
 		return model.Plugin{}, fmt.Errorf("load plugin: %w", err)
 	}
@@ -222,7 +226,9 @@ func (m *Manager) LoadEnabled(ctx context.Context) error {
 				err = errors.New("plugin requests database_write but plugin database writes are disabled")
 			}
 			if err == nil {
-				err = m.registry.LoadWASMBytes(ctx, manifestBytes, wasmBytes)
+				if err = m.activateSettings(ctx, item.ID); err == nil {
+					err = m.registry.LoadWASMBytes(ctx, manifestBytes, wasmBytes)
+				}
 			}
 		}
 		if err != nil {

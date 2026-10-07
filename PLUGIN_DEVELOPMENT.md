@@ -100,3 +100,44 @@ func (a *Admin) manageSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ sessionAdministration = (*user.Service)(nil)
+
+
+## 插件设置接口
+
+插件版本可在 `manifest.yaml` 声明设置字段。例如：
+
+```yaml
+settings_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    region:
+      type: string
+      title: 地区
+      default: CN
+      enum: [CN, US, JP]
+    timeout:
+      type: integer
+      title: 超时秒数
+      minimum: 1
+      maximum: 30
+      default: 5
+    access_token:
+      type: string
+      title: 访问令牌
+      writeOnly: true
+  required: [region, timeout]
+```
+
+Schema 最大 32 KiB，设置 JSON 最大 32 KiB、深度最大 16，必须声明 `type: object` 和 `additionalProperties: false`。不支持 `$ref`、外部资源引用、原型字段。字段标题与说明是纯文本，不支持 HTML。密码或令牌必须标记 `writeOnly: true`，不得把实际秘密放入清单默认值。
+
+每次 `handle` 请求 JSON 新增可选 `settings` 对象，只包含当前插件版本的配置。未声明设置的旧插件无需变更；请忽略未知请求字段。插件只能从此对象读取设置，不获得数据库连接、任意 SQL、环境变量或文件系统权限。配置仅注入匹配插件，不注入公开 API 文档。
+
+后台配置接口（使用管理会话与 `plugin.manage` 权限）：
+
+- `GET /admin/v1/plugins/{plugin_id}/settings` 返回 `schema`、`values`、`version` 和 `secret_fields_set`，不返回 `writeOnly` 的秘密值。
+- `PUT /admin/v1/plugins/{plugin_id}/settings` 提交 `{ "version": 版本, "changes": { "字段": 值 }, "remove_fields": [] }`。省略字段保留旧值；填写 `remove_fields` 显式删除字段，最终对象仍须通过 Schema 校验。
+- 设置按插件版本 ID 隔离、加密持久化。后台保存后生效，无需重新上传 WASM；缓存标识包含配置版本，因此旧缓存不会作为新配置结果返回。
+- 必填设置没有值或默认值时，插件不能启用。先保存合法设置再启用。新版本应包含迁移兼容的字段或让管理员在启用前补齐设置。
+
+客户端禁止把配置或配置中的秘密复制到响应、调用日志、错误消息或公开说明中。主程序限制插件权限，但无法替插件作者判断哪些业务输出应保密。

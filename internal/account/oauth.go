@@ -71,6 +71,10 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 				write(w, 401, map[string]string{"error": "请先登录"})
 				return
 			}
+			if !s.users.Can(u.ID, "account.security") {
+				write(w, 403, map[string]string{"error": "没有管理授权账号的权限"})
+				return
+			}
 			if _, e = s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil || s.checkMFA(r.Context(), u.ID, request.TOTPCode) != nil {
 				write(w, 403, map[string]string{"error": "请重新验证账号"})
 				return

@@ -30,7 +30,7 @@
       <aside class="sidebar">
         <div class="brand"><span class="brand-mark" aria-hidden="true"></span><strong>API Manager</strong></div>
         <nav id="nav" aria-label="管理后台导航">
-          <button data-page="overview" class="active">总览</button>
+          <button data-page="overview" data-permission="api.read" class="active">总览</button>
           <button data-page="apis" data-permission="api.read">接口管理</button>
           <button data-page="credentials" data-permission="credential.read">调用凭证</button>
           <button data-page="users" data-permission="user.read">用户管理</button>
@@ -38,13 +38,14 @@
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>
-          <button data-page="accounts" data-super-admin="true" class="hidden">用户余额</button>
-          <button data-page="plans" data-super-admin="true" class="hidden">套餐管理</button>
-          <button data-page="calllogs" data-super-admin="true" class="hidden">调用日志</button>
+          <button data-page="accounts" data-permission="billing.read" class="hidden">用户余额</button>
+          <button data-page="cards" data-permission="card.manage" class="hidden">卡密管理</button>
+          <button data-page="plans" data-permission="billing.read" class="hidden">套餐管理</button>
+          <button data-page="calllogs" data-permission="audit.read" class="hidden">调用日志</button>
           <button data-page="authentication" data-super-admin="true" class="hidden">注册与登录</button>
           <button data-page="settings" data-super-admin="true" class="hidden">网站设置</button>
         </nav>
-        <div class="version-status" aria-label="程序版本"><span id="current-version">版本读取中…</span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" class="link">检查更新</button></div>
+        <div class="version-status" aria-label="程序版本"><span id="current-version">版本读取中…</span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" data-permission="api.read" class="link">检查更新</button></div>
         <div class="account"><span id="current-user"></span><div class="account-actions"><button id="account-settings" class="link">账号设置</button><button id="logout" class="link">退出登录</button></div></div>
       </aside>
       <section class="content" aria-labelledby="page-title">
@@ -58,5 +59,6 @@
   <script src="__ADMIN_PATH__/app.js"></script>
  <script src="__ADMIN_PATH__/account.js"></script>
  <script src="__ADMIN_PATH__/consolidation.js"></script>
+ <script src="__ADMIN_PATH__/enhancements.js"></script>
 </body>
 </html>

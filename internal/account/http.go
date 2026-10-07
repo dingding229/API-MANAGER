@@ -21,27 +21,34 @@ import (
 )
 
 type payload struct {
-	UserID          string `json:"user_id,omitempty"`
-	Username        string `json:"username"`
-	Email           string `json:"email"`
-	Password        string `json:"password"`
-	Nickname        string `json:"nickname"`
-	Code            string `json:"code"`
-	Purpose         string `json:"purpose"`
-	VerificationID  string `json:"verification_id"`
-	ChallengeID     string `json:"challenge_id"`
-	TOTPCode        string `json:"totp_code"`
-	CurrentPassword string `json:"current_password"`
-	TurnstileToken  string `json:"turnstile_token"`
-	OperationID     string `json:"operation_id"`
-	PlanID          string `json:"plan_id"`
-	KeyName         string `json:"key_name"`
-	Proof           string `json:"proof"`
-	Confirm         bool   `json:"confirm"`
+	UserID          string     `json:"user_id,omitempty"`
+	Username        string     `json:"username"`
+	Email           string     `json:"email"`
+	Password        string     `json:"password"`
+	Nickname        string     `json:"nickname"`
+	Code            string     `json:"code"`
+	Purpose         string     `json:"purpose"`
+	VerificationID  string     `json:"verification_id"`
+	ChallengeID     string     `json:"challenge_id"`
+	TOTPCode        string     `json:"totp_code"`
+	CurrentPassword string     `json:"current_password"`
+	TurnstileToken  string     `json:"turnstile_token"`
+	OperationID     string     `json:"operation_id"`
+	PlanID          string     `json:"plan_id"`
+	KeyName         string     `json:"key_name"`
+	Proof           string     `json:"proof"`
+	Confirm         bool       `json:"confirm"`
+	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.limiter != nil && !s.limiter.Allow("account-ip:"+httpx.Client(r).IP, 30, time.Minute, time.Now()) {
+	limit := 30
+	bucket := "account-write-ip:"
+	if r.Method == "GET" || r.Method == "HEAD" {
+		limit = 180
+		bucket = "account-read-ip:"
+	}
+	if s.limiter != nil && !s.limiter.Allow(bucket+httpx.Client(r).IP, limit, time.Minute, time.Now()) {
 		write(w, 429, map[string]string{"error": "操作过于频繁，请稍后再试"})
 		return
 	}
@@ -132,6 +139,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.users.TouchSession(token, r)
+	if permission := accountPermission(r); permission != "" && !s.users.Can(u.ID, permission) {
+		write(w, 403, map[string]string{"error": "没有执行此操作的权限"})
+		return
+	}
 	if auth.UnsafeMethod(r.Method) {
 		if _, cookie := auth.SessionToken(r); cookie && !auth.CookieMutationAllowed(r) {
 			write(w, 403, map[string]string{"error": "请求来源不正确"})
@@ -139,8 +150,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if path == "/account/v1/session-users" && r.Method == "GET" {
-		if !s.users.Can(u.ID, "*") {
-			write(w, 403, map[string]string{"error": "仅管理员可查看所有用户会话"})
+		if !s.users.Can(u.ID, "user.read") {
+			write(w, 403, map[string]string{"error": "没有查看用户会话的权限"})
 			return
 		}
 		list := []map[string]string{}
@@ -211,13 +222,30 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if path == "/account/v1/redeem" {
+		s.cards(w, r, u)
+		return
+	}
+	if path == "/account/v1/subscriptions" && r.Method == "GET" {
+		if st, ok := s.store.(interface {
+			Subscriptions(context.Context, string) ([]model.Subscription, error)
+		}); ok {
+			v, e := st.Subscriptions(r.Context(), u.ID)
+			if e != nil {
+				write(w, 503, nil)
+			} else {
+				write(w, 200, v)
+			}
+			return
+		}
+	}
 	if strings.HasPrefix(path, "/account/v1/wallet") || path == "/account/v1/plans" || path == "/account/v1/subscription" || path == "/account/v1/logs" || strings.HasPrefix(path, "/account/v1/keys") {
 		s.portal(w, r, u)
 		return
 	}
 	if strings.HasPrefix(path, "/account/v1/admin/") {
-		if !s.users.Can(u.ID, "*") {
-			write(w, 403, map[string]string{"error": "仅站点所有者可修改此配置"})
+		if permission := adminAccountPermission(r); !s.users.Can(u.ID, permission) {
+			write(w, 403, map[string]string{"error": "没有访问此管理功能的权限"})
 			return
 		}
 		s.admin(w, r, u, cfg)
@@ -253,7 +281,7 @@ func (s *Service) sendCode(w http.ResponseWriter, r *http.Request, cfg model.Sec
 	}
 	if req.Purpose == "change-email" {
 		token, _ := auth.SessionToken(r)
-		if _, err := s.users.ValidateSession(token); err != nil {
+		if u, err := s.users.ValidateSession(token); err != nil || !s.users.Can(u.ID, "account.security") {
 			write(w, 401, map[string]string{"error": "请先登录"})
 			return
 		}
@@ -261,7 +289,7 @@ func (s *Service) sendCode(w http.ResponseWriter, r *http.Request, cfg model.Sec
 	if req.Purpose == "verify-email" {
 		token, _ := auth.SessionToken(r)
 		u, e := s.users.ValidateSession(token)
-		if e != nil || u.Email != req.Email {
+		if e != nil || u.Email != req.Email || !s.users.Can(u.ID, "account.profile") {
 			write(w, 403, map[string]string{"error": "只能验证自己的邮箱"})
 			return
 		}

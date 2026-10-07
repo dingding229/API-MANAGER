@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"api-manager/internal/model"
+	"api-manager/internal/schema"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -75,15 +76,16 @@ func validRoute(r Route) error {
 // Manifest describes a WebAssembly plugin package. The runtime purposefully
 // exposes no host filesystem, environment variables, or network imports.
 type Manifest struct {
-	ID           string   `yaml:"id" json:"id"`
-	Name         string   `yaml:"name" json:"name"`
-	Version      string   `yaml:"version" json:"version"`
-	APIVersion   string   `yaml:"api_version" json:"api_version"`
-	Runtime      string   `yaml:"runtime" json:"runtime"`
-	Entrypoint   string   `yaml:"entrypoint" json:"entrypoint"`
-	Routes       []Route  `yaml:"routes,omitempty" json:"routes,omitempty"`
-	Capabilities []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
-	Limits       struct {
+	SettingsSchema map[string]any `yaml:"settings_schema,omitempty" json:"settings_schema,omitempty"`
+	ID             string         `yaml:"id" json:"id"`
+	Name           string         `yaml:"name" json:"name"`
+	Version        string         `yaml:"version" json:"version"`
+	APIVersion     string         `yaml:"api_version" json:"api_version"`
+	Runtime        string         `yaml:"runtime" json:"runtime"`
+	Entrypoint     string         `yaml:"entrypoint" json:"entrypoint"`
+	Routes         []Route        `yaml:"routes,omitempty" json:"routes,omitempty"`
+	Capabilities   []string       `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Limits         struct {
 		TimeoutMS int `yaml:"timeout_ms" json:"timeout_ms"`
 		MemoryMB  int `yaml:"memory_mb" json:"memory_mb"`
 	} `yaml:"limits" json:"limits"`
@@ -92,6 +94,7 @@ type Manifest struct {
 var ErrRequestTooLarge = errors.New("wasm request exceeds 1 MiB")
 
 type wasmHandler struct {
+	registry *Registry
 	revision string
 	manifest Manifest
 	runtime  wazero.Runtime
@@ -100,12 +103,13 @@ type wasmHandler struct {
 }
 
 type wasmRequest struct {
-	Method  string              `json:"method"`
-	Path    string              `json:"path"`
-	Query   map[string][]string `json:"query"`
-	Headers map[string][]string `json:"headers"`
-	Body    string              `json:"body_base64"`
-	APIID   string              `json:"api_id"`
+	Settings map[string]any      `json:"settings,omitempty"`
+	Method   string              `json:"method"`
+	Path     string              `json:"path"`
+	Query    map[string][]string `json:"query"`
+	Headers  map[string][]string `json:"headers"`
+	Body     string              `json:"body_base64"`
+	APIID    string              `json:"api_id"`
 }
 
 type wasmResponse struct {
@@ -128,6 +132,15 @@ func ParseManifest(data []byte) (Manifest, error) {
 	}
 	if strings.TrimSpace(manifest.Version) == "" {
 		return Manifest{}, errors.New("plugin manifest version is required")
+	}
+	if len(manifest.SettingsSchema) > 0 {
+		raw, _ := json.Marshal(manifest.SettingsSchema)
+		if len(raw) > 32768 || manifest.SettingsSchema["type"] != "object" || manifest.SettingsSchema["additionalProperties"] != false || !safeSettings(manifest.SettingsSchema, 0) || !validSettingsSchema(manifest.SettingsSchema) {
+			return manifest, errors.New("settings_schema must be a bounded object schema")
+		}
+		if err := schema.ValidateSchema(raw); err != nil {
+			return manifest, err
+		}
 	}
 	seenCapabilities := make(map[string]bool)
 	for _, capability := range manifest.Capabilities {
@@ -237,7 +250,7 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 		timeout = 3 * time.Second
 	}
 	sum := sha256.Sum256(append(append([]byte(nil), manifestBytes...), wasmBytes...))
-	r.Register(&wasmHandler{revision: hex.EncodeToString(sum[:]), manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout})
+	r.Register(&wasmHandler{registry: r, revision: hex.EncodeToString(sum[:]), manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout})
 	return nil
 }
 
@@ -273,7 +286,7 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 	if len(body) > 1<<20 {
 		return ErrRequestTooLarge
 	}
-	payload, err := json.Marshal(wasmRequest{Method: request.Method, Path: request.URL.Path, Query: request.URL.Query(), Headers: request.Header, Body: base64.StdEncoding.EncodeToString(body), APIID: configuredAPI.ID})
+	payload, err := json.Marshal(wasmRequest{Settings: w.registry.getSettings(w.Name()).Data, Method: request.Method, Path: request.URL.Path, Query: request.URL.Query(), Headers: request.Header, Body: base64.StdEncoding.EncodeToString(body), APIID: configuredAPI.ID})
 	if err != nil {
 		return fmt.Errorf("marshal wasm request: %w", err)
 	}
@@ -363,4 +376,6 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 
 var _ Handler = (*wasmHandler)(nil)
 
-func (w *wasmHandler) CacheRevision() string { return w.revision }
+func (w *wasmHandler) CacheRevision() string {
+	return w.revision + fmt.Sprint(w.registry.getSettings(w.Name()).Version)
+}

@@ -287,7 +287,7 @@ func (s *Service) ResetGuard(r *http.Request, hash, code string) (int64, error) 
 
 func publicRole(role model.Role) bool {
 	for _, p := range role.Permissions {
-		if p != "api.test" {
+		if p != "api.test" && !publicAccountPermission(p) {
 			return false
 		}
 	}
@@ -320,4 +320,12 @@ func (s *Service) siteInfo() model.PublicSiteInfo {
 		return provider.Public()
 	}
 	return model.PublicSiteInfo{TimeZone: model.DefaultTimeZone}
+}
+
+func publicAccountPermission(code string) bool {
+	switch code {
+	case "account.profile", "account.security", "account.keys.read", "account.keys.write", "account.keys.reveal", "account.logs", "account.sessions", "account.billing.read", "account.billing.purchase", "account.billing.redeem":
+		return true
+	}
+	return false
 }

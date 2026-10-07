@@ -107,9 +107,11 @@ type Credential struct {
 }
 
 type CreateCredentialRequest struct {
-	OwnerUserID string     `json:"owner_user_id,omitempty"`
-	Name        string     `json:"name"`
-	ExpiresAt   *time.Time `json:"expires_at"`
+	CurrentPassword string     `json:"current_password,omitempty"`
+	TurnstileToken  string     `json:"turnstile_token,omitempty"`
+	OwnerUserID     string     `json:"owner_user_id,omitempty"`
+	Name            string     `json:"name"`
+	ExpiresAt       *time.Time `json:"expires_at"`
 }
 
 type User struct {

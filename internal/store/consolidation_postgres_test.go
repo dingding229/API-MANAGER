@@ -136,6 +136,17 @@ func TestUserLogFilteringPaginationAndDirectoryIsolation(t *testing.T) {
 
 func TestLegacyRolesAreArchivedAndNeverPromoted(t *testing.T) {
 	p := accountPG(t)
+	prior := p.ListRoles()
+	t.Cleanup(func() {
+		for _, role := range prior {
+			if role.Name == "super_admin" {
+				continue
+			}
+			if e := p.UpdateRolePermissions(role.Name, role.Permissions); e != nil {
+				t.Error(e)
+			}
+		}
+	})
 	ctx := context.Background()
 	roleID := ids.NewUUID()
 	if _, e := p.pool.Exec(ctx, `INSERT INTO roles(id,name,description,display_name) VALUES($1,'operator','legacy','旧运维')`, roleID); e != nil {

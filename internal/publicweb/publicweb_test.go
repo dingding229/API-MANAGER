@@ -121,3 +121,22 @@ func TestPublicConnectPolicyOnlyAddsTheConfiguredSafeAPIDomain(t *testing.T) {
 		}
 	}
 }
+
+func TestPlaygroundHTMLIsServedButNeverSharedCached(t *testing.T) {
+	dir := t.TempDir()
+	if e := os.WriteFile(filepath.Join(dir, "index.html"), []byte("index"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(filepath.Join(dir, "playground.html"), []byte("playground"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	h, e := New(dir, http.NotFoundHandler())
+	if e != nil {
+		t.Fatal(e)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/playground", nil))
+	if w.Code != 200 || w.Body.String() != "playground" || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+		t.Fatal(w.Code, w.Body.String(), w.Header())
+	}
+}

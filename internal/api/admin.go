@@ -43,6 +43,7 @@ type UserManager interface {
 }
 
 type Admin struct {
+	credentialGuard         func(*http.Request, string, string) error
 	versionChecker          *version.Checker
 	siteSettings            *sitesettings.Service
 	store                   store.Store
@@ -71,6 +72,9 @@ func NewAdminWithUserManagementAndPluginManager(s store.Store, plugins *plugin.R
 }
 func (a *Admin) SetProductionMode(enabled bool) { a.productionMode = enabled }
 
+func (a *Admin) SetCredentialGuard(guard func(*http.Request, string, string) error) {
+	a.credentialGuard = guard
+}
 func (a *Admin) SetCredentialEncryptionKey(secret string) {
 	if strings.TrimSpace(secret) != "" {
 		a.credentialEncryptionKey = secret
@@ -104,7 +108,33 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if a.credentialGuard != nil && strings.HasPrefix(r.URL.Path, "/admin/v1/credentials") && (auth.UnsafeMethod(r.Method) || strings.HasSuffix(r.URL.Path, "/key")) {
+		if r.Method == "GET" {
+			writeJSON(w, 405, map[string]string{"error": "请在调用凭证页面验证后查看密钥"})
+			return
+		}
+		raw, e := io.ReadAll(io.LimitReader(r.Body, 65537))
+		if e != nil || len(raw) > 65536 {
+			writeJSON(w, 400, nil)
+			return
+		}
+		var step struct {
+			CurrentPassword string `json:"current_password"`
+			TurnstileToken  string `json:"turnstile_token"`
+		}
+		if json.Unmarshal(raw, &step) != nil {
+			writeJSON(w, 400, nil)
+			return
+		}
+		if e = a.credentialGuard(r, step.CurrentPassword, step.TurnstileToken); e != nil {
+			writeJSON(w, 403, nil)
+			return
+		}
+		r.Body = io.NopCloser(strings.NewReader(string(raw)))
+	}
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/settings") && (r.Method == "GET" || r.Method == "PUT"):
+		a.pluginSettings(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/"):
 		a.deleteRole(w, r)
 	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/") && !strings.HasSuffix(r.URL.Path, "/permissions"):
@@ -231,6 +261,8 @@ func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
+	case path == "/admin/v1/overview" || path == "/admin/v1/version":
+		return "api.read"
 	case strings.HasPrefix(path, "/admin/v1/users/") && strings.Contains(path, "/sessions"):
 		return ""
 	case strings.HasPrefix(path, "/admin/v1/apis/") && strings.HasSuffix(path, "/cache") && r.Method == http.MethodDelete:
@@ -256,11 +288,11 @@ func requiredPermission(r *http.Request) string {
 	case strings.HasPrefix(path, "/admin/v1/apis/") && r.Method == http.MethodDelete:
 		return "api.delete"
 	case strings.HasPrefix(path, "/admin/v1/credentials/") && strings.HasSuffix(path, "/key") && r.Method == http.MethodGet:
-		return "*"
+		return "credential.reveal"
 	case path == "/admin/v1/credentials" && r.Method == http.MethodGet:
-		return "*"
+		return "credential.read"
 	case path == "/admin/v1/credentials" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/credentials/") && (strings.HasSuffix(path, "/revoke") || strings.HasSuffix(path, "/rotate")) && r.Method == http.MethodPost:
-		return "*"
+		return "credential.write"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodGet, path == "/admin/v1/plugin-library" && r.Method == http.MethodGet:
 		return "plugin.read"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/plugins/"), path == "/admin/v1/plugin-library/install" && r.Method == http.MethodPost, path == "/admin/v1/plugin-library" && r.Method == http.MethodPost:

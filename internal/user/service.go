@@ -60,7 +60,7 @@ type sessionStore interface {
 	DeleteSession(string) error
 }
 
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}$`)
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$`)
 var dummyPasswordHash = func() []byte {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-check"), passwordHashCost)
 	return hash

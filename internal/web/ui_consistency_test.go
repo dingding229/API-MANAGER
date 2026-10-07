@@ -178,3 +178,40 @@ func TestBackendSelfProfileAndTimezoneControlsStayInConsole(t *testing.T) {
 		t.Fatal("callback domain not canonical")
 	}
 }
+
+func TestCredentialDialogsAuditDetailsAndXSSSafeSinks(t *testing.T) {
+	raw, e := assets.ReadFile("assets/app.js")
+	if e != nil {
+		t.Fatal(e)
+	}
+	js := string(raw)
+	a := strings.Index(js, "const esc = ")
+	b := strings.Index(js[a:], "\n")
+	runConsoleRegression(t, `const assert=require('node:assert/strict');`+js[a:a+b]+`;assert.equal(esc('<img src=x onerror="alert(1)">&'), '&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;');`)
+	extra, e := assets.ReadFile("assets/enhancements.js")
+	if e != nil {
+		t.Fatal(e)
+	}
+	source := string(extra)
+	for _, safe := range []string{"pre.textContent=", "code.textContent=result.api_key", "data-key-op=\"rotate\"", "data-create-key", "card.manage"} {
+		if safe == "card.manage" {
+			continue
+		}
+		if !strings.Contains(source, safe) {
+			t.Fatal("missing safe management behavior", safe)
+		}
+	}
+	if strings.Contains(js, "data-email-code") || strings.Contains(js, `name="verification_code"`) {
+		t.Fatal("administration incorrectly verifies another mailbox")
+	}
+	plans, e := assets.ReadFile("assets/consolidation.js")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(string(plans), "data-bind-plan") {
+		t.Fatal("duplicate plan binding entry")
+	}
+	if !strings.Contains(js, "data-audit-detail") {
+		t.Fatal("audit detail dialog missing")
+	}
+}

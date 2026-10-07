@@ -33,7 +33,7 @@ func (s *Service) profileGuard(actorID, targetID string, request model.UpdateUse
 	if err != nil {
 		return err
 	}
-	if request.Email != nil && strings.ToLower(strings.TrimSpace(*request.Email)) != target.Email {
+	if !request.AdminOperation && request.Email != nil && strings.ToLower(strings.TrimSpace(*request.Email)) != target.Email {
 		v, err := s.verifyCode(ctx, request.VerificationID, "change-email", request.VerificationCode, actorID)
 		if err != nil || v.Subject != strings.ToLower(strings.TrimSpace(*request.Email)) {
 			return fmt.Errorf("%w: 修改邮箱须验证新邮箱", user.ErrInvalidProfile)

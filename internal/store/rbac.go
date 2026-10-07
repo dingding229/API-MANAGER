@@ -3,6 +3,20 @@ package store
 import "api-manager/internal/model"
 
 var defaultPermissions = []model.Permission{
+	{Code: "account.profile", Description: "修改个人资料"},
+	{Code: "account.security", Description: "管理个人账号安全"},
+	{Code: "account.keys.read", Description: "查看个人调用凭据"},
+	{Code: "account.keys.write", Description: "创建、重置和吊销个人调用凭据"},
+	{Code: "account.keys.reveal", Description: "查看个人调用密钥"},
+	{Code: "account.logs", Description: "查看个人调用日志"},
+	{Code: "account.sessions", Description: "管理个人登录会话"},
+	{Code: "account.billing.read", Description: "查看个人余额、套餐和用量"},
+	{Code: "account.billing.purchase", Description: "购买与续订套餐"},
+	{Code: "account.billing.redeem", Description: "兑换余额卡密和套餐卡密"},
+	{Code: "billing.read", Description: "查看全站余额和套餐"},
+	{Code: "billing.manage", Description: "管理套餐、绑定套餐和调整余额"},
+	{Code: "card.manage", Description: "创建、查看和停用卡密"},
+
 	{Code: "api.read", Description: "查看接口与 OpenAPI 文档"},
 	{Code: "api.write", Description: "创建与修改接口"},
 	{Code: "api.publish", Description: "发布、下线与回滚接口"},
@@ -23,8 +37,8 @@ var defaultPermissions = []model.Permission{
 
 var defaultRoles = []model.Role{
 	{Name: "super_admin", DisplayName: "管理员", Description: "管理所有用户、接口与网站设置", Permissions: []string{"*"}},
-	{Name: "member", DisplayName: "普通用户", Description: "使用个人账户、凭据、日志与公开在线测试", Permissions: []string{"api.test"}},
-	{Name: "api_developer", DisplayName: "接口开发者", Description: "开发、发布与管理接口", Permissions: []string{"api.test", "api.read", "api.write", "api.publish", "api.delete", "plugin.read", "plugin.manage", "observability.read"}},
+	{Name: "member", DisplayName: "普通用户", Description: "使用个人账户、凭据、日志与公开在线测试", Permissions: []string{"api.test", "account.profile", "account.security", "account.keys.read", "account.keys.write", "account.keys.reveal", "account.logs", "account.sessions", "account.billing.read", "account.billing.purchase", "account.billing.redeem"}},
+	{Name: "api_developer", DisplayName: "接口开发者", Description: "开发、发布与管理接口", Permissions: []string{"account.profile", "account.security", "account.keys.read", "account.keys.write", "account.keys.reveal", "account.logs", "account.sessions", "account.billing.read", "account.billing.purchase", "account.billing.redeem", "api.test", "api.read", "api.write", "api.publish", "api.delete", "plugin.read", "plugin.manage", "observability.read"}},
 }
 
 func SupportedRole(name string) bool {

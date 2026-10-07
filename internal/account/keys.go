@@ -31,12 +31,12 @@ func (s *Service) revealOwnKey(w http.ResponseWriter, r *http.Request, u model.U
 		return
 	}
 	if key.Revoked || key.EncryptedKey == "" {
-		write(w, 409, map[string]string{"error": "此凭据已吊销或没有可恢复的密钥，请新建凭据"})
+		write(w, 409, map[string]string{"error": "此凭据已吊销或没有可恢复的密钥，请重置或新建凭据"})
 		return
 	}
 	secret, e := auth.DecryptSecret(s.key, key.EncryptedKey)
 	if e != nil || subtle.ConstantTimeCompare([]byte(auth.HashAPIKey(secret)), []byte(key.Hash)) != 1 {
-		write(w, 409, map[string]string{"error": "密钥不可恢复，请新建凭据"})
+		write(w, 409, map[string]string{"error": "密钥不可恢复，请重置或新建凭据"})
 		return
 	}
 	if e = audit.New(s.store, nil).RecordChecked(r.Context(), auditActor(u), r, "account.key.reveal", "credential", id, 200, nil); e != nil {

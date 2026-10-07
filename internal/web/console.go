@@ -25,7 +25,7 @@ func ConsoleWithSite(base string, provider func() model.PublicSiteInfo) http.Han
 		if r.URL.Path == base || path == "" || path == "index.html" {
 			path = "index.html"
 		}
-		if path != "index.html" && path != "app.css" && path != "app.js" && path != "controls.css" && path != "account.js" && path != "consolidation.js" {
+		if path != "index.html" && path != "app.css" && path != "app.js" && path != "controls.css" && path != "account.js" && path != "consolidation.js" && path != "enhancements.js" {
 			http.NotFound(w, r)
 			return
 		}
