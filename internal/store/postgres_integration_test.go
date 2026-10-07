@@ -126,7 +126,7 @@ func TestPostgresProductionInvariants(t *testing.T) {
 	demotions := make(chan error, 2)
 	for _, id := range []string{first.ID, second.ID} {
 		wg.Add(1)
-		go func(id string) { defer wg.Done(); demotions <- p.AssignUserRoles(id, []string{"viewer"}) }(id)
+		go func(id string) { defer wg.Done(); demotions <- p.AssignUserRoles(id, []string{"member"}) }(id)
 	}
 	wg.Wait()
 	close(demotions)

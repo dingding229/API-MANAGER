@@ -88,14 +88,10 @@ func (s *Service) portal(w http.ResponseWriter, r *http.Request, u model.User) {
 		return
 	}
 	if path == "/account/v1/logs" && r.Method == "GET" {
-		v, e := billing.CallLogs(r.Context(), u.ID)
-		if e != nil {
-			write(w, 503, map[string]string{"error": "调用日志不可读取"})
-			return
-		}
-		write(w, 200, v)
+		s.callLogs(w, r, u.ID)
 		return
 	}
+
 	if path == "/account/v1/keys" && r.Method == "GET" {
 		st, ok := s.store.(interface {
 			OwnCredentials(context.Context, string) ([]model.Credential, error)
@@ -152,6 +148,10 @@ func (s *Service) portal(w http.ResponseWriter, r *http.Request, u model.User) {
 		write(w, 201, map[string]any{"credential": v, "api_key": key})
 		return
 	}
+	if strings.HasPrefix(path, "/account/v1/keys/") && strings.HasSuffix(path, "/reveal") && r.Method == "POST" {
+		s.revealOwnKey(w, r, u)
+		return
+	}
 	if strings.HasPrefix(path, "/account/v1/keys/") && r.Method == "DELETE" {
 		var req payload
 		if !read(w, r, &req) {
@@ -191,6 +191,14 @@ func billingError(err error) string {
 }
 func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cfg model.SecuritySettings) {
 	path := r.URL.Path
+	if path == "/account/v1/admin/logs" && r.Method == "GET" {
+		s.callLogs(w, r, "")
+		return
+	}
+	if path == "/account/v1/admin/credentials" && r.Method == "GET" {
+		s.credentialDirectory(w, r)
+		return
+	}
 	billing, _ := s.store.(store.BillingStore)
 	if billing == nil {
 		write(w, 503, map[string]string{"error": "结算服务不可用"})
@@ -423,31 +431,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 		write(w, 200, map[string]bool{"saved": true})
 		return
 	}
-	if path == "/account/v1/admin/levels" && r.Method == "PUT" {
-		var request struct {
-			Name        string `json:"name"`
-			DisplayName string `json:"display_name"`
-			Description string `json:"description"`
-		}
-		if !read(w, r, &request) {
-			return
-		}
-		if request.DisplayName == "" || utf8.RuneCountInString(request.DisplayName) > 64 || len(request.Description) > 512 {
-			write(w, 400, map[string]string{"error": "等级展示名无效"})
-			return
-		}
-		if e := audit.New(s.store, nil).RecordChecked(r.Context(), auditActor(u), r, "account.level.rename.requested", "role", request.Name, 202, nil); e != nil {
-			write(w, 503, map[string]string{"error": "审计不可用，未保存"})
-			return
-		}
-		if e := s.accounts.RenameRole(r.Context(), request.Name, request.DisplayName, request.Description); e != nil {
-			write(w, 503, map[string]string{"error": "等级保存失败"})
-			return
-		}
-		s.users.RecordAudit(auditActor(u), r, "account.level.rename", "role", request.Name, 200, nil)
-		write(w, 200, map[string]bool{"saved": true})
-		return
-	}
+
 	write(w, 404, map[string]string{"error": "not found"})
 }
 func validateSettings(cfg model.SecuritySettings, roles interface {

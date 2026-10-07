@@ -98,10 +98,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 400, "测试参数格式不正确。")
 		return
 	}
-	if body.Request.Method != "GET" && body.Request.Method != "HEAD" && !(h.users.Can(u.ID, "api.test.write") || h.users.Can(u.ID, "api.write")) {
-		reply(w, 403, "此调用方式需要接口修改权限。")
-		return
-	}
+
 	a, target, ok := h.resolve(body.Request)
 	if !ok {
 		reply(w, 403, "此接口未开放在线测试，或调用方式已经变化。")
@@ -202,7 +199,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reply(w, 401, "登录会话已退出。")
 		return
 	}
-	if !h.users.Can(u.ID, "api.test") || (body.Request.Method != "GET" && body.Request.Method != "HEAD" && !(h.users.Can(u.ID, "api.test.write") || h.users.Can(u.ID, "api.write"))) {
+	if !h.users.Can(u.ID, "api.test") {
 		reply(w, 403, "账号权限已变化。")
 		return
 	}
@@ -256,7 +253,7 @@ func (h *Handler) resolve(request Request) (model.API, *url.URL, bool) {
 	}
 	for _, a := range list {
 		hash := sha256.Sum256([]byte(a.Path))
-		if request.APIID != hex.EncodeToString(hash[:8]) || !a.Enabled || a.PublishedAt == nil || !a.PublicVisible || !a.PublicTestEnabled || (a.AuthMode != "api_key" && a.AuthMode != "none") {
+		if request.APIID != hex.EncodeToString(hash[:8]) || !a.Enabled || a.PublishedAt == nil || !a.PublicVisible || (a.AuthMode != "api_key" && a.AuthMode != "none") {
 			continue
 		}
 		allowed := false

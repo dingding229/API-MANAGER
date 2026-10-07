@@ -104,7 +104,7 @@ func TestSelfProfileUpdateRejectsWrongCurrentPassword(t *testing.T) {
 
 func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
 	s := NewService(store.NewMemory())
-	u, err := s.Create("self-reader", "old-reader-password", "viewer")
+	u, err := s.Create("self-reader", "old-reader-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

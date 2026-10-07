@@ -7,7 +7,7 @@ import (
 
 type API struct {
 	PriceMicros        int64             `json:"price_micros"`
-	PublicTestEnabled  bool              `json:"public_test_enabled"`
+	PublicTestEnabled  bool              `json:"-"`
 	PublicVisible      bool              `json:"public_visible"`
 	PublicTitle        string            `json:"public_title"`
 	PublicSummary      string            `json:"public_summary"`
@@ -20,9 +20,9 @@ type API struct {
 	Path               string            `json:"path"`
 	AuthMode           string            `json:"auth_mode"`
 	AuthConfig         map[string]string `json:"auth_config,omitempty"`
-	RateLimitPerMinute int               `json:"rate_limit_per_minute,omitempty"`
-	DailyQuota         int               `json:"daily_quota,omitempty"`
-	MonthlyQuota       int               `json:"monthly_quota,omitempty"`
+	RateLimitPerMinute int               `json:"-"`
+	DailyQuota         int               `json:"-"`
+	MonthlyQuota       int               `json:"-"`
 	ResponseStatus     int               `json:"response_status"`
 	ResponseBody       string            `json:"response_body,omitempty"`
 	RequestSchema      json.RawMessage   `json:"request_schema,omitempty"`
@@ -45,20 +45,21 @@ type API struct {
 }
 
 type CreateAPIRequest struct {
-	PriceMicros        int64             `json:"price_micros"`
-	PublicTestEnabled  bool              `json:"public_test_enabled"`
-	PublicVisible      bool              `json:"public_visible"`
-	PublicTitle        string            `json:"public_title"`
-	PublicSummary      string            `json:"public_summary"`
-	PublicCategory     string            `json:"public_category"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	Method             string            `json:"method"`
-	Methods            []string          `json:"methods,omitempty"`
-	Path               string            `json:"path"`
-	AuthMode           string            `json:"auth_mode"`
-	AuthConfig         map[string]string `json:"auth_config"`
-	RateLimitPerMinute int               `json:"rate_limit_per_minute"`
+	PriceMicros       int64             `json:"price_micros"`
+	PublicTestEnabled bool              `json:"public_test_enabled"`
+	PublicVisible     bool              `json:"public_visible"`
+	PublicTitle       string            `json:"public_title"`
+	PublicSummary     string            `json:"public_summary"`
+	PublicCategory    string            `json:"public_category"`
+	Name              string            `json:"name"`
+	Description       string            `json:"description"`
+	Method            string            `json:"method"`
+	Methods           []string          `json:"methods,omitempty"`
+	Path              string            `json:"path"`
+	AuthMode          string            `json:"auth_mode"`
+	AuthConfig        map[string]string `json:"auth_config"`
+	// Legacy inputs are accepted for upgrade compatibility and ignored; plans own all business quotas.
+	RateLimitPerMinute int               `json:"rate_limit_per_minute,omitempty"`
 	DailyQuota         int               `json:"daily_quota"`
 	MonthlyQuota       int               `json:"monthly_quota"`
 	ResponseStatus     int               `json:"response_status"`
@@ -90,16 +91,19 @@ type OpenAPIImportRequest struct {
 }
 
 type Credential struct {
-	OwnerUserID  string     `json:"owner_user_id,omitempty"`
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Prefix       string     `json:"prefix"`
-	Hash         string     `json:"-"`
-	EncryptedKey string     `json:"-"`
-	KeyAvailable bool       `json:"api_key_available"`
-	Revoked      bool       `json:"revoked"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	OwnerUsername string     `json:"owner_username,omitempty"`
+	OwnerNickname string     `json:"owner_nickname,omitempty"`
+	OwnerEmail    string     `json:"owner_email,omitempty"`
+	OwnerUserID   string     `json:"owner_user_id,omitempty"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Prefix        string     `json:"prefix"`
+	Hash          string     `json:"-"`
+	EncryptedKey  string     `json:"-"`
+	KeyAvailable  bool       `json:"api_key_available"`
+	Revoked       bool       `json:"revoked"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
 }
 
 type CreateCredentialRequest struct {

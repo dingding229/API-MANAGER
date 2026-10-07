@@ -21,6 +21,7 @@ import (
 )
 
 type payload struct {
+	UserID          string `json:"user_id,omitempty"`
 	Username        string `json:"username"`
 	Email           string `json:"email"`
 	Password        string `json:"password"`
@@ -136,6 +137,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, 403, map[string]string{"error": "请求来源不正确"})
 			return
 		}
+	}
+	if path == "/account/v1/session-users" && r.Method == "GET" {
+		if !s.users.Can(u.ID, "*") {
+			write(w, 403, map[string]string{"error": "仅管理员可查看所有用户会话"})
+			return
+		}
+		list := []map[string]string{}
+		for _, v := range s.store.ListUsers() {
+			list = append(list, map[string]string{"id": v.ID, "username": v.Username, "nickname": v.Nickname})
+		}
+		write(w, 200, list)
+		return
 	}
 	if strings.HasPrefix(path, "/account/v1/sessions") {
 		s.sessions(w, r, u)

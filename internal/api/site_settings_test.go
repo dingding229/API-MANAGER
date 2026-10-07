@@ -24,7 +24,7 @@ func TestWebsiteSettingsSuperAdminOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = users.Create("tenant", "Password88", "tenant_admin")
+	_, err = users.Create("tenant", "Password88", "api_developer")
 	if err != nil {
 		t.Fatal(err)
 	}

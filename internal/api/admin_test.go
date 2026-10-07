@@ -41,10 +41,14 @@ func TestRollbackRejectsLegacyModesBeforeChangingRoutes(t *testing.T) {
 }
 
 func TestValidateAPIRequestAcceptsExactlyOneKnownHTTPMethod(t *testing.T) {
- for _, method := range []string{"GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS"," get "} {
-  if err:=validateAPIRequest(model.CreateAPIRequest{Name:"known",Method:method,Path:"/api/known",ResponseBody:`{}`},true);err!=nil{t.Fatalf("method %q rejected: %v",method,err)}
- }
- for _, method := range []string{"","GET,POST","GET POST","CONNECT","TRACE","[GET,POST]"} {
-  if err:=validateAPIRequest(model.CreateAPIRequest{Name:"invalid",Method:method,Path:"/api/invalid",ResponseBody:`{}`},true);err==nil{t.Fatalf("method %q accepted",method)}
- }
+	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", " get "} {
+		if err := validateAPIRequest(model.CreateAPIRequest{Name: "known", Method: method, Path: "/api/known", ResponseBody: `{}`}, true); err != nil {
+			t.Fatalf("method %q rejected: %v", method, err)
+		}
+	}
+	for _, method := range []string{"", "GET,POST", "GET POST", "CONNECT", "TRACE", "[GET,POST]"} {
+		if err := validateAPIRequest(model.CreateAPIRequest{Name: "invalid", Method: method, Path: "/api/invalid", ResponseBody: `{}`}, true); err == nil {
+			t.Fatalf("method %q accepted", method)
+		}
+	}
 }

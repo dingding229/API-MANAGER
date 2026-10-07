@@ -287,7 +287,7 @@ func (p *Postgres) FinishCharge(ctx context.Context, c model.Charge, success boo
 	return tx.Commit(ctx)
 }
 func (p *Postgres) SaveCallLog(ctx context.Context, v model.CallLog) error {
-	_, err := p.pool.Exec(ctx, `INSERT INTO user_call_logs(id,user_id,api_id,api_name,method,path,client_ip,status,price_micros,duration_ms,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`, v.ID, v.UserID, v.APIID, v.APIName, v.Method, v.Path, v.ClientIP, v.Status, v.PriceMicros, v.DurationMS, v.CreatedAt)
+	_, err := p.pool.Exec(ctx, `INSERT INTO user_call_logs(id,user_id,api_id,api_name,method,path,client_ip,status,price_micros,duration_ms,created_at,request_id,trace_id,credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(id) DO NOTHING`, v.ID, v.UserID, v.APIID, v.APIName, v.Method, v.Path, v.ClientIP, v.Status, v.PriceMicros, v.DurationMS, v.CreatedAt, v.RequestID, v.TraceID, v.CredentialID)
 	return err
 }
 func (p *Postgres) CallLogs(ctx context.Context, id string) ([]model.CallLog, error) {

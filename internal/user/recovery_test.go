@@ -25,7 +25,7 @@ func (m *captureMailer) SendReset(_ context.Context, to, link string) error {
 func TestEmailIsSeparateAndRecoveryIsSingleUse(t *testing.T) {
 	m := store.NewMemory()
 	s := NewService(m)
-	u, err := s.CreateWithContact("reader", "reader@example.test", "ReadMe88", []string{"viewer"})
+	u, err := s.CreateWithContact("reader", "reader@example.test", "ReadMe88", []string{"member"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestForgotPasswordDoesNotRevealAccountOrToken(t *testing.T) {
 func TestResetStoreRejectsExpiredAndChangedContact(t *testing.T) {
 	m := store.NewMemory()
 	s := NewService(m)
-	u, err := s.CreateWithContact("reader", "reader@example.test", "ReadMe88", []string{"viewer"})
+	u, err := s.CreateWithContact("reader", "reader@example.test", "ReadMe88", []string{"member"})
 	if err != nil {
 		t.Fatal(err)
 	}

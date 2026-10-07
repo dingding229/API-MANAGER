@@ -53,17 +53,21 @@ type Charge struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 type CallLog struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"user_id"`
-	APIID       string    `json:"api_id"`
-	APIName     string    `json:"api_name"`
-	Method      string    `json:"method"`
-	Path        string    `json:"path"`
-	ClientIP    string    `json:"client_ip"`
-	Status      int       `json:"status"`
-	PriceMicros int64     `json:"price_micros"`
-	DurationMS  int64     `json:"duration_ms"`
-	CreatedAt   time.Time `json:"created_at"`
+	RequestID    string    `json:"request_id"`
+	TraceID      string    `json:"trace_id"`
+	CredentialID string    `json:"credential_id"`
+	Username     string    `json:"username"`
+	ID           string    `json:"id"`
+	UserID       string    `json:"user_id"`
+	APIID        string    `json:"api_id"`
+	APIName      string    `json:"api_name"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	ClientIP     string    `json:"client_ip"`
+	Status       int       `json:"status"`
+	PriceMicros  int64     `json:"price_micros"`
+	DurationMS   int64     `json:"duration_ms"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 type SecuritySettings struct {
 	Version             int64  `json:"version"`
@@ -99,3 +103,15 @@ type Verification struct {
 	Binding                                         string
 }
 type Identity struct{ Provider, Subject, UserID string }
+
+type CallLogQuery struct {
+	UserID, Search, Method, RequestID    string
+	StatusMin, StatusMax, Page, PageSize int
+	From, To                             time.Time
+}
+type CallLogPage struct {
+	Items    []CallLog `json:"items"`
+	Total    int64     `json:"total"`
+	Page     int       `json:"page"`
+	PageSize int       `json:"page_size"`
+}

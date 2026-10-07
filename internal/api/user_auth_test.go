@@ -18,7 +18,7 @@ func TestUsernamePasswordSessionsEnforceUserRoles(t *testing.T) {
 	if err := users.EnsureInitialAdmin("admin", "admin-password"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("reader", "reader-password", "viewer"); err != nil {
+	if _, err := users.Create("reader", "reader-password", "member"); err != nil {
 		t.Fatal(err)
 	}
 	_, adminSession, err := users.Authenticate("admin", "admin-password")
@@ -36,7 +36,7 @@ func TestUsernamePasswordSessionsEnforceUserRoles(t *testing.T) {
 		status                    int
 	}{
 		{"GET", "/admin/v1/apis", adminSession, "", 200},
-		{"GET", "/admin/v1/apis", readerSession, "", 200},
+		{"GET", "/admin/v1/apis", readerSession, "", 403},
 		{"POST", "/admin/v1/apis", readerSession, `{"name":"forbidden"}`, 403},
 		{"GET", "/admin/v1/apis", "ak_business_key", "", 401},
 		{"POST", "/admin/v1/users", readerSession, `{"email":"other","password":"other-password"}`, 403},
@@ -57,7 +57,7 @@ func TestAdminCanUpdateBasicInfoOfNonPrivilegedUserAndRevokesSessions(t *testing
 	if err := users.EnsureInitialAdmin("admin", "admin-password"); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := users.Create("reader", "reader-password", "viewer")
+	reader, err := users.Create("reader", "reader-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestReaderCannotUpdateUserProfileThroughAdminRoute(t *testing.T) {
 	if err := users.EnsureInitialAdmin("admin", "admin-password"); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := users.Create("reader", "reader-password", "viewer")
+	reader, err := users.Create("reader", "reader-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

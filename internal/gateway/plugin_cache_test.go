@@ -141,8 +141,8 @@ func TestCacheAuthQuotasMethodsParametersAndCookies(t *testing.T) {
 			t.Fatal("request rejected")
 		}
 	}
-	if cacheRequest(g, "GET", "/api/cache", "first-key", "").Code != 429 {
-		t.Fatal("hit did not consume quota")
+	if cacheRequest(g, "GET", "/api/cache", "first-key", "").Code != 200 {
+		t.Fatal("removed per-interface quota still applied")
 	}
 	if p.calls.Load() != 1 {
 		t.Fatal(p.calls.Load())

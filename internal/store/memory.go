@@ -28,6 +28,7 @@ type Memory struct {
 	releases      map[string][]model.Release
 	permissions   map[string]model.Permission
 	roles         map[string]model.Role
+	deletedRoles  map[string]bool
 	userRoles     map[string][]string
 	plugins       map[string]model.Plugin
 	pluginData    map[string]model.PluginData
@@ -38,7 +39,7 @@ type Memory struct {
 }
 
 func NewMemory() *Memory {
-	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), sessions: make(map[string]model.Session), resets: make(map[string]model.PasswordReset), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
+	memory := &Memory{apis: make(map[string]model.API), credentials: make(map[string]model.Credential), users: make(map[string]model.User), sessions: make(map[string]model.Session), resets: make(map[string]model.PasswordReset), releases: make(map[string][]model.Release), permissions: make(map[string]model.Permission), roles: make(map[string]model.Role), deletedRoles: make(map[string]bool), userRoles: make(map[string][]string), plugins: make(map[string]model.Plugin), pluginData: make(map[string]model.PluginData), auditLogs: make([]model.AuditLog, 0)}
 	memory.seedRBAC()
 	return memory
 }
@@ -50,9 +51,11 @@ func (m *Memory) seedRBAC() {
 		}
 	}
 	for _, role := range DefaultRoles() {
+		if m.deletedRoles[role.Name] {
+			continue
+		}
 		if existing, exists := m.roles[role.Name]; exists {
-			existing.Description = role.Description
-			m.roles[role.Name] = existing
+			_ = existing // administrator-edited names and descriptions survive restarts
 		} else {
 			m.roles[role.Name] = role
 		}
@@ -235,7 +238,7 @@ func (m *Memory) CreateUser(user model.User) error {
 		roles = []string{user.Role}
 	}
 	if len(roles) == 0 {
-		roles = []string{"viewer"}
+		roles = []string{"member"}
 	}
 	for _, role := range roles {
 		if _, ok := m.roles[role]; !ok {
@@ -377,6 +380,9 @@ func (m *Memory) ListPermissions() []model.Permission {
 }
 
 func (m *Memory) CreateRole(role model.Role) error {
+	if !SupportedRole(role.Name) {
+		return ErrConflict
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.roles[role.Name]; ok {
@@ -387,6 +393,7 @@ func (m *Memory) CreateRole(role model.Role) error {
 			m.permissions[code] = model.Permission{ID: code, Code: code}
 		}
 	}
+	delete(m.deletedRoles, role.Name)
 	role.Permissions = dedupe(role.Permissions)
 	m.roles[role.Name] = role
 	return nil

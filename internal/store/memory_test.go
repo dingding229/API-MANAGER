@@ -4,13 +4,13 @@ import "testing"
 
 func TestEnsureRBACPreservesCustomizedRolePermissions(t *testing.T) {
 	m := NewMemory()
-	if err := m.UpdateRolePermissions("viewer", []string{"api.read"}); err != nil {
+	if err := m.UpdateRolePermissions("api_developer", []string{"api.read"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.EnsureRBAC(); err != nil {
 		t.Fatal(err)
 	}
-	role, err := m.GetRoleByName("viewer")
+	role, err := m.GetRoleByName("api_developer")
 	if err != nil {
 		t.Fatal(err)
 	}

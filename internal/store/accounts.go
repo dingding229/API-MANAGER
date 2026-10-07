@@ -245,7 +245,7 @@ func (p *Postgres) ActiveSession(ctx context.Context, id, hash string) (bool, er
 	return ok, err
 }
 func (p *Postgres) OwnCredentials(ctx context.Context, id string) ([]model.Credential, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,revoked,expires_at,created_at FROM api_credentials WHERE owner_user_id=$1 ORDER BY created_at DESC LIMIT 100`, id)
+	rows, err := p.pool.Query(ctx, `SELECT id,name,prefix,revoked,expires_at,created_at,(encrypted_key<>'') FROM api_credentials WHERE owner_user_id=$1 ORDER BY revoked ASC,created_at DESC LIMIT 100`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +253,7 @@ func (p *Postgres) OwnCredentials(ctx context.Context, id string) ([]model.Crede
 	list := []model.Credential{}
 	for rows.Next() {
 		var v model.Credential
-		if err = rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Revoked, &v.ExpiresAt, &v.CreatedAt); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.Prefix, &v.Revoked, &v.ExpiresAt, &v.CreatedAt, &v.KeyAvailable); err != nil {
 			return nil, err
 		}
 		v.OwnerUserID = id
@@ -295,4 +295,25 @@ func (p *Postgres) CreateOwnedCredential(ctx context.Context, c model.Credential
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func (p *Postgres) CredentialDirectory(ctx context.Context) ([]model.Credential, error) {
+	rows, err := p.pool.Query(ctx, `SELECT c.id,c.owner_user_id::text,COALESCE(u.username,''),COALESCE(u.nickname,''),COALESCE(u.email,''),c.name,c.prefix,c.revoked,c.created_at,c.expires_at,(c.encrypted_key<>'') FROM api_credentials c LEFT JOIN users u ON u.id=c.owner_user_id ORDER BY c.created_at DESC LIMIT 5000`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []model.Credential{}
+	for rows.Next() {
+		var c model.Credential
+		var owner *string
+		if err = rows.Scan(&c.ID, &owner, &c.OwnerUsername, &c.OwnerNickname, &c.OwnerEmail, &c.Name, &c.Prefix, &c.Revoked, &c.CreatedAt, &c.ExpiresAt, &c.KeyAvailable); err != nil {
+			return nil, err
+		}
+		if owner != nil {
+			c.OwnerUserID = *owner
+		}
+		list = append(list, c)
+	}
+	return list, rows.Err()
 }

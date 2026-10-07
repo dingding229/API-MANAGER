@@ -59,7 +59,19 @@ func (s *Service) identities(w http.ResponseWriter, r *http.Request, u model.Use
 func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User) {
 	token, _ := auth.SessionToken(r)
 	if r.Method == "GET" && r.URL.Path == "/account/v1/sessions" {
-		list, err := s.users.Sessions(u.ID)
+		target := r.URL.Query().Get("user_id")
+		if target == "" {
+			target = u.ID
+		}
+		if target != u.ID && !s.users.Can(u.ID, "*") {
+			write(w, 403, map[string]string{"error": "只能查看自己的会话"})
+			return
+		}
+		if _, e := s.store.GetUserByID(target); e != nil {
+			write(w, 404, map[string]string{"error": "用户不存在"})
+			return
+		}
+		list, err := s.users.Sessions(target)
 		if err != nil {
 			write(w, 503, map[string]string{"error": "会话读取失败"})
 			return
@@ -71,7 +83,7 @@ func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User)
 		}
 		out := []map[string]any{}
 		for _, v := range list {
-			out = append(out, map[string]any{"id": v.ID, "device": v.Device, "login_ip": v.LoginIP, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
+			out = append(out, map[string]any{"id": v.ID, "user_id": target, "user_agent": v.UserAgent, "expires_at": v.ExpiresAt, "device": v.Device, "login_ip": v.LoginIP, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
 		}
 		write(w, 200, out)
 		return
@@ -86,7 +98,21 @@ func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User)
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/account/v1/sessions/")
-		list, err := s.users.Sessions(u.ID)
+		target := req.UserID
+		if target == "" {
+			target = u.ID
+		}
+		if target != u.ID {
+			if !s.users.Can(u.ID, "*") {
+				write(w, 403, map[string]string{"error": "不能退出其他用户的会话"})
+				return
+			}
+			if e := s.reauthenticate(r, u, req); e != nil {
+				write(w, 403, map[string]string{"error": "请重新验证管理员账号"})
+				return
+			}
+		}
+		list, err := s.users.Sessions(target)
 		if err != nil {
 			write(w, 503, map[string]string{"error": "会话服务不可用"})
 			return
@@ -106,7 +132,7 @@ func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User)
 			return
 		}
 		current, _ := s.users.CurrentSession(token)
-		if _, err = s.users.RevokeSession(u.ID, id); err != nil {
+		if _, err = s.users.RevokeSession(target, id); err != nil {
 			write(w, 503, map[string]string{"error": "会话退出失败"})
 			return
 		}

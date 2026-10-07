@@ -279,7 +279,7 @@ func (s *Service) ResetGuard(r *http.Request, hash, code string) (int64, error) 
 
 func publicRole(role model.Role) bool {
 	for _, p := range role.Permissions {
-		if p != "api.test" && p != "api.test.write" {
+		if p != "api.test" {
 			return false
 		}
 	}

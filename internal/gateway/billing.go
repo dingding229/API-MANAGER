@@ -8,6 +8,7 @@ import (
 	"api-manager/internal/store"
 	"context"
 	"errors"
+	"go.opentelemetry.io/otel/trace"
 	"net/http"
 	"time"
 )
@@ -39,22 +40,41 @@ func (g *Gateway) reserveCall(r *http.Request, a model.API, id string) (model.Ch
 	defer cancel()
 	return st.BeginCharge(ctx, id, a.ID, a.PriceMicros, ids.NewUUID(), time.Now().UTC())
 }
-func (g *Gateway) finishCall(r *http.Request, a model.API, c model.Charge, status int, started time.Time) {
-	if c.ID == "" {
+func (g *Gateway) finishCall(r *http.Request, a model.API, c model.Charge, userID string, status int, started time.Time) {
+	if userID == "" {
 		return
 	}
-	st := g.store.(store.BillingStore)
+	st, ok := g.store.(store.BillingStore)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	success := status >= 200 && status < 300
-	if err := st.FinishCharge(ctx, c, success); err != nil {
-		g.logger.Error("call settlement requires reconciliation", "charge_id", c.ID, "api_id", a.ID)
+	if c.ID != "" {
+		if err := st.FinishCharge(ctx, c, success); err != nil {
+			g.logger.Error("call settlement requires reconciliation", "charge_id", c.ID, "api_id", a.ID)
+		}
+	}
+	if c.ID == "" {
+		c.ID = ids.NewUUID()
+		c.UserID = userID
 	}
 	price := int64(0)
 	if success {
 		price = c.PriceMicros
 	}
-	if err := st.SaveCallLog(ctx, model.CallLog{ID: c.ID, UserID: c.UserID, APIID: a.ID, APIName: a.Name, Method: r.Method, Path: r.URL.Path, ClientIP: httpx.Client(r).IP, Status: status, PriceMicros: price, DurationMS: time.Since(started).Milliseconds(), CreatedAt: time.Now().UTC()}); err != nil {
+	credentialID := ""
+	if key, ok := auth.ValidateAPIKey(g.store, auth.RequestKey(r)); ok {
+		credentialID = key.ID
+	}
+	if err := st.SaveCallLog(ctx, model.CallLog{TraceID: func() string {
+		v := trace.SpanContextFromContext(r.Context())
+		if v.IsValid() {
+			return v.TraceID().String()
+		}
+		return ""
+	}(), RequestID: httpx.RequestIDFromContext(r.Context()), CredentialID: credentialID, ID: c.ID, UserID: c.UserID, APIID: a.ID, APIName: a.Name, Method: r.Method, Path: r.URL.Path, ClientIP: httpx.Client(r).IP, Status: status, PriceMicros: price, DurationMS: time.Since(started).Milliseconds(), CreatedAt: time.Now().UTC()}); err != nil {
 		g.logger.Error("own call log unavailable", "charge_id", c.ID)
 	}
 }

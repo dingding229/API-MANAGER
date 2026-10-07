@@ -74,7 +74,7 @@ func TestRegistrationDefaultCannotEscalate(t *testing.T) {
 			t.Fatal("unsafe public role", code)
 		}
 	}
-	if !publicRole(model.Role{Name: "member", Permissions: []string{"api.test", "api.test.write"}}) {
+	if !publicRole(model.Role{Name: "member", Permissions: []string{"api.test"}}) {
 		t.Fatal("safe role rejected")
 	}
 }
@@ -298,5 +298,166 @@ func TestPostgresPaidGatewayKeyIsolationAndRefund(t *testing.T) {
 	}
 	if invoke(other, false) != 403 {
 		t.Fatal("paid API accepts unowned legacy key")
+	}
+}
+
+func TestPostgresOwnKeyRevealAndLogsCannotCrossUsers(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated account database not configured")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, e := store.NewPostgres(context.Background(), dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	users := user.NewService(p)
+	cfg, _, e := p.SecuritySettings(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member"}, ""); e != nil {
+		t.Fatal(e)
+	}
+	owner, e := users.Create("key-owner-"+ids.NewUUID(), "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, e := users.Create("key-other-"+ids.NewUUID(), "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, token, e := users.Authenticate(owner.Username, "Password888")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, foreign, e := users.Authenticate(other.Username, "Password888")
+	if e != nil {
+		t.Fatal(e)
+	}
+	s := New(p, users, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
+	secret := "ak_" + ids.NewUUID()
+	encrypted, e := auth.EncryptSecret(s.key, secret)
+	if e != nil {
+		t.Fatal(e)
+	}
+	key := model.Credential{ID: ids.NewUUID(), OwnerUserID: owner.ID, Name: "test", Prefix: "ak_safe", Hash: auth.HashAPIKey(secret), EncryptedKey: encrypted, CreatedAt: time.Now()}
+	if e = p.CreateOwnedCredential(context.Background(), key); e != nil {
+		t.Fatal(e)
+	}
+	call := func(method, path, session, password string) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]string{"current_password": password})
+		r := httptest.NewRequest(method, "https://example.test"+path, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer "+session)
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-API-Request", "1")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	path := "/account/v1/keys/" + key.ID + "/reveal"
+	if w := call("POST", path, foreign, "Password888"); w.Code != 404 {
+		t.Fatal("cross-user secret", w.Code, w.Body.String())
+	}
+	if w := call("POST", path, token, "wrong"); w.Code != 403 {
+		t.Fatal("reauth omitted", w.Code)
+	}
+	if w := call("POST", path, token, "Password888"); w.Code != 200 || !strings.Contains(w.Body.String(), secret) || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	logs, e := p.ListAuditLogs(model.AuditLogQuery{Action: "account.key.reveal"})
+	if e != nil || logs.Total < 1 {
+		t.Fatal("secret access not audited", e)
+	}
+	if w := call("GET", "/account/v1/logs?user_id="+other.ID, token, ""); w.Code != 403 {
+		t.Fatal("cross-user logs", w.Code)
+	}
+	if w := call("GET", "/account/v1/admin/credentials", token, ""); w.Code != 403 {
+		t.Fatal("ordinary user accessed global credentials", w.Code)
+	}
+	key.Revoked = true
+	if e = p.UpdateCredential(key); e != nil {
+		t.Fatal(e)
+	}
+	if w := call("POST", path, token, "Password888"); w.Code != 409 {
+		t.Fatal("revoked key revealed", w.Code)
+	}
+}
+
+func TestPostgresUserCenterSessionAdministrationIsScoped(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated account database not configured")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, e := store.NewPostgres(context.Background(), dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	users := user.NewService(p)
+	admin, e := users.Create("session-admin-"+ids.NewUUID(), "Password888", "super_admin")
+	if e != nil {
+		t.Fatal(e)
+	}
+	member, e := users.Create("session-member-"+ids.NewUUID(), "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, adminToken, e := users.Authenticate(admin.Username, "Password888")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, memberToken, e := users.Authenticate(member.Username, "Password888")
+	if e != nil {
+		t.Fatal(e)
+	}
+	cfg, _, e := p.SecuritySettings(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member"}, ""); e != nil {
+		t.Fatal(e)
+	}
+	s := New(p, users, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
+	call := func(method, path, token string, body any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(method, "https://example.test"+path, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-API-Request", "1")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	if w := call("GET", "/account/v1/sessions?user_id="+admin.ID, memberToken, nil); w.Code != 403 {
+		t.Fatal("ordinary user read foreign sessions", w.Code)
+	}
+	if w := call("GET", "/account/v1/admin/logs", adminToken, nil); w.Code != 200 {
+		t.Fatal("administrator log route unavailable", w.Code, w.Body.String())
+	}
+	if w := call("GET", "/account/v1/admin/logs", memberToken, nil); w.Code != 403 {
+		t.Fatal("ordinary user queried all logs", w.Code)
+	}
+	if w := call("GET", "/account/v1/session-users", memberToken, nil); w.Code != 403 {
+		t.Fatal("global users exposed", w.Code)
+	}
+	current, e := users.CurrentSession(memberToken)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if w := call("DELETE", "/account/v1/sessions/"+current.ID, adminToken, map[string]any{"user_id": member.ID, "confirm": true}); w.Code != 403 {
+		t.Fatal("admin reauth omitted", w.Code)
+	}
+	if w := call("DELETE", "/account/v1/sessions/"+current.ID, adminToken, map[string]any{"user_id": member.ID, "confirm": true, "current_password": "Password888"}); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, e = users.ValidateSession(memberToken); e == nil {
+		t.Fatal("revoked session survived")
 	}
 }

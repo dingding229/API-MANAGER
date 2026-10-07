@@ -21,7 +21,7 @@ func TestLogCleanupRequiresDedicatedPermissionAndConfirmation(t *testing.T) {
 	memory := store.NewMemory()
 	users := user.NewService(memory)
 	sessions := map[string]string{}
-	for _, role := range []string{"super_admin", "operator", "viewer"} {
+	for _, role := range []string{"super_admin", "api_developer", "member"} {
 		if _, err := users.Create(role, "Password88", role); err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestLogCleanupRequiresDedicatedPermissionAndConfirmation(t *testing.T) {
 		status      int
 	}{
 		{"", `{"confirm":true}`, 401}, {"ak_not_a_management_session", `{"confirm":true}`, 401},
-		{sessions["operator"], `{"confirm":true}`, 403}, {sessions["viewer"], `{"confirm":true}`, 403},
+		{sessions["api_developer"], `{"confirm":true}`, 403}, {sessions["member"], `{"confirm":true}`, 403},
 		{sessions["super_admin"], `{}`, 400}, {sessions["super_admin"], `{"confirm":false}`, 400},
 		{sessions["super_admin"], `{"confirm":true,"path":"/root"}`, 400},
 		{sessions["super_admin"], `{"confirm":true} {}`, 400}, {sessions["super_admin"], `not json`, 400},
@@ -102,12 +102,12 @@ func TestLogCleanupRequiresDedicatedPermissionAndConfirmation(t *testing.T) {
 		t.Fatal("original audit history was removed")
 	}
 	// An explicit grant enables cleanup; existing operator permissions do not.
-	if err = users.UpdateRolePermissions("operator", []string{"observability.read", "observability.logs.clear"}); err != nil {
-		t.Fatal(err)
+	if err = users.UpdateRolePermissions("api_developer", []string{"observability.read", "observability.logs.clear"}); err == nil {
+		t.Fatal("developer acquired administrative log deletion permission")
 	}
 	_, _ = hub.Write([]byte("{\"msg\":\"new log\"}\n"))
-	if w = call(sessions["operator"], "/admin/v1/observability/logs", `{"confirm":true}`); w.Code != 200 {
-		t.Fatal("dedicated permission grant is not honored")
+	if w = call(sessions["api_developer"], "/admin/v1/observability/logs", `{"confirm":true}`); w.Code != 403 {
+		t.Fatal("developer bypassed log deletion restriction")
 	}
 }
 
@@ -187,11 +187,11 @@ func TestLogCleanupRoleCannotBeGrantedByAnOrdinaryUserManager(t *testing.T) {
 	if _, err := users.Create("owner", "Password88", "super_admin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("manager", "Password88", "tenant_admin"); err != nil {
+	if _, err := users.Create("manager", "Password88", "api_developer"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.CreateRole("log-cleaner", "", []string{"observability.read", "observability.logs.clear"}); err != nil {
-		t.Fatal(err)
+	if _, err := users.CreateRole("log-cleaner", "", []string{"observability.read", "observability.logs.clear"}); err == nil {
+		t.Fatal("fourth role was created")
 	}
 	_, token, err := users.Authenticate("manager", "Password88")
 	if err != nil {

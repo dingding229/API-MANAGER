@@ -15,8 +15,7 @@ const can = (permission) => state.permissions.includes('*') || state.permissions
 const permissionLabels = {
   '*': '全部权限',
   'api.read': '查看接口',
-  'api.test': '执行公开接口在线测试',
-  'user.sessions.manage': '查看与退出其他用户登录会话',
+  'api.test': '测试已展示接口',
   'api.write': '创建与修改接口',
   'api.publish': '发布、下线与回滚接口',
   'api.delete': '删除接口',
@@ -141,6 +140,8 @@ function authErrorMessage(error) {
 }
 
 function showConsole() {
+  if(!can('*')&&!can('api.read')&&!can('user.read')){location.replace('/account');return;}
+  $('#auth-loading')?.classList.add('hidden');
   void loadVersion(true);
   $('#login-view').classList.add('hidden');
   $('#console-view').classList.remove('hidden');
@@ -152,6 +153,7 @@ function showConsole() {
 }
 
 function showLogin() {
+  $('#auth-loading')?.classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   $('#console-view').classList.add('hidden');
 }
@@ -200,9 +202,9 @@ async function hydrateSession() {
     legacySession='';
     const changed=JSON.stringify([state.user,state.permissions])!==JSON.stringify([result.user,result.permissions||[]]);
     if(state.user?.id && state.user.id!==result.user.id) { closeProfileModal(true);closeRoleModal(true);closeLogCleanupModal(true);$$('.cache-dialog').forEach(dialog=>{dialog.close();dialog.remove()});state.cache={}; }
-    state.user=result.user;state.permissions=result.permissions||[];
+    state.user=result.user;state.permissions=result.permissions||[];state.cache.roleNames=result.level_names||{};state.cache.permissionNames=result.permission_names||{};
     if(changed || $('#console-view').classList.contains('hidden')) showConsole();
-  } catch(error) { if(epoch!==authEpoch)return;legacySession='';if(error.status===401) clearSession();else notice('登录状态暂时无法确认，请稍后刷新'); }
+  } catch(error) { if(epoch!==authEpoch)return;legacySession='';if(error.status===401) clearSession();else if(!state.user){$('#auth-loading p').textContent='暂时无法连接，请重试。';$('#retry-auth').classList.remove('hidden')}else notice('登录状态暂时无法确认，请稍后刷新'); }
   finally { hydratingSession=false;if(first)initialLoginControls.forEach(control=>{control.disabled=false});if(pendingSessionHydration){pendingSessionHydration=false;void hydrateSession()} }
 }
 authEvents?.addEventListener('message',()=>{authEpoch++;void hydrateSession()});
@@ -217,13 +219,13 @@ function renderPage() {
   const newPage = document.createElement('div'); newPage.id = 'page';
   oldPage.replaceWith(newPage);
   notice('');
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置',sessions:'登录会话',accounts:'会员与计费',authentication:'注册与登录'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置',accounts:'用户余额',plans:'套餐管理',calllogs:'调用日志',authentication:'注册与登录'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => {
     const active = button.dataset.page === state.page; button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings,sessions: renderSessions,accounts:renderAccounts,authentication:renderAuthentication};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings,accounts:renderBalanceAdmin,plans:renderPlanAdmin,calllogs:renderCallLogsAdmin,authentication:renderAuthentication};
   return renderers[state.page]();
 }
 
@@ -318,7 +320,6 @@ function apiForm(item = {}) {
   const hasUpstream = item.upstream_url || item.upstream_path || item.upstream_auth_ref;
   const hasResilience = Number(item.upstream_timeout_ms || 0) || Number(item.upstream_retries || 0) || Number(item.circuit_breaker_threshold || 0) || (item.circuit_breaker_reset_seconds !== undefined && Number(item.circuit_breaker_reset_seconds) !== 30);
   const hasResponse = item.response_body || Number(item.response_status || 0) || item.request_schema || item.response_schema || item.parameters_schema;
-  const hasQuota = Number(item.rate_limit_per_minute || 0) || Number(item.daily_quota || 0) || Number(item.monthly_quota || 0);
   return `<form id="api-form" class="form-stack api-form" data-api-id="${value('id')}">
     <section class="form-section form-section-primary" aria-labelledby="api-basics-title">
       <div class="form-section-heading"><div><h3 id="api-basics-title">基础信息</h3><p>填写接口名称、地址与调用方式。</p></div><span class="required-note">带 * 为必填</span></div>
@@ -361,18 +362,15 @@ function apiForm(item = {}) {
     <details class="form-section form-section-collapsible" ${item.public_visible ? 'open' : ''}>
       <summary><span><strong>公开目录</strong><small>选择是否展示在网站首页</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
       <div class="form-section-body">
-        <label class="checkbox-field"><input type="checkbox" name="public_visible" ${item.public_visible ? 'checked' : ''}><span>在公开前端展示此接口</span></label>
-        <label class="checkbox-field"><input type="checkbox" name="public_test_enabled" ${item.public_test_enabled?'checked':''}><span>允许已登录且有测试权限的用户在线测试</span></label><p class="small">仅公开、启用且已发布的接口可测试。测试会真实调用，可能消耗额度或修改数据。</p>
+        <label class="checkbox-field"><input type="checkbox" name="public_visible" ${item.public_visible ? 'checked' : ''}><span>公开展示并允许有测试权限的登录用户在线测试</span></label>
+        <p class="small">仅公开、启用且已发布的接口可测试。测试会真实调用，可能消耗额度或修改数据。</p>
         <label class="field"><span class="field-label">公开标题</span><input name="public_title" maxlength="120" value="${value('public_title')}" placeholder="面向调用方的接口名称"></label>
         <label class="field"><span class="field-label">公开分类</span><input name="public_category" maxlength="48" value="${value('public_category')}" placeholder="例如：数据查询"></label>
         <label class="field"><span class="field-label">公开说明</span><textarea name="public_summary" maxlength="600" placeholder="仅填写可公开的用途说明，不要写内部地址、密码或 KEY">${value('public_summary')}</textarea></label>
-        <p class="small">只有已发布、已启用且打开此开关的接口才会显示。私有说明、上游配置、真实响应及凭据不会输出。隐藏目录不等于关闭接口。</p>
+        <p class="small">只有已发布、已启用且打开此开关的接口才会显示并允许在线测试。测试可能消耗余额、套餐次数或修改业务数据。私有说明、上游配置、真实响应及凭据不会输出。隐藏目录不等于关闭接口。</p>
       </div>
     </details>
-    <details class="form-section form-section-collapsible" ${hasQuota ? 'open' : ''}>
-      <summary><span><strong>限流与配额</strong><small>按接口控制调用频率和周期配额</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
-      <div class="form-section-body"><div class="grid-2"><label class="field"><span class="field-label">每分钟限制</span><input type="number" min="0" name="rate_limit_per_minute" value="${value('rate_limit_per_minute','0')}"></label><label class="field"><span class="field-label">每日配额</span><input type="number" min="0" name="daily_quota" value="${value('daily_quota','0')}"></label></div><label class="field"><span class="field-label">每月配额</span><input type="number" min="0" name="monthly_quota" value="${value('monthly_quota','0')}"></label></div>
-    </details>
+
     <div class="form-submit"><span class="small">保存后仍需单独发布接口，草稿不会立即对外生效。</span><div class="actions"><button type="submit">${item.id ? '保存接口修改' : '创建并保存草稿'}</button>${item.id ? '<button type="button" class="secondary" id="cancel-api-edit">取消编辑</button>' : ''}</div></div>
   </form>`;
 }
@@ -388,10 +386,10 @@ function apiFormData(form) {
   data.method = data.methods[0];
   data.price_micros=moneyMicros(data.call_price);delete data.call_price;
   for (const key of ['request_schema', 'response_schema', 'parameters_schema']) { if (data[key]?.trim()) data[key] = JSON.parse(data[key]); else delete data[key]; }
-  for (const key of ['rate_limit_per_minute', 'daily_quota', 'monthly_quota', 'response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
+  for (const key of ['response_status', 'upstream_timeout_ms', 'upstream_retries', 'circuit_breaker_threshold', 'circuit_breaker_reset_seconds']) data[key] = Number(data[key] || 0);
   data.strip_path = form.elements.strip_path.checked;
   data.public_visible = form.elements.public_visible.checked;
-  data.public_test_enabled = data.public_visible && form.elements.public_test_enabled.checked;
+  data.public_test_enabled=data.public_visible;
   data.plugin_cache = {enabled:form.elements.cache_enabled.checked,ttl_seconds:Number(data.cache_ttl||form.elements.cache_ttl.value),max_entries:Number(data.cache_limit||form.elements.cache_limit.value),cache_post:form.elements.cache_enabled.checked && form.elements.cache_post.checked};
   for(const key of ['cache_enabled','cache_ttl','cache_limit','cache_post'])delete data[key];
   return data;
@@ -471,44 +469,6 @@ async function apiAction(action, id) {
   } catch (error) { notice(error.message); }
 }
 
-async function renderCredentials() {
-  if (state.page !== 'credentials') return;
-  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
-  try {
-    const items = await api('/admin/v1/credentials');
-    if (!page.isConnected) return; page.innerHTML = `<div class="split management-grid"><div class="table-wrap credential-table-wrap" role="region" aria-label="调用凭证列表" tabindex="0"><div class="toolbar table-toolbar"><h2>调用凭证</h2><span class="badge">${items.length} 个凭证</span></div><table class="credential-table"><colgroup><col class="credential-name-column"><col class="credential-prefix-column"><col class="credential-status-column"><col class="credential-date-column"><col class="credential-actions-column"></colgroup><thead><tr><th scope="col">名称</th><th scope="col">前缀</th><th scope="col" class="status-heading">状态</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody>${items.length?items.map(c=>`<tr><td>${esc(c.name)}</td><td><code>${esc(c.prefix)}…</code></td><td class="status-cell"><span class="badge status-badge ${c.revoked?'off':'is-success'}">${c.revoked?'已撤销':'有效'}</span></td><td>${esc(formatDate(c.created_at))}</td><td><div class="actions">${!c.revoked&&can('credential.reveal')?`<button class="secondary" data-view-key="${esc(c.id)}" ${c.api_key_available?'':'disabled title="历史凭证无法恢复，请先轮换"'}>${c.api_key_available?'查看密钥':'不可查看'}</button>`:''}${!c.revoked&&can('credential.write')?`<button class="secondary" data-rotate="${esc(c.id)}">重新生成</button><button class="danger" data-revoke="${esc(c.id)}">撤销</button>`:''}</div></td></tr>`).join(''):'<tr><td colspan="5"><div class="empty">暂无凭证</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建调用凭证</h2><form id="credential-form" class="form-stack"><label>名称<input name="name" required placeholder="production-client"></label><div class="form-footer"><button type="submit">创建凭证</button></div></form><p class="small">新建或轮换后的 Key 会加密保存。拥有查看权限的管理员可按需查看并复制；历史凭证若未加密保存，需要先轮换。</p></div></div>`;
-    restrictForm($('#credential-form'), 'credential.write');
-    $('#credential-form').onsubmit = async (e) => { e.preventDefault(); await withSubmitting(e.currentTarget, '创建中…', async () => { try { const result = await api('/admin/v1/credentials',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target).entries()))}); await renderCredentials(); showCredentialKey(result.api_key, '新建凭证'); } catch(error){notice(error.message)} }); };
-    $$('#page [data-view-key]').forEach(button => button.onclick = async () => {
-      if (button.disabled) return;
-      try { const result = await api(`/admin/v1/credentials/${encodeURIComponent(button.dataset.viewKey)}/key`); showCredentialKey(result.api_key, '查看 API Key'); } catch(error) { notice(error.message); }
-    });
-    $$('#page [data-rotate]').forEach(button => button.onclick = async () => {
-      if (!confirm('重新生成后，旧 API Key 会立即失效。确定继续吗？')) return;
-      try { const result = await api(`/admin/v1/credentials/${encodeURIComponent(button.dataset.rotate)}/rotate`, {method:'POST'}); await renderCredentials(); showCredentialKey(result.api_key, '重新生成成功，旧 Key 已失效'); } catch(error) { notice(error.message); }
-    });
-    $$('#page [data-revoke]').forEach(button => button.onclick = async () => { if(confirm('确定撤销此凭证？')){try{await api(`/admin/v1/credentials/${encodeURIComponent(button.dataset.revoke)}/revoke`,{method:'POST'});renderCredentials()}catch(error){notice(error.message)}} });
-  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty" role="alert">${esc(error.message)}</div>`; }
-}
-
-function showCredentialKey(key, title) {
-  const card = $('#credential-form')?.closest('.card');
-  if (!card) return;
-  const previous = $('#credential-key-result');
-  if (previous) previous.remove();
-  const panel = document.createElement('div');
-  panel.id = 'credential-key-result';
-  panel.className = 'credential-key-result';
-  panel.innerHTML = `<strong>${esc(title)}</strong><p>仅向当前有权限的管理员显示。请复制并妥善保管，不要在聊天、日志或截图中传播。</p><div class="actions"><input aria-label="新的 API Key" type="text" readonly autocomplete="off" spellcheck="false"><button type="button" id="copy-credential-key">复制 Key</button><button type="button" class="secondary" id="hide-credential-key">关闭</button></div>`;
-  card.append(panel);
-  const input = panel.querySelector('input');
-  input.value = key;
-  $('#copy-credential-key').onclick = async () => {
-    try { await navigator.clipboard.writeText(input.value); notice('Key 已复制，请妥善保管', true); }
-    catch (error) { input.select(); notice('无法自动复制，请手动复制选中的 Key'); }
-  };
-  $('#hide-credential-key').onclick = () => { input.value = ''; panel.remove(); };
-}
 
 function roleCanBeGranted(role) {
   return can('*') || (role.name !== 'super_admin' && role.name !== 'tenant_admin' && !(role.permissions || []).some(permission => permission === '*' || permission === 'user.manage' || permission === 'observability.logs.clear'));
@@ -656,49 +616,13 @@ function userActions(user, roles) {
   return edit + role + status || '<span class="small">无可用操作</span>';
 }
 
-async function renderUsers() {
-  if (state.page !== 'users') return;
-  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载中…</div>';
-  try {
-    const [users, roles] = await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);
-    if (!page.isConnected) return;
-    page.innerHTML = `<div class="split management-grid"><div class="table-wrap user-table-wrap" role="region" aria-label="用户列表" tabindex="0"><div class="toolbar table-toolbar"><h2>用户列表</h2><span class="badge">${users.length} 位用户</span></div><table class="user-table"><thead><tr><th scope="col">用户名与邮箱</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${users.length?users.map(u=>`<tr><td><div class="user-cell user-identity"><strong>${esc(u.username)}</strong><span class="small">${esc(u.email||'未绑定邮箱')}</span></div></td><td><div class="user-cell user-cell-badges">${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</div></td><td><div class="user-cell"><span class="badge status-badge ${u.status==='active'?'is-success':'off'}">${esc(u.status==='active'?'启用':u.status==='disabled'?'停用':u.status)}</span></div></td><td><div class="actions">${userActions(u, roles)}</div></td></tr>`).join(''):'<tr><td colspan="4"><div class="empty">暂无用户</div></td></tr>'}</tbody></table></div><div class="card"><h2>创建用户</h2><form id="user-form" class="form-stack"><div class="grid-2"><label>用户名<input name="username" type="text" minlength="3" maxlength="64" required autocomplete="username"></label><label>邮箱（可选）<input name="email" type="email" maxlength="254" autocomplete="email" placeholder="name@example.com"></label><label>密码<input name="password" type="password" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.filter(roleCanBeGranted).map(r=>`<option value="${esc(r.name)}" ${selected(r.name,'viewer')}>${esc(roleLabel(r.name))}</option>`).join('')}</select></label></div><div class="form-footer"><button type="submit">创建用户</button></div></form><p class="small">角色决定用户可访问的管理功能。默认授予只读角色，管理类角色仅可由超级管理员授予。</p></div></div>`;
-    restrictForm($('#user-form'), 'user.manage');
-    $('#user-form').elements.password.oninput = event => event.target.setCustomValidity('');
-    $('#user-form').onsubmit = async event => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const bytes = new TextEncoder().encode(form.elements.password.value).length;
-      form.elements.password.setCustomValidity(bytes < 8 || bytes > 72 ? '密码必须为 8–72 个 UTF-8 字节。' : '');
-      if (!form.reportValidity()) return;
-      await withSubmitting(form, '创建中…', async () => {
-        try { await api('/admin/v1/users', {method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form).entries()))}); notice('用户创建成功', true); renderUsers(); }
-        catch (error) { notice(error.message); }
-      });
-    };
-    $$('#page [data-user-profile]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userProfile);if(user)openProfileModal(user)});
-    $$('#page [data-user-status]').forEach(button=>button.onclick=async()=>{await withAction(button,'稍候',async()=>{try{await api(`/admin/v1/users/${encodeURIComponent(button.dataset.userStatus)}/status`,{method:'PUT',body:JSON.stringify({status:button.dataset.status})});notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})});
-    $$('#page [data-user-roles]').forEach(button=>button.onclick=()=>{const user=users.find(item=>item.id===button.dataset.userRoles);if(user)openRoleModal(user,roles)});
-  } catch(error) { if(!page.isConnected)return; page.innerHTML=`<div class="empty" role="alert">${esc(error.message)}</div>`; }
-}
-
-async function renderRoles() {
-  if (state.page !== 'roles') return;
-  const page = $('#page'); if (!page.isConnected) return; page.innerHTML = '<div class="empty">加载角色和权限…</div>';
-  try {
-    const [roles, permissions] = await Promise.all([api('/admin/v1/roles'), api('/admin/v1/permissions')]);
-    if (!page.isConnected) return;
-    state.cache.roleNames=Object.fromEntries(roles.map(r=>[r.name,r.display_name||r.name]));state.cache.permissionNames=Object.fromEntries(permissions.map(p=>[p.code,p.description||p.code]));
-    page.innerHTML = `<div class="roles-page">
-      <div class="table-wrap roles-table-wrap"><div class="toolbar table-toolbar"><h2>角色列表</h2><span class="badge">${roles.length} 个角色</span></div><table class="roles-table"><thead><tr><th scope="col">角色</th><th scope="col">说明</th><th scope="col">权限</th><th scope="col">操作</th></tr></thead><tbody>
-      ${roles.map(role => { const locked=role.name==='super_admin'; return `<tr><td><strong title="${esc(role.name)}">${esc(roleLabel(role.name))}</strong>${roleLabels[role.name]?`<br><span class="small">${esc(role.name)}</span>`:''}</td><td>${esc(roleDescription(role))}</td><td>${rolePermissionsSummary(role.permissions||[])}</td><td>${can('*') ? (locked ? '<span class="small">系统保护</span>' : `<button type="button" class="secondary" data-role="${esc(role.name)}">编辑权限</button>`) : '<span class="small">只读</span>'}</td></tr>`; }).join('')}
-      </tbody></table></div>
-      ${can('*') ? `<section class="card role-editor" id="role-editor" hidden></section><section class="card role-editor" id="role-create"><h2>创建角色</h2><p class="small">创建自定义角色，并为其选择允许使用的管理功能。</p><form id="role-form" class="form-stack"><div class="role-fields"><label>名称<input name="name" required minlength="3" maxlength="64" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{2,63}" placeholder="例如 support"><span class="field-hint">3–64 位，只能使用字母、数字、点、下划线和短横线。</span></label><label>说明<input name="description" maxlength="200" placeholder="简述角色用途"></label></div>${permissionChecklist(permissions)}<div class="role-form-actions"><button type="submit">创建角色</button></div></form></section>` : ''}
-    </div>`;
-    const createForm=$('#role-form'); bindPermissionPicker(createForm);
-    if(createForm) createForm.onsubmit=async event=>{event.preventDefault();if(!event.currentTarget.reportValidity())return;await withSubmitting(event.currentTarget,'创建中…',async()=>{const form=new FormData(event.currentTarget);try{await api('/admin/v1/roles',{method:'POST',body:JSON.stringify({name:form.get('name'),description:form.get('description'),permissions:form.getAll('permission')})});notice('角色创建成功',true);renderRoles()}catch(error){notice(error.message)}})};
-    $$('#page [data-role]').forEach(button=>button.onclick=()=>{const role=roles.find(item=>item.name===button.dataset.role);if(!role)return;const editor=$('#role-editor');if(!editor)return;editor.hidden=false;editor.innerHTML=`<div class="role-editor-heading"><div><h2>编辑权限：${esc(roleLabel(role.name))}</h2><p class="small">${esc(role.name)} · 修改后立即生效。</p></div><button type="button" class="secondary" id="cancel-role-edit">取消</button></div><form id="role-permissions-form" class="form-stack">${permissionChecklist(permissions,role.permissions||[])}<div class="role-form-actions"><button type="submit">保存权限</button></div></form>`;bindPermissionPicker(editor);$('#cancel-role-edit').onclick=()=>{editor.hidden=true;editor.replaceChildren()};editor.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});const form=$('#role-permissions-form');form.onsubmit=async event=>{event.preventDefault();await withSubmitting(form,'保存中…',async()=>{const codes=new FormData(form).getAll('permission');try{await api(`/admin/v1/roles/${encodeURIComponent(role.name)}/permissions`,{method:'PUT',body:JSON.stringify({permissions:codes})});notice('权限保存成功',true);renderRoles()}catch(error){notice(error.message)}})}});
-  } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty" role="alert">${esc(error.message)}</div>`; }
+async function renderUsers(){
+ const page=$('#page');page.innerHTML='<div class="empty">读取全站用户…</div>';
+ try{const [users,roles]=await Promise.all([api('/admin/v1/users'),api('/admin/v1/roles')]);if(!page.isConnected)return;state.cache.roleNames=Object.fromEntries(roles.map(r=>[r.name,r.display_name||r.name]));
+ page.innerHTML=`<div class="management-grid"><section class="card"><div class="toolbar"><h2>所有用户</h2><span class="badge">${users.length} 位用户</span></div><p class="small">包含管理员创建、邮箱注册与授权注册的所有用户，不局限于后台人员。</p><form class="directory-filter" data-user-filter><label class="field"><span class="field-label">搜索昵称、用户名、邮箱或 UID</span><input name="search" maxlength="200"></label><label class="field"><span class="field-label">角色</span><select name="role"><option value="">全部角色</option>${roles.map(r=>`<option value="${esc(r.name)}">${esc(r.display_name)}</option>`).join('')}</select></label></form><div class="table-wrap user-table-wrap"><table class="user-table"><thead><tr><th>昵称 / 用户名</th><th>邮箱 / UID</th><th>角色</th><th>状态 / 注册时间</th><th>操作</th></tr></thead><tbody data-user-rows></tbody></table></div></section><section class="card spaced-split"><h2>创建用户</h2><form id="user-form" class="form-stack"><div class="grid-2"><label>用户名<input name="username" minlength="3" maxlength="64" required autocomplete="username"></label><label>邮箱（可选）<input name="email" type="email" maxlength="254"></label><label>密码<input name="password" type="password" maxlength="72" required autocomplete="new-password"></label><label>角色<select name="role">${roles.map(r=>`<option value="${esc(r.name)}" ${r.name==='member'?'selected':''}>${esc(r.display_name)}</option>`).join('')}</select></label></div><button type="submit">创建用户</button></form><p class="small">默认创建普通用户。用户在用户中心管理个人资料、凭据和会话。</p></section></div>`;
+ const filter=page.querySelector('[data-user-filter]'),rows=page.querySelector('[data-user-rows]');const draw=()=>{const search=filter.elements.search.value.trim().toLowerCase(),role=filter.elements.role.value;const selected=users.filter(u=>(!role||(u.roles||[u.role]).includes(role))&&(!search||[u.nickname,u.username,u.email,u.uid||u.id].join(' ').toLowerCase().includes(search)));rows.innerHTML=selected.map(u=>`<tr><td><strong>${esc(u.nickname||u.username)}</strong><br><span class="small">${esc(u.username)}</span></td><td>${esc(u.email||'未绑定邮箱')}<br><code>${esc(u.uid||u.id)}</code></td><td>${(u.roles||[u.role]).map(r=>`<span class="badge">${esc(roleLabel(r))}</span>`).join(' ')}</td><td><span class="badge status-badge ${u.status==='active'?'is-success':'off'}">${u.status==='active'?'启用':'停用'}</span><br><span class="small">${esc(formatDate(u.created_at))}</span></td><td><div class="actions">${userActions(u,roles)}</div></td></tr>`).join('')||'<tr><td colspan="5">没有匹配用户。</td></tr>';rows.querySelectorAll('[data-user-profile]').forEach(button=>button.onclick=()=>openProfileModal(users.find(u=>u.id===button.dataset.userProfile)));rows.querySelectorAll('[data-user-roles]').forEach(button=>button.onclick=()=>openRoleModal(users.find(u=>u.id===button.dataset.userRoles),roles));rows.querySelectorAll('[data-user-status]').forEach(button=>button.onclick=async()=>{try{await withAction(button,'更新中…',()=>api('/admin/v1/users/'+encodeURIComponent(button.dataset.userStatus)+'/status',{method:'PUT',body:JSON.stringify({status:button.dataset.status})}));notice('用户状态已更新',true);renderUsers()}catch(error){notice(error.message)}})};filter.onsubmit=e=>e.preventDefault();filter.elements.search.oninput=draw;filter.elements.role.onchange=draw;draw();
+ const form=$('#user-form');restrictForm($('#user-form'), 'user.manage');form.onsubmit=async e=>{e.preventDefault();const bytes=new TextEncoder().encode(form.elements.password.value).length;form.elements.password.setCustomValidity(bytes<8||bytes>72?'密码须为 8–72 个 UTF-8 字节。':'');if(!form.reportValidity())return;try{await withSubmitting(form,'创建中…',()=>api('/admin/v1/users',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(form)))}));notice('用户已创建',true);renderUsers()}catch(error){notice(error.message)}};form.elements.password.oninput=()=>form.elements.password.setCustomValidity('');
+ }catch(e){if(page.isConnected)page.innerHTML=`<div class="empty" role="alert">${esc(e.message)}</div>`}
 }
 
 function formatDate(value) {
@@ -1104,9 +1028,10 @@ $('#login-form').onsubmit = async (event) => {
 };
 $('#logout').onclick = logout;
 $('#account-settings').onclick = () => location.assign('/account');
+$('#retry-auth').onclick = () => {authEpoch++;void hydrateSession()};
 $('#refresh').onclick = () => withAction($('#refresh'), '刷新中…', renderPage);
 $$('#nav button').forEach((button) => button.onclick = () => { if (button.classList.contains('hidden')) return; state.page = button.dataset.page; renderPage(); });
-hydrateSession();
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>void hydrateSession(),{once:true});else void hydrateSession();
 
 let pendingResetToken = '';
 function openRecoveryModal(resetToken = '') {
@@ -1242,29 +1167,4 @@ async function showPluginCache(id) {
     try {await withSubmitting(form,'清理中…',()=>api(`/admin/v1/apis/${encodeURIComponent(id)}/cache`,{method:'DELETE',body:JSON.stringify({confirm:true})}));busy=false;close();notice('接口缓存已清理',true);}
     catch(error){dialog.querySelector('.message').textContent=error.message;busy=false;confirm.disabled=false;}
   };
-}
-
-async function renderSessions(){
- const page=$('#page');page.innerHTML='<div class="empty">读取登录会话…</div>';
- try {
-  const users=can('user.sessions.manage')&&can('user.read')?await api('/admin/v1/users'):[state.user];
-  if(!page.isConnected)return;
-  page.innerHTML=`<section class="card"><div class="toolbar"><div><h2>登录会话</h2><p class="small">查看登录设备和来源，退出不再使用的会话。设备名称来自客户端声明，仅供参考。</p></div></div><label class="field"><span class="field-label">用户</span><select data-session-user>${users.map(u=>`<option value="${esc(u.id)}">${esc(u.username)}${u.id===state.user.id?'（我）':''}</option>`).join('')}</select></label><div data-session-results></div></section>`;
-  const select=page.querySelector('[data-session-user]');select.value=state.user.id;let epoch=0;
-  const load=async()=>{const run=++epoch;const userId=select.value,root=page.querySelector('[data-session-results]');root.innerHTML='<div class="empty">读取中…</div>';
-   try {const list=await api(`/admin/v1/users/${encodeURIComponent(userId)}/sessions`);if(!page.isConnected||run!==epoch)return;
-    root.innerHTML=list.length?`<div class="table-wrap"><table class="session-table"><thead><tr><th>设备</th><th>登录来源</th><th>时间</th><th>操作</th></tr></thead><tbody>${list.map(s=>`<tr><td><strong>${esc(s.device||'未知设备')}</strong>${s.current?'<span class="badge">当前会话</span>':''}<details><summary>设备详情</summary><p class="small">${esc(s.user_agent||'客户端未提供')}</p></details></td><td><code>${esc(s.login_ip||'未记录')}</code><p class="small">${s.ip_source==='trusted_proxy'?'可信代理转发':s.ip_source==='peer'?'直连地址':'来源未知'}</p><p class="small">最近来源：${esc(s.last_ip||'未记录')}</p></td><td><p class="small">登录：${esc(formatDate(s.created_at))}</p><p class="small">最近访问：${esc(formatDate(s.last_seen_at))}</p><p class="small">到期：${esc(formatDate(s.expires_at))}</p></td><td><button type="button" class="danger" data-revoke-session="${esc(s.id)}" data-current="${s.current?'1':'0'}">退出会话</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">暂无有效登录会话。</div>';
-    root.querySelectorAll('[data-revoke-session]').forEach(button=>button.onclick=()=>showSessionRevoke(userId,button.dataset.revokeSession,button.dataset.current==='1',load));
-   }catch(error){if(page.isConnected&&run===epoch)root.innerHTML=`<p class="message" role="alert">${esc(error.message)}</p>`}
-  };select.onchange=()=>void load();await load();
- }catch(error){if(page.isConnected)page.innerHTML=`<p class="message" role="alert">${esc(error.message)}</p>`}
-}
-function showSessionRevoke(userId,id,current,refresh){
- const dialog=document.createElement('dialog');dialog.className='modal-card cache-dialog';dialog.setAttribute('aria-label','退出登录会话');
- dialog.innerHTML=`<div class="modal-heading"><h2>退出登录会话</h2></div><p>${current?'这是当前会话，退出后前后台均需重新登录。':'该设备的会话将立即失效，未使用的测试授权也会失效。'}</p><form><label class="checkbox-field"><input type="checkbox" name="confirm"><span>我确认退出此会话</span></label><p class="message" role="alert"></p><div class="modal-actions"><button type="button" class="secondary" data-close>取消</button><button type="submit" class="danger" disabled>退出会话</button></div></form>`;
- document.body.appendChild(dialog);dialog.showModal();let busy=false;const close=()=>{if(!busy){dialog.close();dialog.remove()}};dialog.oncancel=e=>{e.preventDefault();close()};dialog.querySelector('[data-close]').onclick=close;const form=dialog.querySelector('form'),submit=form.querySelector('[type=submit]');form.elements.confirm.onchange=()=>submit.disabled=!form.elements.confirm.checked;
- form.onsubmit=async event=>{event.preventDefault();if(busy||!form.elements.confirm.checked)return;busy=true;
-  try {const data=await withSubmitting(form,'退出中…',()=>api(`/admin/v1/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({confirm:true})}));busy=false;close();if(data.current){clearSession();broadcastAuth()}else{notice('会话已退出',true);await refresh()}}
-  catch(error){dialog.querySelector('.message').textContent=error.message;busy=false;}
- };
 }

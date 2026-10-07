@@ -92,7 +92,7 @@ func (s *Service) canEditProfile(actorID string, target model.User) bool {
 		roles = []string{target.Role}
 	}
 	for _, name := range roles {
-		if name == "super_admin" || name == "tenant_admin" {
+		if name == "super_admin" {
 			return false
 		}
 		role, err := s.store.GetRoleByName(name)

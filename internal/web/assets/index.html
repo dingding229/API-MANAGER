@@ -9,7 +9,8 @@
 </head>
 <body data-admin-path="__ADMIN_PATH__">
   <main id="app">
-    <section id="login-view" class="auth-shell">
+    <section id="auth-loading" class="auth-loading" role="status" aria-live="polite"><div><span class="auth-spinner" aria-hidden="true"></span><h1>正在确认登录状态</h1><p>请稍候…</p><button type="button" id="retry-auth" class="secondary hidden">重新连接</button></div></section>
+    <section id="login-view" class="auth-shell hidden">
       <div class="auth-card">
         <p class="eyebrow">API MANAGER</p>
         <h1 id="login-site-title">管理控制台</h1>
@@ -37,8 +38,9 @@
           <button data-page="plugins" data-permission="plugin.read">插件</button>
           <button data-page="observability" data-permission="observability.read">运行观测</button>
           <button data-page="audit" data-permission="audit.read">审计日志</button>
-          <button data-page="sessions">登录会话</button>
-          <button data-page="accounts" data-super-admin="true" class="hidden">会员与计费</button>
+          <button data-page="accounts" data-super-admin="true" class="hidden">用户余额</button>
+          <button data-page="plans" data-super-admin="true" class="hidden">套餐管理</button>
+          <button data-page="calllogs" data-super-admin="true" class="hidden">调用日志</button>
           <button data-page="authentication" data-super-admin="true" class="hidden">注册与登录</button>
           <button data-page="settings" data-super-admin="true" class="hidden">网站设置</button>
         </nav>
@@ -55,5 +57,6 @@
   <template id="empty"><div class="empty">暂无数据</div></template>
   <script src="__ADMIN_PATH__/app.js"></script>
  <script src="__ADMIN_PATH__/account.js"></script>
+ <script src="__ADMIN_PATH__/consolidation.js"></script>
 </body>
 </html>

@@ -459,11 +459,11 @@ func (p *Postgres) CreateIdentityUser(user model.User, identity *model.Identity)
 		roles = []string{user.Role}
 	}
 	if len(roles) == 0 {
-		roles = []string{"viewer"}
+		roles = []string{"member"}
 	}
 	for _, name := range dedupeCodes(roles) {
 		var roleID string
-		if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1 AND deleted_at IS NULL FOR SHARE`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
@@ -678,6 +678,9 @@ func (p *Postgres) EnsureRBAC() error {
 }
 
 func (p *Postgres) CreateRole(role model.Role) error {
+	if !SupportedRole(role.Name) {
+		return ErrConflict
+	}
 	ctx, cancel := dbContext()
 	defer cancel()
 	tx, err := p.pool.Begin(ctx)
@@ -686,11 +689,14 @@ func (p *Postgres) CreateRole(role model.Role) error {
 	}
 	defer tx.Rollback(ctx)
 	var count int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM roles WHERE tenant_id IS NULL AND name=$1`, role.Name).Scan(&count); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM roles WHERE tenant_id IS NULL AND name=$1 AND deleted_at IS NULL`, role.Name).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
 		return ErrConflict
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM roles WHERE name=$1 AND tenant_id IS NULL AND deleted_at IS NOT NULL`, role.Name); err != nil {
+		return err
 	}
 	if err := ensureRoleTx(ctx, tx, role); err != nil {
 		return err
@@ -710,8 +716,6 @@ func ensureRoleTx(ctx context.Context, tx pgx.Tx, role model.Role) error {
 			return fmt.Errorf("create role %s: %w", role.Name, err)
 		}
 	} else if err != nil {
-		return err
-	} else if _, err := tx.Exec(ctx, `UPDATE roles SET description=$2 WHERE id=$1`, roleID, role.Description); err != nil {
 		return err
 	} else {
 		// Existing roles may have been customized by administrators. Seeding must
@@ -751,7 +755,7 @@ func (p *Postgres) UpdateRolePermissions(name string, codes []string) error {
 	}
 	defer tx.Rollback(ctx)
 	var roleID string
-	if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
+	if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1 AND deleted_at IS NULL FOR SHARE`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -783,7 +787,7 @@ func (p *Postgres) ListPermissions() []model.Permission {
 func (p *Postgres) ListRoles() []model.Role {
 	ctx, cancel := dbContext()
 	defer cancel()
-	rows, err := p.pool.Query(ctx, `SELECT r.id,r.name,r.description,r.display_name,ARRAY(SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id ORDER BY p.code) FROM roles r WHERE r.tenant_id IS NULL ORDER BY r.name`)
+	rows, err := p.pool.Query(ctx, `SELECT r.id,r.name,r.description,r.display_name,ARRAY(SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=r.id ORDER BY p.code) FROM roles r WHERE r.tenant_id IS NULL AND r.deleted_at IS NULL ORDER BY r.name`)
 	if err != nil {
 		return nil
 	}
@@ -806,7 +810,7 @@ func (p *Postgres) GetRoleByName(name string) (model.Role, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var role model.Role
-	if err := p.pool.QueryRow(ctx, `SELECT id,name,description,display_name FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&role.ID, &role.Name, &role.Description, &role.DisplayName); errors.Is(err, pgx.ErrNoRows) {
+	if err := p.pool.QueryRow(ctx, `SELECT id,name,description,display_name FROM roles WHERE tenant_id IS NULL AND name=$1 AND deleted_at IS NULL`, name).Scan(&role.ID, &role.Name, &role.Description, &role.DisplayName); errors.Is(err, pgx.ErrNoRows) {
 		return model.Role{}, ErrNotFound
 	} else if err != nil {
 		return model.Role{}, err
@@ -854,7 +858,7 @@ func (p *Postgres) AssignUserRoles(userID string, roles []string) error {
 	roleNames := dedupeCodes(roles)
 	for _, name := range roleNames {
 		var roleID string
-		if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
+		if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE tenant_id IS NULL AND name=$1 AND deleted_at IS NULL FOR SHARE`, name).Scan(&roleID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
@@ -878,7 +882,7 @@ func (p *Postgres) ListUserRoles(userID string) []string {
 }
 
 func (p *Postgres) userRoles(ctx context.Context, userID string) []string {
-	rows, err := p.pool.Query(ctx, `SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=$1 ORDER BY r.name`, userID)
+	rows, err := p.pool.Query(ctx, `SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id=r.id WHERE ur.user_id=$1 AND r.deleted_at IS NULL ORDER BY r.name`, userID)
 	if err != nil {
 		return nil
 	}

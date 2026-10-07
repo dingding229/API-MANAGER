@@ -48,10 +48,10 @@ func TestOverviewCountsBusinessRequestsAndHonorsPermissions(t *testing.T) {
 	if body.Metrics.GatewayRequests != 2 || body.Metrics.GatewayErrors != 1 || body.Metrics.HTTPRequestsTotal != 1 || body.Resources["users"] != 1 || body.Scope != "process_lifetime" {
 		t.Fatal("overview counts incorrect")
 	}
-	if _, err = s.CreateRole("minimal", "", []string{"api.read"}); err != nil {
+	if err = s.UpdateRolePermissions("api_developer", []string{"api.read"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Create("minimal-user", "ReadMe88", "minimal"); err != nil {
+	if _, err = s.Create("minimal-user", "ReadMe88", "api_developer"); err != nil {
 		t.Fatal(err)
 	}
 	_, token, err = s.Authenticate("minimal-user", "ReadMe88")

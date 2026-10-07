@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-func TestSessionPageIncludesScopedMetadataAndConfirmation(t *testing.T) {
+func TestPersonalSessionsAndKeysHaveOnlyUserCenterEntry(t *testing.T) {
+	html, _ := assets.ReadFile("assets/index.html")
 	js, _ := assets.ReadFile("assets/app.js")
-	source := string(js)
-	for _, term := range []string{"renderSessions", "user.sessions.manage", "login_ip", "user_agent", "last_seen_at", "expires_at", "data-revoke-session", "我确认退出此会话", "body:JSON.stringify({confirm:true})", "public_test_enabled"} {
-		if !strings.Contains(source, term) {
-			t.Fatal("missing session control", term)
-		}
+	if strings.Contains(string(html), `data-page="sessions"`) || strings.Contains(string(js), "renderSessions") || strings.Contains(string(js), "/sessions") {
+		t.Fatal("duplicated personal session page retained")
 	}
-	if strings.Contains(source, "state.token") {
-		t.Fatal("session token stored in UI state")
+	if !strings.Contains(string(js), `location.assign('/account')`) {
+		t.Fatal("user-center entry missing")
+	}
+	if !strings.Contains(string(html), `id="login-view" class="auth-shell hidden"`) || !strings.Contains(string(js), `$('#auth-loading')?.classList.add('hidden')`) {
+		t.Fatal("login paints before session check")
 	}
 }

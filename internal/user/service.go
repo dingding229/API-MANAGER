@@ -127,7 +127,7 @@ func (s *Service) PrepareUser(username, email, password string, roles []string) 
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
-		roles = []string{"viewer"}
+		roles = []string{"member"}
 	}
 	for _, role := range roles {
 		if _, err := s.store.GetRoleByName(role); err != nil {
@@ -175,12 +175,15 @@ func (s *Service) GetRole(name string) (model.Role, error) { return s.store.GetR
 func (s *Service) UpdateRolePermissions(name string, codes []string) error {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
-		return errors.New("role name is required")
+		return errors.New("仅支持管理员、普通用户、接口开发者三种角色")
 	}
 	if name == "super_admin" {
 		return errors.New("super_admin permissions are immutable")
 	}
 	normalized := normalizePermissions(codes)
+	if !store.RolePermissionsAllowed(name, normalized) {
+		return errors.New("该角色不能授予所选管理权限")
+	}
 	known := make(map[string]struct{})
 	for _, permission := range s.store.ListPermissions() {
 		known[permission.Code] = struct{}{}
@@ -209,9 +212,9 @@ func normalizePermissions(values []string) []string {
 }
 
 func (s *Service) CreateRole(name, description string, permissions []string) (model.Role, error) {
-	role := model.Role{ID: ids.NewUUID(), Name: strings.ToLower(strings.TrimSpace(name)), Description: strings.TrimSpace(description), Permissions: normalizeRoles(permissions)}
-	if role.Name == "" {
-		return model.Role{}, errors.New("role name is required")
+	role := model.Role{DisplayName: map[string]string{"super_admin": "管理员", "member": "普通用户", "api_developer": "接口开发者"}[strings.ToLower(strings.TrimSpace(name))], ID: ids.NewUUID(), Name: strings.ToLower(strings.TrimSpace(name)), Description: strings.TrimSpace(description), Permissions: normalizeRoles(permissions)}
+	if !store.SupportedRole(role.Name) || !store.RolePermissionsAllowed(role.Name, role.Permissions) {
+		return model.Role{}, errors.New("仅支持管理员、普通用户、接口开发者三种角色")
 	}
 	if err := s.store.CreateRole(role); err != nil {
 		return model.Role{}, err

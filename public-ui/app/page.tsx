@@ -152,7 +152,7 @@ function Guide({ site, baseUrl, apis, onReference }: { site: SiteInfo; baseUrl: 
       <div><span>03</span><h3>测试并接入程序</h3><p>登录后，可对已开放测试的接口发起真实调用，无需填写 KEY。完成确认后，将示例接入自己的程序。</p><small>只有主动确认并发送，才会执行测试。</small></div>
     </div></section>
     <section id="guide-auth" className="guide-section"><SectionTitle>账号登录与接口认证</SectionTitle><div className="guide-auth-grid">
-      <div><ShieldCheck size={20} aria-hidden="true" /><h3>网页在线测试</h3><p>前台与后台共用账号登录状态。有权限的用户可测试管理员开放的接口，使用一次性授权，不显示或保存调用 KEY。</p><ul><li>前后台使用同一 HTTPS 网站地址。</li><li>授权仅适用于当前接口、方法和参数。</li><li>测试可能消耗额度或修改业务数据。</li></ul></div>
+      <div><ShieldCheck size={20} aria-hidden="true" /><h3>网页在线测试</h3><p>前台与后台共用账号登录状态。有权限的用户可测试已展示的接口，使用一次性授权，不显示或保存调用 KEY。</p><ul><li>前后台使用同一 HTTPS 网站地址。</li><li>授权仅适用于当前接口、方法和参数。</li><li>测试可能消耗套餐次数、余额或修改业务数据。</li></ul></div>
       <div><KeyRound size={20} aria-hidden="true" /><h3>外部程序调用</h3><p>标记为 KEY 认证的接口仍需在请求头携带 <code>X-API-Key</code>。登录 Cookie 不能代替 KEY；无需验证的接口可匿名调用。</p><ul><li>使用自己的调用凭据，不写入公开代码。</li><li>配置专用地址时，只使用该调用地址。</li><li>按接口约定发送 JSON 和其他参数。</li></ul></div>
     </div></section>
     <section id="guide-example" className="guide-section"><SectionTitle>从当前接口开始</SectionTitle>{sample?<><div className="guide-example-meta"><strong>{sample.title}</strong><MethodBadge method={method}/><code>{sample.path}</code></div><p>以下示例来自当前公开目录。参数值是接入示例，请在执行前按实际需求调整；需要 KEY 时，在你自己的调用环境中填写。</p>{example?<div className="guide-code"><div><span>cURL 调用示例</span><CopyButton text={example} label="复制示例" /></div><pre tabIndex={0}><code><HighlightedCode code={example}/></code></pre></div>:<p className="section-empty">请打开接口文档，选择调用方式并检查参数后查看示例。</p>}<p className="small">接口文档还提供 JavaScript、Python 和 Go 示例，可按你的调用环境选择。</p></>:<div className="section-empty">暂时没有公开接口。接口发布后，这里会显示对应调用示例。</div>}</section>
@@ -165,7 +165,7 @@ function Guide({ site, baseUrl, apis, onReference }: { site: SiteInfo; baseUrl: 
       <tr><td><code>5xx</code></td><td>服务暂时无法完成请求</td><td>保存状态码和时间，联系服务维护人员；写入请求不要盲目重试。</td></tr>
     </tbody></table></div><p className="guide-caution">停止等待、超时或无法读取响应，不代表请求未执行。重复提交前请先确认结果，尤其是写入类调用。</p></section>
     <section id="guide-faq" className="guide-section"><SectionTitle>常见问题</SectionTitle><div className="guide-faq">
-      <details><summary>为什么登录后仍不能测试某个接口？</summary><p>需要同时满足账号具有测试权限、接口已发布且管理员开启在线测试。旧会话、设备或来源变更时，也可能需要重新登录。</p></details>
+      <details><summary>为什么登录后仍不能测试某个接口？</summary><p>需要同时满足账号具有测试权限、接口已发布且接口在公开目录展示。旧会话、设备或来源变更时，也可能需要重新登录。</p></details>
       <details><summary>为什么网页测试不用 KEY，程序接入仍要填写？</summary><p>网页测试使用账号范围内的一次性授权，仅适用于选定请求。业务接口的 KEY 要求没有改变，不能复制登录 Cookie 替代程序调用凭据。</p></details>
       <details><summary>如何判断结果是否来自缓存？</summary><p>服务端插件缓存命中时可能返回 <code>X-Plugin-Cache: HIT</code>。缓存有效期由接口管理员配置，浏览器或 CDN 不应缓存业务响应。</p></details>
       <details><summary>前后台登录状态为什么没有同步？</summary><p>请使用同一 HTTPS 主机名，不要混用 IP、不同域名或子域名。确认浏览器允许本站 Cookie，再刷新页面。</p></details>

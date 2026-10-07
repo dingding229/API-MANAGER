@@ -145,7 +145,7 @@ func (c *Catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			operation := Operation{PriceMicros: a.PriceMicros, TestEnabled: a.PublicTestEnabled, Method: method, Authentication: d.Authentication, Parameters: d.Parameters, Body: d.Body}
+			operation := Operation{PriceMicros: a.PriceMicros, TestEnabled: a.PublicVisible, Method: method, Authentication: d.Authentication, Parameters: d.Parameters, Body: d.Body}
 			if index, exists := grouped[a.Path]; exists {
 				duplicate := false
 				for _, existing := range result.APIs[index].Methods {

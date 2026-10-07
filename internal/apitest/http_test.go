@@ -112,7 +112,7 @@ func TestTicketBlocksDifferentSessionPathIPAndDeviceAndClosedAPI(t *testing.T) {
 				a.PublishedAt = nil
 			}
 			if kind == "test_disabled" {
-				a.PublicTestEnabled = false
+				a.PublicVisible = false
 			}
 			if kind == "changed_config" {
 				a.UpdatedAt = time.Now().Add(time.Second)
@@ -155,9 +155,9 @@ func TestResponseCaptureIsBounded(t *testing.T) {
 	}
 }
 
-func TestReadOnlyUsersCannotRunMutationTestsAndExpiredTicketIsRejected(t *testing.T) {
+func TestTestPermissionCoversDisplayedMethodsAndExpiredTicketIsRejected(t *testing.T) {
 	h, m, u, _, payload, _ := fixture(t)
-	_, err := u.Create("readonly", "ViewerPass888", "viewer")
+	_, err := u.Create("readonly", "ViewerPass888", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,8 +172,8 @@ func TestReadOnlyUsersCannotRunMutationTestsAndExpiredTicketIsRejected(t *testin
 	payload.Method = "POST"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req("/test/v1/prepare", token, input{Request: payload}))
-	if w.Code != 403 {
-		t.Fatal("readonly mutation allowed", w.Code)
+	if w.Code != 200 {
+		t.Fatal("visible POST method unavailable to testing user", w.Code)
 	}
 	payload.Method = "GET"
 	ticket := prepare(t, h, token, payload)

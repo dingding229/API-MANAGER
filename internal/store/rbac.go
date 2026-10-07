@@ -12,9 +12,7 @@ var defaultPermissions = []model.Permission{
 	{Code: "credential.write", Description: "创建与吊销调用凭证"},
 	{Code: "plugin.read", Description: "查看插件"},
 	{Code: "plugin.manage", Description: "管理插件配置"},
-	{Code: "api.test.write", Description: "执行非只读在线测试"},
 	{Code: "api.test", Description: "在公开文档中执行在线测试"},
-	{Code: "user.sessions.manage", Description: "查看与退出其他用户的登录会话"},
 	{Code: "user.read", Description: "查看用户、角色与权限"},
 	{Code: "user.manage", Description: "创建用户与分配角色"},
 	{Code: "audit.read", Description: "查看审计日志"},
@@ -24,12 +22,13 @@ var defaultPermissions = []model.Permission{
 }
 
 var defaultRoles = []model.Role{
-	{Name: "member", DisplayName: "普通会员", Description: "使用自己的账户与公开在线测试", Permissions: []string{"api.test", "api.test.write"}},
-	{Name: "super_admin", Description: "完整管理权限", Permissions: []string{"*"}},
-	{Name: "tenant_admin", Description: "平台管理权限（当前仅支持单租户）", Permissions: []string{"api.test", "api.read", "api.write", "api.publish", "api.delete", "credential.read", "credential.reveal", "credential.write", "plugin.read", "plugin.manage", "user.read", "user.manage", "user.sessions.manage", "audit.read", "observability.read", "observability.manage"}},
-	{Name: "operator", Description: "接口运维权限", Permissions: []string{"api.test", "api.read", "api.write", "api.publish", "credential.read", "credential.write", "plugin.read", "audit.read", "observability.read", "observability.manage"}},
-	{Name: "api_developer", Description: "接口开发权限", Permissions: []string{"api.test", "api.read", "api.write", "credential.read", "plugin.read", "observability.read"}},
-	{Name: "viewer", Description: "只读权限", Permissions: []string{"api.test", "api.read", "credential.read", "plugin.read", "observability.read"}},
+	{Name: "super_admin", DisplayName: "管理员", Description: "管理所有用户、接口与网站设置", Permissions: []string{"*"}},
+	{Name: "member", DisplayName: "普通用户", Description: "使用个人账户、凭据、日志与公开在线测试", Permissions: []string{"api.test"}},
+	{Name: "api_developer", DisplayName: "接口开发者", Description: "开发、发布与管理接口", Permissions: []string{"api.test", "api.read", "api.write", "api.publish", "api.delete", "plugin.read", "plugin.manage", "observability.read"}},
+}
+
+func SupportedRole(name string) bool {
+	return name == "super_admin" || name == "member" || name == "api_developer"
 }
 
 func DefaultPermissions() []model.Permission {

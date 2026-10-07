@@ -96,7 +96,7 @@ func TestConsoleSharedComponentsAndAuditGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(raw)
-	for _, marker := range []string{"bindModalKeyboard(modal, close)", "management-grid", "page._auditRequest !== request", `class="empty spaced-split"`, "restrictForm($('#user-form'), 'user.manage')", "restrictForm($('#credential-form'), 'credential.write')"} {
+	for _, marker := range []string{"bindModalKeyboard(modal, close)", "management-grid", "page._auditRequest !== request", `class="empty spaced-split"`, "restrictForm($('#user-form'), 'user.manage')"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("missing shared console behavior: %s", marker)
 		}

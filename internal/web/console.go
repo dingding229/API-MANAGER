@@ -25,7 +25,7 @@ func ConsoleWithSite(base string, provider func() model.PublicSiteInfo) http.Han
 		if r.URL.Path == base || path == "" || path == "index.html" {
 			path = "index.html"
 		}
-		if path != "index.html" && path != "app.css" && path != "app.js" && path != "controls.css" && path != "account.js" {
+		if path != "index.html" && path != "app.css" && path != "app.js" && path != "controls.css" && path != "account.js" && path != "consolidation.js" {
 			http.NotFound(w, r)
 			return
 		}
@@ -59,6 +59,38 @@ func ConsoleWithSite(base string, provider func() model.PublicSiteInfo) http.Han
 		if r.Method != "HEAD" {
 			// #nosec G705 -- bytes are embedded assets; the only substitution is the HTML-escaped, validated server-side ADMIN_PATH, never request input.
 			_, _ = w.Write(contents)
+		}
+	})
+}
+
+// Shared style files are read-only and avoid tying the user center to a custom admin path.
+func SharedStyles() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" && r.Method != "HEAD" {
+			w.Header().Set("Allow", "GET, HEAD")
+			w.WriteHeader(405)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, "/ui/")
+		if path != "admin.css" && path != "controls.css" {
+			http.NotFound(w, r)
+			return
+		}
+		name := "app.css"
+		if path == "controls.css" {
+			name = path
+		}
+		data, err := assets.ReadFile("assets/" + name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method == "GET" {
+			// #nosec G705 -- data is an embedded, allowlisted CSS asset. No request values are reflected; text/css and nosniff prevent HTML interpretation.
+			_, _ = w.Write(data)
 		}
 	})
 }

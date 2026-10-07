@@ -13,7 +13,7 @@ func ValidAdminPath(value string) bool {
 	if len(value) > 100 || !adminPathPattern.MatchString(value) {
 		return false
 	}
-	for _, path := range []string{"/api", "/auth", "/test", "/account", "/health", "/metrics", "/public", "/_next", "/catalog.json", "/admin/v1"} {
+	for _, path := range []string{"/api", "/auth", "/test", "/account", "/health", "/metrics", "/public", "/ui", "/_next", "/catalog.json", "/admin/v1"} {
 		if value == path || strings.HasPrefix(value, path+"/") {
 			return false
 		}
@@ -27,6 +27,7 @@ func MountAdministration(mux *http.ServeMux, path string, admin, auth http.Handl
 	MountAdministrationWithSite(mux, path, admin, auth, nil)
 }
 func MountAdministrationWithSite(mux *http.ServeMux, path string, admin, auth http.Handler, provider func() model.PublicSiteInfo) {
+	mux.Handle("/ui/", SharedStyles())
 	mux.Handle("/admin/v1/", admin)
 	mux.Handle("/auth/", auth)
 	mux.Handle("/test/v1/", auth)

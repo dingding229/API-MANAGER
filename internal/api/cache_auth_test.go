@@ -51,7 +51,7 @@ func TestReadOnlyUserCannotClearPluginCache(t *testing.T) {
 	m := store.NewMemory()
 	users := user.NewService(m)
 	_ = users.EnsureInitialAdmin("admin", "a-long-initial-password")
-	_, err := users.Create("readonly-user", "ViewerPass888", "viewer")
+	_, err := users.Create("readonly-user", "ViewerPass888", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

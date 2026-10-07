@@ -114,7 +114,10 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser
 		return
 	}
 
-	if testID != "" && (api.ID != testID || !api.PublicVisible || !api.PublicTestEnabled || !api.UpdatedAt.Equal(expected)) {
+	userID := g.billingUser(r, testUser)
+	var charge model.Charge
+	defer func() { g.finishCall(r, api, charge, userID, capture.status, started) }()
+	if testID != "" && (api.ID != testID || !api.PublicVisible || !api.UpdatedAt.Equal(expected)) {
 		writeJSONError(capture, 403, "online test unavailable")
 		return
 	}
@@ -149,21 +152,8 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser
 		return
 	}
 
-	identity := clientIdentity(r)
-	if !g.allow(api.ID+":"+identity, api.RateLimitPerMinute, time.Minute) ||
-		!g.allow(api.ID+":"+identity+":day", api.DailyQuota, 24*time.Hour) ||
-		!g.allow(api.ID+":"+identity+":month", api.MonthlyQuota, 31*24*time.Hour) {
-		if g.metrics != nil {
-			g.metrics.IncRateLimit()
-		}
-		capture.Header().Set("Retry-After", "60")
-		writeJSONError(capture, http.StatusTooManyRequests, "rate limit exceeded")
-		g.logRequest(r, api, capture, started)
-		return
-	}
-
-	userID := g.billingUser(r, testUser)
-	charge, chargeErr := g.reserveCall(r, api, userID)
+	var chargeErr error
+	charge, chargeErr = g.reserveCall(r, api, userID)
 	if chargeErr != nil {
 		status := http.StatusServiceUnavailable
 		message := "账户结算服务不可用"
@@ -175,6 +165,10 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser
 			status = 429
 			message = "套餐调用额度已用完"
 		}
+		if errors.Is(chargeErr, store.ErrNotFound) {
+			status = 403
+			message = "凭据所属账号不可用"
+		}
 		if errors.Is(chargeErr, auth.ErrForbidden) {
 			status = 403
 			message = "付费接口需要绑定用户的调用 KEY"
@@ -182,7 +176,6 @@ func (g *Gateway) serve(w http.ResponseWriter, r *http.Request, testID, testUser
 		writeJSONError(capture, status, message)
 		return
 	}
-	defer func() { g.finishCall(r, api, charge, capture.status, started) }()
 	var output http.ResponseWriter = capture
 	var responseValidation *responseValidator
 	if !apiSchema.IsEmpty(api.ResponseSchema) {

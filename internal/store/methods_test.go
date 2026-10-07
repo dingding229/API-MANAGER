@@ -38,7 +38,7 @@ func TestLastAdministratorSurvivesConcurrentDemotion(t *testing.T) {
 	wins := make(chan bool, 2)
 	for _, id := range []string{"a", "b"} {
 		wg.Add(1)
-		go func(id string) { defer wg.Done(); wins <- m.AssignUserRoles(id, []string{"viewer"}) == nil }(id)
+		go func(id string) { defer wg.Done(); wins <- m.AssignUserRoles(id, []string{"member"}) == nil }(id)
 	}
 	wg.Wait()
 	close(wins)

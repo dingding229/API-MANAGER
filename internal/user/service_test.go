@@ -15,13 +15,13 @@ import (
 func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	memory := store.NewMemory()
 	service := NewService(memory)
-	if _, err := service.Create("short@example.com", "1234567", "viewer"); err == nil {
+	if _, err := service.Create("short@example.com", "1234567", "member"); err == nil {
 		t.Fatal("7-byte password was accepted")
 	}
-	if _, err := service.Create("eight-byte-user", "12345678", "viewer"); err != nil {
+	if _, err := service.Create("eight-byte-user", "12345678", "member"); err != nil {
 		t.Fatalf("8-byte password was rejected: %v", err)
 	}
-	created, err := service.Create("valid@example.com", "123456789012", "viewer")
+	created, err := service.Create("valid@example.com", "123456789012", "member")
 	if err != nil {
 		t.Fatalf("12-byte password was rejected: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	if cost != passwordHashCost {
 		t.Fatalf("bcrypt cost = %d, want %d", cost, passwordHashCost)
 	}
-	if _, err := service.Create("long@example.com", strings.Repeat("x", 73), "viewer"); err == nil {
+	if _, err := service.Create("long@example.com", strings.Repeat("x", 73), "member"); err == nil {
 		t.Fatal("73-byte password was accepted")
 	}
 }
@@ -76,11 +76,11 @@ func TestExistingAccountsAreNotResetAndSessionHashesArePersisted(t *testing.T) {
 func TestDisabledUserSessionIsImmediatelyRejected(t *testing.T) {
 	m := store.NewMemory()
 	s := NewService(m)
-	user, err := s.Create("viewer", "viewer-password", "viewer")
+	user, err := s.Create("member", "viewer-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := s.Authenticate("viewer", "viewer-password")
+	_, token, err := s.Authenticate("member", "viewer-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestDisabledUserSessionIsImmediatelyRejected(t *testing.T) {
 
 func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
 	s := NewService(store.NewMemory())
-	u, err := s.Create("viewer-two", "viewer-password", "viewer")
+	u, err := s.Create("viewer-two", "viewer-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,17 +119,17 @@ func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
 func TestRolePermissionUpdatesValidateAndProtectSuperAdmin(t *testing.T) {
 	m := store.NewMemory()
 	service := NewService(m)
-	if err := service.UpdateRolePermissions("viewer", []string{"api.read", "api.read", "observability.read"}); err != nil {
+	if err := service.UpdateRolePermissions("api_developer", []string{"api.read", "api.read", "observability.read"}); err != nil {
 		t.Fatal(err)
 	}
-	role, err := m.GetRoleByName("viewer")
+	role, err := m.GetRoleByName("api_developer")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(role.Permissions) != 2 {
 		t.Fatalf("permissions not normalized: %#v", role.Permissions)
 	}
-	if err := service.UpdateRolePermissions("viewer", []string{"unknown.permission"}); err == nil {
+	if err := service.UpdateRolePermissions("api_developer", []string{"unknown.permission"}); err == nil {
 		t.Fatal("unknown permission accepted")
 	}
 	if err := service.UpdateRolePermissions("super_admin", []string{"api.read"}); err == nil {
@@ -173,7 +173,7 @@ func TestUpdateProfileRequiresCurrentPasswordForSelfAndProtectsPrivilegedTarget(
 	if err := s.EnsureInitialAdmin("admin", "admin-password"); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := s.Create("reader", "reader-password", "viewer")
+	reader, err := s.Create("reader", "reader-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

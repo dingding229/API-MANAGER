@@ -39,12 +39,12 @@ func TestConsoleNavigationContainsOnlyApplicationFeatures(t *testing.T) {
 	w := httptest.NewRecorder()
 	Console().ServeHTTP(w, httptest.NewRequest("GET", "/admin/", nil))
 	html := w.Body.String()
-	for _, name := range []string{"总览", "接口管理", "调用凭证", "用户管理", "角色与权限", "插件", "运行观测", "审计日志", "登录会话", "网站设置", "会员与计费", "注册与登录"} {
+	for _, name := range []string{"总览", "接口管理", "调用凭证", "用户管理", "角色与权限", "插件", "运行观测", "审计日志", "网站设置", "用户余额", "套餐管理", "调用日志", "注册与登录"} {
 		if !strings.Contains(html, name) {
 			t.Fatalf("missing navigation %s", name)
 		}
 	}
-	if strings.Count(html, "data-page=") != 12 {
+	if strings.Count(html, "data-page=") != 13 {
 		t.Fatal("unexpected extra navigation entry")
 	}
 }
@@ -96,7 +96,7 @@ func TestUserTableUsesScopedCenteredRowLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, markup := range []string{`<table class="user-table">`, `<div class="user-cell user-identity"><strong>`, `<div class="user-cell user-cell-badges">`, `<div class="user-cell"><span class="badge`} {
+	for _, markup := range []string{`<table class="user-table">`, `<strong>${esc(u.nickname||u.username)}</strong>`, `data-user-filter`, `u.uid||u.id`} {
 		if !strings.Contains(string(js), markup) {
 			t.Errorf("missing centered user cell markup: %s", markup)
 		}

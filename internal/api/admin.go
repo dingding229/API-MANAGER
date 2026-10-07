@@ -105,6 +105,12 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/"):
+		a.deleteRole(w, r)
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/") && !strings.HasSuffix(r.URL.Path, "/permissions"):
+		a.saveRoleDetails(w, r)
+	case strings.Contains(r.URL.Path, "/sessions") && strings.HasPrefix(r.URL.Path, "/admin/v1/users/"):
+		writeJSON(w, 410, map[string]string{"error": "请在用户中心管理登录会话"})
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/version":
 		writeJSON(w, 200, version.Current())
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/version/check":
@@ -250,11 +256,11 @@ func requiredPermission(r *http.Request) string {
 	case strings.HasPrefix(path, "/admin/v1/apis/") && r.Method == http.MethodDelete:
 		return "api.delete"
 	case strings.HasPrefix(path, "/admin/v1/credentials/") && strings.HasSuffix(path, "/key") && r.Method == http.MethodGet:
-		return "credential.reveal"
+		return "*"
 	case path == "/admin/v1/credentials" && r.Method == http.MethodGet:
-		return "credential.read"
+		return "*"
 	case path == "/admin/v1/credentials" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/credentials/") && (strings.HasSuffix(path, "/revoke") || strings.HasSuffix(path, "/rotate")) && r.Method == http.MethodPost:
-		return "credential.write"
+		return "*"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodGet, path == "/admin/v1/plugin-library" && r.Method == http.MethodGet:
 		return "plugin.read"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/plugins/"), path == "/admin/v1/plugin-library/install" && r.Method == http.MethodPost, path == "/admin/v1/plugin-library" && r.Method == http.MethodPost:
@@ -267,7 +273,7 @@ func requiredPermission(r *http.Request) string {
 		return "user.manage"
 	case path == "/admin/v1/roles" && r.Method == http.MethodGet, path == "/admin/v1/permissions":
 		return "user.read"
-	case path == "/admin/v1/roles" && r.Method == http.MethodPost, strings.HasSuffix(path, "/permissions"):
+	case path == "/admin/v1/roles" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/roles/"):
 		return "user.manage"
 	default:
 		return ""
@@ -1377,7 +1383,7 @@ func responseStatus(api model.API) int {
 }
 
 func apiFromRequest(id string, request model.CreateAPIRequest, createdAt, updatedAt time.Time) model.API {
-	return model.API{PriceMicros: request.PriceMicros, PublicTestEnabled: request.PublicTestEnabled, PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: primaryMethod(request), Methods: normalizedMethods(request), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: request.RateLimitPerMinute, DailyQuota: request.DailyQuota, MonthlyQuota: request.MonthlyQuota, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, PluginCache: request.PluginCache, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return model.API{PriceMicros: request.PriceMicros, PublicTestEnabled: request.PublicVisible, PublicVisible: request.PublicVisible, PublicTitle: request.PublicTitle, PublicSummary: request.PublicSummary, PublicCategory: request.PublicCategory, ID: id, Name: request.Name, Description: request.Description, Method: primaryMethod(request), Methods: normalizedMethods(request), Path: request.Path, AuthMode: defaultAuthMode(request.AuthMode), AuthConfig: request.AuthConfig, RateLimitPerMinute: 0, DailyQuota: 0, MonthlyQuota: 0, ResponseStatus: request.ResponseStatus, ResponseBody: request.ResponseBody, RequestSchema: request.RequestSchema, ResponseSchema: request.ResponseSchema, ParametersSchema: request.ParametersSchema, Plugin: request.Plugin, PluginCache: request.PluginCache, UpstreamAuthRef: request.UpstreamAuthRef, UpstreamURL: request.UpstreamURL, UpstreamPath: request.UpstreamPath, StripPath: request.StripPath, UpstreamTimeoutMS: request.UpstreamTimeoutMS, UpstreamRetries: request.UpstreamRetries, CircuitThreshold: request.CircuitThreshold, CircuitResetSecs: request.CircuitResetSecs, CreatedAt: createdAt, UpdatedAt: updatedAt}
 }
 
 func normalizeAPIMethod(method string) string { return strings.ToUpper(strings.TrimSpace(method)) }
@@ -1424,9 +1430,7 @@ func validateAPIRequest(request model.CreateAPIRequest, productionMode bool) err
 	if request.ResponseStatus != 0 && (request.ResponseStatus < 100 || request.ResponseStatus > 599) {
 		return errors.New("response_status must be between 100 and 599")
 	}
-	if request.RateLimitPerMinute < 0 || request.DailyQuota < 0 || request.MonthlyQuota < 0 {
-		return errors.New("rate limits and quotas must not be negative")
-	}
+
 	if request.UpstreamURL != "" {
 		parsed, err := url.ParseRequestURI(request.UpstreamURL)
 		if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
