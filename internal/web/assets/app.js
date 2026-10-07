@@ -21,7 +21,7 @@ const permissionLabels = {
   'api.delete': '删除接口',
   'credential.read': '查看调用凭证列表',
   'credential.reveal': '查看完整调用密钥',
-  'credential.write': '创建与吊销调用凭证',
+  'credential.write': '创建、重置和吊销调用凭证',
   'plugin.read': '查看插件',
   'plugin.manage': '管理插件配置',
   'user.read': '查看用户、角色与权限',

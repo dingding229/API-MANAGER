@@ -30,3 +30,5 @@ CREATE TABLE plugin_settings (
  plugin_id TEXT PRIMARY KEY REFERENCES plugins(id) ON DELETE CASCADE,
  encrypted_settings TEXT NOT NULL, version BIGINT NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+UPDATE permissions SET description='创建、重置和吊销调用凭证' WHERE code='credential.write';

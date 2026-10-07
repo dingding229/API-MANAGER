@@ -23,7 +23,7 @@ var defaultPermissions = []model.Permission{
 	{Code: "api.delete", Description: "删除接口"},
 	{Code: "credential.read", Description: "查看调用凭证列表"},
 	{Code: "credential.reveal", Description: "查看完整调用密钥"},
-	{Code: "credential.write", Description: "创建与吊销调用凭证"},
+	{Code: "credential.write", Description: "创建、重置和吊销调用凭证"},
 	{Code: "plugin.read", Description: "查看插件"},
 	{Code: "plugin.manage", Description: "管理插件配置"},
 	{Code: "api.test", Description: "在公开文档中执行在线测试"},
