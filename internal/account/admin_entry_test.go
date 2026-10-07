@@ -49,6 +49,15 @@ func TestPostgresAdminEntryIsPermissionBoundSessionBoundAndSingleUse(t *testing.
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Each test initializes its own authentication settings, including when CI
+	// reuses a database after storage-level encryption fixtures.
+	cfg, _, err := p.SecuritySettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member", WebsiteURL: "https://example.test"}, ""); err != nil {
+		t.Fatal(err)
+	}
 	s := New(p, us, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, true)
 	s.SetAdminPath("/staff/console")
 	issue := func(token, origin string, bearer bool) *httptest.ResponseRecorder {
