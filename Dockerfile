@@ -13,10 +13,10 @@ RUN go mod download
 COPY cmd/server ./cmd/server
 COPY internal ./internal
 ARG TARGETOS TARGETARCH
-ARG APP_VERSION=0.3.38-dev
+ARG APP_VERSION=0.3.39-dev
 ARG APP_REVISION=development
 ARG APP_BUILT_AT
-RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X api-manager/internal/version.Version=${APP_VERSION} -X api-manager/internal/version.Revision=${APP_REVISION} -X api-manager/internal/version.BuiltAt=${APP_BUILT_AT}" -o /out/api-manager ./cmd/server && mkdir -p /out/plugins /out/plugin-library /out/observability
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X api-manager/internal/version.Version=${APP_VERSION} -X api-manager/internal/version.Revision=${APP_REVISION} -X api-manager/internal/version.BuiltAt=${APP_BUILT_AT}" -o /out/api-manager ./cmd/server && mkdir -p /out/plugins /out/plugin-library /out/observability /out/database-backups
 
 # Rebuild upstream binaries from immutable source archives with patched Go modules.
 # The downloaded tarballs and the Alertmanager UI release asset are SHA-256 checked.
@@ -104,6 +104,7 @@ COPY --from=builder --chown=65532:65532 /out/api-manager /api-manager
 COPY --from=builder --chown=65532:65532 /out/plugins /data/plugins
 COPY --from=builder --chown=65532:65532 /out/plugin-library /data/plugin-library
 COPY --from=builder --chown=65532:65532 /out/observability /data/observability
+COPY --from=builder --chown=65532:65532 /out/database-backups /data/database-backups
 COPY --from=public-ui-build /ui/out /usr/share/api-manager/public-ui
 COPY public-ui/LICENSE.fumadocs /usr/share/api-manager/LICENSE.fumadocs
 COPY public-ui/LICENSE.octicons /usr/share/api-manager/LICENSE.octicons

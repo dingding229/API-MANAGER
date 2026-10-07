@@ -69,8 +69,13 @@ func LimitRequestBody(maxBodyBytes, maxPluginUploadBytes int64, next http.Handle
 		maxPluginUploadBytes = maxBodyBytes
 	}
 	normal := http.MaxBytesHandler(next, maxBodyBytes)
+	databaseUpload := http.MaxBytesHandler(next, 24<<20)
 	pluginUpload := http.MaxBytesHandler(next, maxPluginUploadBytes)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/admin/v1/database/import" {
+			databaseUpload.ServeHTTP(w, r)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/admin/v1/plugins" {
 			pluginUpload.ServeHTTP(w, r)
 			return

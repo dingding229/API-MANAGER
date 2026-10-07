@@ -63,6 +63,7 @@ services:
       - plugin_data:/data/plugins
       - plugin_library:/data/plugin-library
       - observability_data:/data/observability
+      - database_backups:/data/database-backups
     networks: [frontend, backend]
     depends_on:
       postgres: {condition: service_healthy}
@@ -144,6 +145,7 @@ networks:
   backend: {internal: true}
 
 volumes:
+  database_backups: {name: "${DATABASE_BACKUP_VOLUME:-api-manager-database-backups}"}
   postgres_data: {name: "${POSTGRES_DATA_VOLUME:-api-manager-postgres-data}"}
   redis_data: {name: "${REDIS_DATA_VOLUME:-api-manager-redis-data}"}
   plugin_data: {name: "${PLUGIN_DATA_VOLUME:-api-manager-prod-plugin-data}"}

@@ -44,6 +44,7 @@ type UserManager interface {
 }
 
 type Admin struct {
+	database                databaseManagement
 	mailPreviews            mailPreviewCache
 	credentialGuard         func(*http.Request, string, string) error
 	versionChecker          *version.Checker
@@ -150,6 +151,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = io.NopCloser(strings.NewReader(string(raw)))
 	}
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/database/"):
+		a.databaseHandler(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/settings") && (r.Method == "GET" || r.Method == "PUT"):
 		a.pluginSettings(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/"):
@@ -299,6 +302,8 @@ func (a *Admin) hasPermission(r *http.Request, permission string) bool {
 func requiredPermission(r *http.Request) string {
 	path := r.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/admin/v1/database/"):
+		return "database.manage"
 	case path == "/admin/v1/version/settings":
 		return "*"
 	case path == "/admin/v1/overview" || path == "/admin/v1/version" || path == "/admin/v1/version/check":

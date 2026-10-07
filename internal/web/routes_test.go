@@ -44,7 +44,7 @@ func TestConsoleNavigationContainsOnlyApplicationFeatures(t *testing.T) {
 			t.Fatalf("missing navigation %s", name)
 		}
 	}
-	if strings.Count(html, "data-page=") != 14 {
+	if strings.Count(html, "data-page=") != 15 {
 		t.Fatal("unexpected extra navigation entry")
 	}
 }

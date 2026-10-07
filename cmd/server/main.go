@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -144,6 +145,8 @@ func main() {
 		os.Exit(1)
 	}
 	admin.SetProductionMode(cfg.ProductionMode)
+	maintenance := &httpx.Maintenance{}
+	admin.ConfigureDatabaseManagement(filepath.Join(filepath.Dir(cfg.PluginLibraryDir), "database-backups"), stop, maintenance)
 	admin.SetPluginLibrary(plugin.NewLibrary(cfg.PluginLibraryDir, pluginManager))
 	admin.SetObservability(observabilityHub, metrics)
 	settingsStore, ok := activeStore.(sitesettings.Store)
@@ -183,11 +186,16 @@ func main() {
 				case <-rootCtx.Done():
 					return
 				case <-ticker.C:
+					release, available := maintenance.Work()
+					if !available {
+						continue
+					}
 					ctx, cancel := context.WithTimeout(rootCtx, 5*time.Second)
 					if err := recon.ReconcileCharges(ctx); err != nil {
 						logger.Error("billing reconciliation unavailable")
 					}
 					cancel()
+					release()
 				}
 			}
 		}()
@@ -201,9 +209,14 @@ func main() {
 				case <-rootCtx.Done():
 					return
 				case <-ticker.C:
+					release, available := maintenance.Work()
+					if !available {
+						continue
+					}
 					ctx, cancel := context.WithTimeout(rootCtx, 2*time.Second)
 					_ = cached.PrunePluginCache(ctx, time.Now().UTC(), 1000)
 					cancel()
+					release()
 				}
 			}
 		}()
@@ -259,6 +272,7 @@ func main() {
 	mux.Handle("/metrics", httpx.ProtectMetrics(metrics, cfg.MetricsToken))
 
 	handler := httpx.LimitRequestBody(cfg.MaxBodyBytes, cfg.PluginMaxBytes+(64<<10), mux)
+	handler = maintenance.Middleware(handler)
 	handler = httpx.ThrottleAdmin(limiter, handler)
 	handler = loggingMiddleware(logger, handler)
 	handler = metrics.Middleware(handler)

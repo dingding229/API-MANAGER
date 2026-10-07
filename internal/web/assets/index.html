@@ -36,6 +36,7 @@
           <button data-page="plans" data-permission="billing.read" class="hidden">套餐管理</button>
           <button data-page="calllogs" data-permission="audit.read" class="hidden">调用日志</button>
           <button data-page="authentication" data-super-admin="true" class="hidden">注册与登录</button>
+          <button data-page="database" data-permission="database.manage" data-super-admin class="hidden">数据库管理</button>
           <button data-page="settings" data-super-admin="true" class="hidden">网站设置</button>
         </nav>
         <div class="version-status" aria-label="程序版本"><span id="current-version" aria-label="程序版本"><span class="ui-placeholder-line" aria-hidden="true"></span></span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" data-permission="api.read" class="link">检查更新</button></div>
@@ -53,5 +54,6 @@
  <script src="__ADMIN_PATH__/account.js"></script>
  <script src="__ADMIN_PATH__/consolidation.js"></script>
  <script src="__ADMIN_PATH__/enhancements.js"></script>
+ <script src="__ADMIN_PATH__/database.js"></script>
 </body>
 </html>

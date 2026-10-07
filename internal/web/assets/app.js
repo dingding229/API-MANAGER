@@ -219,13 +219,13 @@ function renderPage() {
   const newPage = document.createElement('div'); newPage.id = 'page';
   oldPage.replaceWith(newPage);
   notice('');
-  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',settings:'网站设置',cards:'卡密管理',accounts:'用户余额',plans:'套餐管理',calllogs:'调用日志',authentication:'注册与登录'};
+  const titles = {overview:'总览', apis:'接口管理', credentials:'调用凭证', users:'用户管理', roles:'角色与权限', plugins:'插件', observability:'运行观测', audit:'审计日志',database:'数据库管理',settings:'网站设置',cards:'卡密管理',accounts:'用户余额',plans:'套餐管理',calllogs:'调用日志',authentication:'注册与登录'};
   $('#page-title').textContent = titles[state.page] || '总览';
   $$('#nav button').forEach((button) => {
     const active = button.dataset.page === state.page; button.classList.toggle('active', active);
     if (active) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
-  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, settings: renderSiteSettings,cards:renderCards,accounts:renderBalanceAdmin,plans:renderPlanAdmin,calllogs:renderCallLogsAdmin,authentication:renderAuthentication};
+  const renderers = {overview: renderOverview, apis: renderAPIs, credentials: renderCredentials, users: renderUsers, roles: renderRoles, plugins: renderPlugins, observability: renderObservability, audit: renderAuditLogs, database: renderDatabase, settings: renderSiteSettings,cards:renderCards,accounts:renderBalanceAdmin,plans:renderPlanAdmin,calllogs:renderCallLogsAdmin,authentication:renderAuthentication};
   return renderers[state.page]();
 }
 

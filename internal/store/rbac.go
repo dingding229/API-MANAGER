@@ -3,6 +3,7 @@ package store
 import "api-manager/internal/model"
 
 var defaultPermissions = []model.Permission{
+	{Code: "database.manage", Description: "查看、备份和恢复数据库"},
 	{Code: "account.profile", Description: "修改个人资料"},
 	{Code: "account.security", Description: "管理个人账号安全"},
 	{Code: "account.keys.read", Description: "查看个人调用凭据"},

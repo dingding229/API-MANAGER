@@ -42,7 +42,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/bin/sh", "-ec"]
-          args: ["mkdir -p /data/plugins /data/plugin-library /data/observability && chmod 0700 /data/plugins /data/plugin-library /data/observability"]
+          args: ["mkdir -p /data/plugins /data/plugin-library /data/observability /data/database-backups && chmod 0700 /data/plugins /data/plugin-library /data/observability /data/database-backups"]
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           volumeMounts:
@@ -104,6 +104,9 @@ spec:
             - name: data
               mountPath: /data/observability
               subPath: observability
+            - name: data
+              mountPath: /data/database-backups
+              subPath: database-backups
           readinessProbe:
             httpGet: { path: /health/ready, port: http }
             initialDelaySeconds: 5
