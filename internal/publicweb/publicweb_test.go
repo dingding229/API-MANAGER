@@ -140,3 +140,23 @@ func TestPlaygroundHTMLIsServedButNeverSharedCached(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String(), w.Header())
 	}
 }
+
+func TestHomeAndDocumentationRoutesAreDistinctAndPrivateCached(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"index.html": "home", "docs.html": "documentation", "account.html": "account", "playground.html": "testing"} {
+		if e := os.WriteFile(filepath.Join(dir, name), []byte(body), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	h, e := New(dir, http.NotFoundHandler())
+	if e != nil {
+		t.Fatal(e)
+	}
+	for path, body := range map[string]string{"/": "home", "/docs": "documentation", "/docs/": "documentation", "/playground": "testing"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
+		if w.Code != 200 || w.Body.String() != body || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+			t.Fatal(path, w.Code, w.Body.String(), w.Header())
+		}
+	}
+}

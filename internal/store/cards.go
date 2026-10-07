@@ -51,7 +51,7 @@ func (p *Postgres) CardBatch(ctx context.Context, id string) (model.CardBatch, e
 	if e != nil {
 		return b, e
 	}
-	rows, e := p.pool.Query(ctx, `SELECT id,batch_id,code_hash,prefix,encrypted_code,revoked,redeemed_by,redeemed_at FROM redeem_cards WHERE batch_id=$1 ORDER BY id`, id)
+	rows, e := p.pool.Query(ctx, `SELECT c.id,c.batch_id,c.code_hash,c.prefix,c.encrypted_code,c.revoked,c.redeemed_by,c.redeemed_at,COALESCE(u.username,''),COALESCE(NULLIF(u.nickname,''),u.username,'') FROM redeem_cards c LEFT JOIN users u ON u.id=c.redeemed_by WHERE c.batch_id=$1 ORDER BY c.id`, id)
 	if e != nil {
 		return b, e
 	}
@@ -59,8 +59,16 @@ func (p *Postgres) CardBatch(ctx context.Context, id string) (model.CardBatch, e
 	b.Cards = []model.RedeemCard{}
 	for rows.Next() {
 		var v model.RedeemCard
-		if e = rows.Scan(&v.ID, &v.BatchID, &v.CodeHash, &v.Prefix, &v.EncryptedCode, &v.Revoked, &v.RedeemedBy, &v.RedeemedAt); e != nil {
+		if e = rows.Scan(&v.ID, &v.BatchID, &v.CodeHash, &v.Prefix, &v.EncryptedCode, &v.Revoked, &v.RedeemedBy, &v.RedeemedAt, &v.RedeemedUsername, &v.RedeemedNickname); e != nil {
 			return b, e
+		}
+		v.Status = "unused"
+		if v.RedeemedBy != nil {
+			v.Status = "used"
+		} else if v.Revoked {
+			v.Status = "revoked"
+		} else if !b.ExpiresAt.After(time.Now()) {
+			v.Status = "expired"
 		}
 		b.Cards = append(b.Cards, v)
 	}

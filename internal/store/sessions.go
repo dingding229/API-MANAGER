@@ -158,9 +158,11 @@ func (m *Memory) TouchSession(hash string, now time.Time, ip string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	if now.Sub(s.LastSeenAt) > time.Minute {
+	if now.Sub(s.LastSeenAt) > time.Minute || (ip != "" && s.LastIP != ip) {
 		s.LastSeenAt = now
-		s.LastIP = ip
+		if ip != "" {
+			s.LastIP = ip
+		}
 		m.sessions[hash] = s
 	}
 	return nil
@@ -195,6 +197,6 @@ func (p *Postgres) DeleteUserSession(userID, id string) (bool, error) {
 func (p *Postgres) TouchSession(hash string, now time.Time, ip string) error {
 	ctx, cancel := dbContext()
 	defer cancel()
-	_, err := p.pool.Exec(ctx, `UPDATE user_sessions SET last_seen_at=$2,last_ip=$3 WHERE key_hash=$1 AND last_seen_at<$2-INTERVAL '1 minute'`, hash, now, ip)
+	_, err := p.pool.Exec(ctx, `UPDATE user_sessions SET last_seen_at=$2::timestamptz,last_ip=CASE WHEN $3='' THEN last_ip ELSE $3 END WHERE key_hash=$1 AND (last_seen_at<$2::timestamptz-INTERVAL '1 minute' OR ($3<>'' AND last_ip<>$3))`, hash, now, ip)
 	return err
 }

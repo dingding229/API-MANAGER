@@ -4,6 +4,7 @@ import (
 	"api-manager/internal/auth"
 	"api-manager/internal/httpx"
 	"api-manager/internal/model"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -92,6 +93,8 @@ func (s *Service) TouchSession(token string, r *http.Request) {
 		return
 	}
 	if st, ok := s.store.(sessionManagerStore); ok {
-		_ = st.TouchSession(auth.HashAPIKey(token), time.Now().UTC(), httpx.Client(r).IP)
+		if err := st.TouchSession(auth.HashAPIKey(token), time.Now().UTC(), httpx.PublicAddress(httpx.Client(r).IP)); err != nil {
+			slog.Warn("session activity update failed")
+		}
 	}
 }

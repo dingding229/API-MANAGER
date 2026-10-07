@@ -215,3 +215,26 @@ func TestCredentialDialogsAuditDetailsAndXSSSafeSinks(t *testing.T) {
 		t.Fatal("audit detail dialog missing")
 	}
 }
+
+func TestUserManagementUsesSingleRowSecondaryMenu(t *testing.T) {
+	raw, e := assets.ReadFile("assets/app.js")
+	if e != nil {
+		t.Fatal(e)
+	}
+	s := string(raw)
+	start := strings.Index(s, "function userActions(")
+	end := strings.Index(s[start:], "async function renderUsers")
+	actions := s[start : start+end]
+	for _, field := range []string{"user-action-menu", "更多操作", "data-user-usage", "data-bind-user-plan", "data-user-status"} {
+		if !strings.Contains(actions, field) {
+			t.Fatal("missing permission-bound action", field)
+		}
+	}
+	css, e := assets.ReadFile("assets/app.css")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(string(css), ".user-table .actions{flex-wrap:nowrap!important") {
+		t.Fatal("user actions can wrap")
+	}
+}

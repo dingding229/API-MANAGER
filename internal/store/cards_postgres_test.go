@@ -165,3 +165,25 @@ func TestPluginSettingsStoreCASAndVersionIsolation(t *testing.T) {
 		t.Fatal("deleted plugin retained settings", version, e)
 	}
 }
+
+func TestCardUsageRecordsIdentifyConsumerWithoutExposingSecrets(t *testing.T) {
+	p := accountPG(t)
+	u := accountUser(t, p)
+	other := accountUser(t, p)
+	b := sampleCards(t, p, u, "balance", 100, nil)
+	if _, e := p.RedeemCard(context.Background(), other.ID, b.Cards[0].CodeHash); e != nil {
+		t.Fatal(e)
+	}
+	used, e := p.CardBatch(context.Background(), b.ID)
+	if e != nil || len(used.Cards) != 1 {
+		t.Fatal(used, e)
+	}
+	c := used.Cards[0]
+	if c.Status != "used" || c.RedeemedBy == nil || *c.RedeemedBy != other.ID || c.RedeemedUsername != other.Username || c.RedeemedAt == nil {
+		t.Fatal(c, e)
+	}
+	raw, _ := json.Marshal(used)
+	if containsCardSecret(string(raw), c.CodeHash) || containsCardSecret(string(raw), c.EncryptedCode) {
+		t.Fatal("secret exposed", string(raw))
+	}
+}

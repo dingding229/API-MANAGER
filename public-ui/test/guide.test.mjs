@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {projectCatalog} from '../lib/catalog.ts';
 test('guide covers real API onboarding, authentication, errors and FAQs without development prompts',()=>{
- const source=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8');
+ const source=readFileSync(new URL('../components/api-documentation.tsx',import.meta.url),'utf8');
  for(const section of ['guide-start','guide-auth','guide-example','guide-errors','guide-faq'])assert.ok(source.includes(section));
  assert.match(source,/snippet\(sample,baseUrl,method,'curl'\)/);assert.doesNotMatch(source,/YOUR_API_DOMAIN|YOUR_VALUE|prompt|codex|ChatGPT/);
 });

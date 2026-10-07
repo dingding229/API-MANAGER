@@ -1,3 +1,3 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
-const page=readFileSync(new URL('../app/page.tsx',import.meta.url),'utf8'),play=readFileSync(new URL('../app/playground/page.tsx',import.meta.url),'utf8');
+const page=readFileSync(new URL('../components/api-documentation.tsx',import.meta.url),'utf8'),play=readFileSync(new URL('../app/playground/page.tsx',import.meta.url),'utf8');
 test('testing page is separated from documentation and gated by authenticated permission',()=>{assert.match(play,/!session.username/);assert.match(play,/!session.canTest/);assert.match(play,/testing\/?>/);assert.match(page,/testing\?<TestPanel/);assert.match(page,/session.username&&session.canTest/);const nav=page.slice(page.indexOf('<nav className="endpoint-navigation"'),page.indexOf('<p className="directory-footer"'));assert.doesNotMatch(nav,/api.path|MethodBadge/)});

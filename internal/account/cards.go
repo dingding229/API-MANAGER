@@ -65,7 +65,22 @@ func (s *Service) cards(w http.ResponseWriter, r *http.Request, u model.User) {
 		write(w, 200, list)
 		return
 	}
+	if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/account/v1/admin/cards/") && strings.HasSuffix(r.URL.Path, "/items") {
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/account/v1/admin/cards/"), "/items")
+		if !assignmentUUID.MatchString(id) {
+			write(w, 404, nil)
+			return
+		}
+		b, e := st.CardBatch(r.Context(), id)
+		if e != nil {
+			write(w, 404, nil)
+			return
+		}
+		write(w, 200, b)
+		return
+	}
 	var req struct {
+		Purpose         string    `json:"purpose"`
 		Kind            string    `json:"kind"`
 		AmountMicros    int64     `json:"amount_micros"`
 		PlanID          string    `json:"plan_id"`
@@ -146,7 +161,7 @@ func (s *Service) cards(w http.ResponseWriter, r *http.Request, u model.User) {
 			write(w, 409, map[string]string{"error": "创建失败，请使用原操作编号重试"})
 			return
 		}
-		s.outputCards(w, result)
+		s.outputCards(w, result, "unused")
 		return
 	}
 	tail := strings.TrimPrefix(r.URL.Path, "/account/v1/admin/cards/")
@@ -161,7 +176,14 @@ func (s *Service) cards(w http.ResponseWriter, r *http.Request, u model.User) {
 			write(w, 404, nil)
 			return
 		}
-		s.outputCards(w, b)
+		if req.Purpose == "" {
+			req.Purpose = "unused"
+		}
+		if req.Purpose != "used" && req.Purpose != "unused" && req.Purpose != "all" {
+			write(w, 400, nil)
+			return
+		}
+		s.outputCards(w, b, req.Purpose)
 		return
 	}
 	if parts[1] == "revoke" && req.Confirm {
@@ -174,10 +196,10 @@ func (s *Service) cards(w http.ResponseWriter, r *http.Request, u model.User) {
 	}
 	write(w, 400, nil)
 }
-func (s *Service) outputCards(w http.ResponseWriter, b model.CardBatch) {
+func (s *Service) outputCards(w http.ResponseWriter, b model.CardBatch, purpose string) {
 	codes := []string{}
 	for _, c := range b.Cards {
-		if c.RedeemedBy == nil && !c.Revoked {
+		if purpose == "all" || (purpose == "used" && c.Status == "used") || (purpose == "unused" && c.Status == "unused") {
 			v, e := auth.DecryptSecret(s.key+":cards", c.EncryptedCode)
 			if e != nil {
 				write(w, 503, map[string]string{"error": "卡密不可读取"})

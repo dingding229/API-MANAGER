@@ -67,7 +67,7 @@ test('generated Python and Go snippets parse with quotes, Unicode and composite 
 });
 
 test('frontend uses only public data and no template secrets, response mocks or external CDN assets', () => {
-  const page = readFileSync(new URL('../app/page.tsx', import.meta.url), 'utf8');
+  const page = readFileSync(new URL('../components/api-documentation.tsx', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../app/global.css', import.meta.url), 'utf8');
   assert.match(page, /fetch\('\/catalog\.json'/);
   assert.match(page, /credentials: 'omit'/);

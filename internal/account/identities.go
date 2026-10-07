@@ -84,7 +84,22 @@ func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User)
 		}
 		out := []map[string]any{}
 		for _, v := range list {
-			out = append(out, map[string]any{"id": v.ID, "user_id": target, "user_agent": v.UserAgent, "expires_at": v.ExpiresAt, "device": v.Device, "login_ip": httpx.PublicAddress(v.LoginIP), "last_ip": httpx.PublicAddress(v.LastIP), "ip_source": v.IPSource, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
+			publicIP := httpx.PublicAddress(v.LastIP)
+			addressSource := "last_activity"
+			if publicIP == "" {
+				publicIP = httpx.PublicAddress(v.LoginIP)
+				addressSource = "login"
+			}
+			if v.ID == current.ID && target == u.ID {
+				if ip := httpx.PublicAddress(httpx.Client(r).IP); ip != "" {
+					publicIP = ip
+					addressSource = "current_request"
+				}
+			}
+			if publicIP == "" {
+				addressSource = "not_recorded"
+			}
+			out = append(out, map[string]any{"id": v.ID, "user_id": target, "user_agent": v.UserAgent, "expires_at": v.ExpiresAt, "device": v.Device, "public_ip": publicIP, "public_ip_source": addressSource, "login_ip": httpx.PublicAddress(v.LoginIP), "last_ip": httpx.PublicAddress(v.LastIP), "ip_source": v.IPSource, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
 		}
 		write(w, 200, out)
 		return

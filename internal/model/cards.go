@@ -19,12 +19,15 @@ type CardBatch struct {
 	Cards        []RedeemCard    `json:"cards,omitempty"`
 }
 type RedeemCard struct {
-	ID            string     `json:"id"`
-	BatchID       string     `json:"batch_id"`
-	CodeHash      string     `json:"-"`
-	Prefix        string     `json:"prefix"`
-	EncryptedCode string     `json:"-"`
-	Revoked       bool       `json:"revoked"`
-	RedeemedBy    *string    `json:"redeemed_by,omitempty"`
-	RedeemedAt    *time.Time `json:"redeemed_at,omitempty"`
+	ID               string     `json:"id"`
+	BatchID          string     `json:"batch_id"`
+	CodeHash         string     `json:"-"`
+	Prefix           string     `json:"prefix"`
+	EncryptedCode    string     `json:"-"`
+	RedeemedUsername string     `json:"redeemed_username,omitempty"`
+	RedeemedNickname string     `json:"redeemed_nickname,omitempty"`
+	Status           string     `json:"status"`
+	Revoked          bool       `json:"revoked"`
+	RedeemedBy       *string    `json:"redeemed_by,omitempty"`
+	RedeemedAt       *time.Time `json:"redeemed_at,omitempty"`
 }

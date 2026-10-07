@@ -24,3 +24,4 @@
 
 /* One card layout for every Plan count. */
 .account-plans-page .account-plan-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),380px));justify-content:start}.account-plan-card{display:flex!important;flex-direction:column;align-items:stretch!important}.account-plan-top{display:flex;flex-direction:column;align-items:flex-start;gap:10px}.account-plan-top>.plan-duration{margin-top:0}.account-plan-price{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;padding:22px 0 18px}.account-plan-price strong{white-space:nowrap;font-size:28px}.account-plan-price small{white-space:nowrap}.account-plan-card .account-plan-limits{width:100%;margin-bottom:20px!important}
+.account-content>.plan-usage{margin-top:22px}.account-plans-page .plan-usage{margin-bottom:0}
