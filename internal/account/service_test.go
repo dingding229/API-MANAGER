@@ -461,3 +461,122 @@ func TestPostgresUserCenterSessionAdministrationIsScoped(t *testing.T) {
 		t.Fatal("revoked session survived")
 	}
 }
+
+func TestPostgresAdminOperationsDoNotRequireOTPButLoginStillDoes(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated account database not configured")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, e := store.NewPostgres(context.Background(), dsn)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer p.Close()
+	users := user.NewService(p)
+	u, e := users.Create("otp-admin-"+ids.NewUUID(), "Password888", "super_admin")
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, token, e := users.Authenticate(u.Username, "Password888")
+	if e != nil {
+		t.Fatal(e)
+	}
+	cfg, _, e := p.SecuritySettings(context.Background())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member"}, ""); e != nil {
+		t.Fatal(e)
+	}
+	s := New(p, users, "0123456789abcdefghijklmnopqrstuvwxyz", &fakeMail{codes: map[string]string{}}, false)
+	secret, e := auth.EncryptSecret(s.key+":totp:"+u.ID, "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = p.BeginTOTP(context.Background(), u.ID, secret); e != nil {
+		t.Fatal(e)
+	}
+	if e = p.EnableTOTP(context.Background(), u.ID, secret, 0, []string{auth.HashAPIKey("rc_admin-test")}); e != nil {
+		t.Fatal(e)
+	}
+	fresh, e := p.GetUserByID(u.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, token, e = users.StartSession(fresh, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	call := func(path string, body any) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest("POST", "https://example.test"+path, strings.NewReader(string(raw)))
+		r.Header.Set("Origin", "https://example.test")
+		r.Header.Set("X-API-Request", "1")
+		r.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	target, e := users.Create("grant-user-"+ids.NewUUID(), "Password888", "member")
+	if e != nil {
+		t.Fatal(e)
+	}
+	plan := model.Plan{ID: ids.NewUUID(), Name: "人工绑定", Days: 30, Daily: 100, Enabled: true}
+	if e = p.SavePlan(context.Background(), plan); e != nil {
+		t.Fatal(e)
+	}
+	body := map[string]any{"user_id": target.ID, "plan_id": plan.ID, "note": "测试", "operation_id": ids.NewUUID(), "confirm": true, "current_password": "Password888"}
+	if w := call("/account/v1/admin/plan-assignment", body); w.Code != 200 {
+		t.Fatal("admin OTP still required", w.Code, w.Body.String())
+	}
+	if w := call("/auth/v1/login", map[string]string{"username": u.Username, "password": "Password888"}); w.Code != 202 {
+		t.Fatal("login MFA bypassed", w.Code, w.Body.String())
+	}
+	if w := call("/account/v1/keys", map[string]string{"key_name": "test", "current_password": "Password888"}); w.Code != 403 {
+		t.Fatal("personal security OTP bypassed", w.Code)
+	}
+	username := u.Username
+	profile := model.UpdateUserProfileRequest{Username: &username, CurrentPassword: "Password888"}
+	if _, _, err := users.UpdateProfile(u.ID, u.ID, profile); err == nil {
+		t.Fatal("personal profile OTP bypassed")
+	}
+	profile.AdminOperation = true
+	if _, _, err := users.UpdateProfile(u.ID, u.ID, profile); err != nil {
+		t.Fatal("backend self edit still requires OTP", err)
+	}
+}
+
+type websiteMail struct {
+	*fakeMail
+	info model.PublicSiteInfo
+}
+
+func (m *websiteMail) Public() model.PublicSiteInfo { return m.info }
+func TestPostgresAuthenticationUsesWebsiteOriginAndTurnstileHostname(t *testing.T) {
+	dsn := os.Getenv("TEST_ACCOUNT_DSN")
+	if dsn == "" {
+		t.Skip("isolated account database not configured")
+	}
+	if !strings.Contains(dsn, "/api_account_review_") {
+		t.Fatal("disposable database required")
+	}
+	p, err := store.NewPostgres(context.Background(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	mail := &websiteMail{fakeMail: &fakeMail{codes: map[string]string{}}, info: model.PublicSiteInfo{WebsiteURL: "https://site.example.test"}}
+	s := New(p, user.NewService(p), "0123456789abcdefghijklmnopqrstuvwxyz", mail, false)
+	cfg, err := s.settings(context.Background())
+	if err != nil || cfg.WebsiteURL != mail.info.WebsiteURL || cfg.TurnstileHost != "site.example.test" {
+		t.Fatal(cfg.WebsiteURL, cfg.TurnstileHost, err)
+	}
+	mail.info.WebsiteURL = "https://new.example.test"
+	cfg, err = s.settings(context.Background())
+	if err != nil || cfg.WebsiteURL != mail.info.WebsiteURL || cfg.TurnstileHost != "new.example.test" {
+		t.Fatal("domain change not propagated", err)
+	}
+}

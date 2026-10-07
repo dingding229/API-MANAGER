@@ -50,7 +50,7 @@ var ErrTestLimited = errors.New("test email rate limited")
 var ErrMailFailed = errors.New("test email delivery failed; check SMTP credentials, sender, recipient and TLS settings")
 
 func Defaults() model.SiteSettings {
-	return model.SiteSettings{Site: model.PublicSiteInfo{Name: "API Manager", PublicTitle: "API Manager · 开放接口目录", AdminTitle: "API Manager Console", Description: "浏览已公开的 API 接口、参数和调用方式。", Subtitle: "开放接口目录", HeroTitle: "找到接口，\n开始你的下一次调用。", HeroDescription: "从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。", Footer: "已发布的服务信息"}, SMTP: model.SMTPSettings{Port: 587, Mode: "starttls"}}
+	return model.SiteSettings{Site: model.PublicSiteInfo{TimeZone: model.DefaultTimeZone, Name: "API Manager", PublicTitle: "API Manager · 开放接口目录", AdminTitle: "API Manager Console", Description: "浏览已公开的 API 接口、参数和调用方式。", Subtitle: "开放接口目录", HeroTitle: "找到接口，\n开始你的下一次调用。", HeroDescription: "从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。", Footer: "已发布的服务信息"}, SMTP: model.SMTPSettings{Port: 587, Mode: "starttls"}}
 }
 func New(ctx context.Context, s Store, key string, defaults model.SiteSettings, password string, users *user.Service) (*Service, error) {
 	service := &Service{store: s, key: key, ctx: ctx, users: users}
@@ -106,6 +106,12 @@ func (s *Service) Save(req model.UpdateSiteSettingsRequest) (model.SiteSettingsV
 		return model.SiteSettingsView{}, err
 	}
 	req.Site.APIDomain = domain
+	if req.Site.TimeZone == "" {
+		req.Site.TimeZone = old.record.Settings.Site.TimeZone
+	}
+	if req.Site.TimeZone == "" {
+		req.Site.TimeZone = model.DefaultTimeZone
+	}
 	record := model.SiteSettingsRecord{Settings: model.SiteSettings{Site: req.Site, SMTP: req.SMTP}, UpdatedAt: time.Now().UTC()}
 	prepared, err := s.prepare(record, password)
 	if err != nil {
@@ -142,6 +148,9 @@ func (s *Service) Save(req model.UpdateSiteSettingsRequest) (model.SiteSettingsV
 	return s.View(), nil
 }
 func (s *Service) prepare(record model.SiteSettingsRecord, password string) (*snapshot, error) {
+	if record.Settings.Site.TimeZone == "" {
+		record.Settings.Site.TimeZone = model.DefaultTimeZone
+	}
 	cfg := record.Settings
 	if err := Validate(cfg, password); err != nil {
 		return nil, err
@@ -229,6 +238,9 @@ func validURL(raw string, originOnly bool) bool {
 	return err == nil && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && !strings.ContainsAny(raw, "\r\n\x00") && (!originOnly || u.Path == "" || u.Path == "/") && (u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost")))
 }
 func Validate(cfg model.SiteSettings, password string) error {
+	if _, err := model.NormalizeTimeZone(cfg.Site.TimeZone); err != nil {
+		return ErrInvalid
+	}
 	for _, f := range []struct {
 		value               string
 		max                 int

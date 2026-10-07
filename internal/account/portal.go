@@ -191,6 +191,10 @@ func billingError(err error) string {
 }
 func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cfg model.SecuritySettings) {
 	path := r.URL.Path
+	if path == "/account/v1/admin/plan-assignment" && r.Method == "POST" {
+		s.assignPlan(w, r, u)
+		return
+	}
 	if path == "/account/v1/admin/logs" && r.Method == "GET" {
 		s.callLogs(w, r, "")
 		return
@@ -288,8 +292,8 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 		if !read(w, r, &request) {
 			return
 		}
-		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil || s.checkMFA(r.Context(), u.ID, request.TOTPCode) != nil {
-			write(w, 403, map[string]string{"error": "请验证当前密码与双重验证"})
+		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil {
+			write(w, 403, map[string]string{"error": "请验证当前管理员密码"})
 			return
 		}
 		if e := s.verifyTurnstile(r.Context(), r, cfg, request.TurnstileToken, "sensitive"); e != nil {
@@ -384,7 +388,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			write(w, 400, map[string]string{"error": "金额、原因和操作编号必填"})
 			return
 		}
-		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil || s.checkMFA(r.Context(), u.ID, request.TOTPCode) != nil {
+		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil {
 			write(w, 403, map[string]string{"error": "重新验证失败"})
 			return
 		}

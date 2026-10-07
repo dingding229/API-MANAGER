@@ -74,6 +74,14 @@ func (s *Service) settings(ctx context.Context) (model.SecuritySettings, error) 
 		cfg.GitHubSecret = secrets.GitHub
 		cfg.GoogleSecret = secrets.Google
 	}
+	if provider, ok := s.mail.(interface{ Public() model.PublicSiteInfo }); ok {
+		if origin := provider.Public().WebsiteURL; origin != "" {
+			cfg.WebsiteURL = origin
+		}
+	}
+	if origin, err := url.Parse(cfg.WebsiteURL); err == nil && origin.Hostname() != "" {
+		cfg.TurnstileHost = origin.Hostname()
+	}
 	if cfg.DefaultRole == "" {
 		cfg.DefaultRole = "member"
 	}
@@ -299,7 +307,17 @@ func (s *Service) reauthenticateAction(r *http.Request, u model.User, req payloa
 	if _, err = s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
 		return err
 	}
+	if strings.HasPrefix(r.URL.Path, "/account/v1/admin/") {
+		return nil
+	}
 	return s.checkMFA(r.Context(), u.ID, req.TOTPCode)
 }
 
 func (s *Service) SetAdminPath(path string) { s.adminPath = path }
+
+func (s *Service) siteInfo() model.PublicSiteInfo {
+	if provider, ok := s.mail.(interface{ Public() model.PublicSiteInfo }); ok {
+		return provider.Public()
+	}
+	return model.PublicSiteInfo{TimeZone: model.DefaultTimeZone}
+}

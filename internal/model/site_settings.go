@@ -5,6 +5,7 @@ import "time"
 // PublicSiteInfo is the entire public allowlist. SMTP, secrets and security
 // settings must never be added to this projection.
 type PublicSiteInfo struct {
+	TimeZone        string `json:"time_zone"`
 	Name            string `json:"name"`
 	PublicTitle     string `json:"public_title"`
 	AdminTitle      string `json:"admin_title"`

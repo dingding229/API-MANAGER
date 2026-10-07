@@ -26,3 +26,29 @@ func TestOnlyTrustedProxyChainSuppliesClientIP(t *testing.T) {
 		})).ServeHTTP(httptest.NewRecorder(), r)
 	}
 }
+
+func TestPublicAddressDoesNotInventHistoricalPublicIP(t *testing.T) {
+	for _, raw := range []string{"192.168.32.1", "172.18.0.2", "10.0.0.1", "127.0.0.1", "::1", "100.64.1.1", "169.254.1.1", "garbage"} {
+		if PublicAddress(raw) != "" {
+			t.Fatal("private address shown as public", raw)
+		}
+	}
+	if PublicAddress("8.8.8.8") != "8.8.8.8" {
+		t.Fatal("valid public address hidden")
+	}
+}
+
+func TestTrustedIngressSkipsCloudflareEdgeButRejectsForgedDirectHeaders(t *testing.T) {
+	proxies := []netip.Prefix{netip.MustParsePrefix("192.168.32.1/32"), netip.MustParsePrefix("173.245.48.0/20")}
+	for _, tc := range []struct{ peer, xff, want string }{{"192.168.32.1:80", "8.8.8.8, 173.245.48.10", "8.8.8.8"}, {"8.8.4.4:80", "1.2.3.4", "8.8.4.4"}, {"192.168.32.1:80", "1.2.3.4, 8.8.4.4", "8.8.4.4"}} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = tc.peer
+		r.Header.Set("X-Forwarded-For", tc.xff)
+		r.Header.Set("CF-Connecting-IP", "9.9.9.9")
+		ClientIdentity(proxies, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if Client(r).IP != tc.want {
+				t.Fatal(tc, Client(r))
+			}
+		})).ServeHTTP(httptest.NewRecorder(), r)
+	}
+}

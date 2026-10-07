@@ -92,11 +92,11 @@ export function command(api:ApiDoc,baseUrl:string,selectedMethod=api.method,over
  return lines.join(' \\\n');
 }
 
-export type SiteInfo = { api_domain:string; name: string; public_title: string; admin_title: string; description: string; keywords: string; website_url: string; api_base_url: string; subtitle: string; hero_title: string; hero_description: string; announcement: string; footer: string; contact_email: string };
-export const defaultSite: SiteInfo = { api_domain:'', name:'API Manager',public_title:'API Manager · 开放接口目录',admin_title:'API Manager Console',description:'浏览已公开的 API 接口、参数和调用方式。',keywords:'',website_url:'',api_base_url:'',subtitle:'开放接口目录',hero_title:'找到接口，\n开始你的下一次调用。',hero_description:'从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。',announcement:'',footer:'已发布的服务信息',contact_email:'' };
+export type SiteInfo = { time_zone?:string; api_domain:string; name: string; public_title: string; admin_title: string; description: string; keywords: string; website_url: string; api_base_url: string; subtitle: string; hero_title: string; hero_description: string; announcement: string; footer: string; contact_email: string };
+export const defaultSite: SiteInfo = { time_zone:'Asia/Shanghai', api_domain:'', name:'API Manager',public_title:'API Manager · 开放接口目录',admin_title:'API Manager Console',description:'浏览已公开的 API 接口、参数和调用方式。',keywords:'',website_url:'',api_base_url:'',subtitle:'开放接口目录',hero_title:'找到接口，\n开始你的下一次调用。',hero_description:'从用途到参数，从认证方式到调用示例。\n让接口接入清晰、直接、有据可循。',announcement:'',footer:'已发布的服务信息',contact_email:'' };
 export function projectSite(value: unknown): SiteInfo {
  const data=object(value); const result={...defaultSite};
- const limits:Record<keyof SiteInfo,number>={api_domain:512,name:80,public_title:120,admin_title:120,description:600,keywords:300,website_url:512,api_base_url:512,subtitle:80,hero_title:160,hero_description:600,announcement:600,footer:300,contact_email:254};
+ const limits:Record<keyof SiteInfo,number>={time_zone:64,api_domain:512,name:80,public_title:120,admin_title:120,description:600,keywords:300,website_url:512,api_base_url:512,subtitle:80,hero_title:160,hero_description:600,announcement:600,footer:300,contact_email:254};
  for(const field of Object.keys(limits) as (keyof SiteInfo)[]) {if(typeof data[field]==='string') result[field]=text(data[field],limits[field]);}
  for(const field of ['website_url','api_base_url','api_domain'] as const) {
   if(!result[field]) continue;

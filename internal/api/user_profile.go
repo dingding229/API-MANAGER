@@ -31,6 +31,7 @@ func (a *Admin) updateUserProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	request.AdminOperation = true
 	updated, changed, err := a.userManager.UpdateProfile(actor.ID, id, request)
 	if err != nil {
 		user.WriteProfileError(w, err)

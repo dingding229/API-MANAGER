@@ -7,7 +7,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/server ./cmd/server
 COPY internal ./internal
 ARG TARGETOS TARGETARCH
-ARG APP_VERSION=0.3.29-dev
+ARG APP_VERSION=0.3.30-dev
 ARG APP_REVISION=development
 ARG APP_BUILT_AT
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X api-manager/internal/version.Version=${APP_VERSION} -X api-manager/internal/version.Revision=${APP_REVISION} -X api-manager/internal/version.BuiltAt=${APP_BUILT_AT}" -o /out/api-manager ./cmd/server

@@ -83,7 +83,7 @@ const page={isConnected:true,querySelector(s){return s==='#site-settings-form'?f
 const $=()=>page;const state={page:'settings',user:{roles:['super_admin']}};
 const cfg={version:1,site:{},smtp:{},smtp_password_set:false,recovery_enabled:false};
 const api=async(path,options)=>{if(!options)return cfg;const e=Error('save failed');e.status=409;throw e};
-const withSubmitting=async(form,text,action)=>action();const siteSettingInput=()=>'';const siteSettingArea=()=>'';
+const withSubmitting=async(form,text,action)=>action();const esc=String;const siteSettingInput=()=>'';const siteSettingArea=()=>'';
 const refreshSiteIdentity=async()=>{};const initRecovery=async()=>{};const notice=()=>{};
 class FormData {constructor(form){this.form=form}entries(){return Object.values(this.form.elements).map(f=>[f.name,f.value])[Symbol.iterator]()}}
 `+settings+`
@@ -148,9 +148,33 @@ page.isConnected=false;releases[1]({items:[],total:0,page:1,page_size:20});await
 
 func TestConsoleDatesUseOneFormatAndHandleMissingValues(t *testing.T) {
 	formatter := consoleFunction(t, "function formatDate(", "function formatMetric(")
-	runConsoleRegression(t, `const assert=require('node:assert/strict');
+	runConsoleRegression(t, `const assert=require('node:assert/strict');const state={timeZone:'Asia/Shanghai'};
 `+formatter+`
 assert.equal(formatDate(undefined),'—');assert.equal(formatDate(''),'—');assert.equal(formatDate('not-a-date'),'—');
 assert.ok(formatDate('2026-10-06T08:00:00Z').includes('2026'));
 `)
+}
+
+func TestBackendSelfProfileAndTimezoneControlsStayInConsole(t *testing.T) {
+	raw, err := assets.ReadFile("assets/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(raw)
+	if strings.Contains(js, `if(isSelf){location.assign("/account");return;}`) {
+		t.Fatal("self management redirects to account")
+	}
+	if !strings.Contains(js, `site.time_zone||'Asia/Shanghai','Asia/Shanghai'`) {
+		t.Fatal("saved custom timezone not retained")
+	}
+	auth, err := assets.ReadFile("assets/account.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(auth), `name="totp_code"`) || strings.Contains(string(auth), `class="form-section"`) {
+		t.Fatal("administrative OTP or old fieldset style remains")
+	}
+	if !strings.Contains(string(auth), "site.website_url||cfg.website_url||location.origin") {
+		t.Fatal("callback domain not canonical")
+	}
 }

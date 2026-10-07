@@ -57,7 +57,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "/account/v1/options" && r.Method == "GET" {
-		write(w, 200, map[string]any{"admin_path": s.adminPath, "registration": cfg.RegistrationEnabled && s.mail.MailAvailable(), "email_login": cfg.EmailLoginEnabled && s.mail.MailAvailable(), "github": cfg.GitHubEnabled, "google": cfg.GoogleEnabled, "turnstile": cfg.TurnstileEnabled, "turnstile_site_key": cfg.TurnstileSiteKey})
+		write(w, 200, map[string]any{"time_zone": s.siteInfo().TimeZone, "website_url": s.siteInfo().WebsiteURL, "admin_path": s.adminPath, "registration": cfg.RegistrationEnabled && s.mail.MailAvailable(), "email_login": cfg.EmailLoginEnabled && s.mail.MailAvailable(), "github": cfg.GitHubEnabled, "google": cfg.GoogleEnabled, "turnstile": cfg.TurnstileEnabled, "turnstile_site_key": cfg.TurnstileSiteKey})
 		return
 	}
 	if strings.HasPrefix(path, "/account/v1/oauth/") {

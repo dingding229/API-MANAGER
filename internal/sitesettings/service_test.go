@@ -167,3 +167,15 @@ func TestDisabledPersistedMailDoesNotFallBackToEnvironment(t *testing.T) {
 		t.Fatal("disabled saved setting unexpectedly reopened environment mail")
 	}
 }
+
+func TestWebsiteTimeZoneRejectsInvalidLocation(t *testing.T) {
+	cfg := Defaults()
+	cfg.Site.TimeZone = "Invalid/TimeZone"
+	if Validate(cfg, "") == nil {
+		t.Fatal("invalid timezone accepted")
+	}
+	cfg.Site.TimeZone = "Asia/Kathmandu"
+	if err := Validate(cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+}

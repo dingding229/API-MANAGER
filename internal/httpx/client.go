@@ -59,3 +59,23 @@ func ClientIdentity(proxies []netip.Prefix, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientInfoKey{}, info)))
 	})
 }
+
+// PublicAddress is a display boundary, not a replacement for rate-limit identity.
+// Historical private-peer records cannot be safely converted to a real client IP.
+func PublicAddress(raw string) string {
+	ip, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	ip = ip.Unmap()
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return ""
+	}
+	for _, raw := range []string{"100.64.0.0/10", "198.18.0.0/15", "192.0.0.0/24"} {
+		p, _ := netip.ParsePrefix(raw)
+		if p.Contains(ip) {
+			return ""
+		}
+	}
+	return ip.String()
+}

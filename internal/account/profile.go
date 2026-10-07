@@ -24,8 +24,10 @@ func (s *Service) profileGuard(actorID, targetID string, request model.UpdateUse
 			return user.ErrCurrentPassword
 		}
 	}
-	if err := s.checkMFA(ctx, actorID, request.TOTPCode); err != nil {
-		return fmt.Errorf("%w: 双重验证失败", user.ErrProfileForbidden)
+	if !request.AdminOperation {
+		if err := s.checkMFA(ctx, actorID, request.TOTPCode); err != nil {
+			return fmt.Errorf("%w: 双重验证失败", user.ErrProfileForbidden)
+		}
 	}
 	target, err := s.store.GetUserByID(targetID)
 	if err != nil {

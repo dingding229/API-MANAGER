@@ -139,6 +139,7 @@ type CreateUserRequest struct {
 // UpdateUserProfileRequest never accepts role, status, or password hashes.
 // Omitted password preserves the existing password; an explicit empty one is invalid.
 type UpdateUserProfileRequest struct {
+	AdminOperation   bool    `json:"-"`
 	Username         *string `json:"username,omitempty"`
 	Email            *string `json:"email,omitempty"`
 	Password         *string `json:"password,omitempty"`

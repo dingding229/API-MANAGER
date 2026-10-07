@@ -3,6 +3,7 @@ package account
 import (
 	"api-manager/internal/audit"
 	"api-manager/internal/auth"
+	"api-manager/internal/httpx"
 	"api-manager/internal/model"
 	"api-manager/internal/user"
 	"context"
@@ -83,7 +84,7 @@ func (s *Service) sessions(w http.ResponseWriter, r *http.Request, u model.User)
 		}
 		out := []map[string]any{}
 		for _, v := range list {
-			out = append(out, map[string]any{"id": v.ID, "user_id": target, "user_agent": v.UserAgent, "expires_at": v.ExpiresAt, "device": v.Device, "login_ip": v.LoginIP, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
+			out = append(out, map[string]any{"id": v.ID, "user_id": target, "user_agent": v.UserAgent, "expires_at": v.ExpiresAt, "device": v.Device, "login_ip": httpx.PublicAddress(v.LoginIP), "last_ip": httpx.PublicAddress(v.LastIP), "ip_source": v.IPSource, "last_seen_at": v.LastSeenAt, "created_at": v.CreatedAt, "current": v.ID == current.ID})
 		}
 		write(w, 200, out)
 		return

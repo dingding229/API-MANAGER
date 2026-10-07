@@ -18,6 +18,7 @@ type Plan struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 type Subscription struct {
+	TimeZone  string    `json:"time_zone"`
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
 	PlanID    string    `json:"plan_id"`

@@ -175,3 +175,99 @@ func TestLegacyRolesAreArchivedAndNeverPromoted(t *testing.T) {
 		t.Fatal("retired role still active", e)
 	}
 }
+
+func TestAdministrativePlanAssignmentIsFreeIdempotentAndKeepsHistory(t *testing.T) {
+	p := accountPG(t)
+	ctx := context.Background()
+	u := accountUser(t, p)
+	plan := model.Plan{ID: ids.NewUUID(), Name: "直接绑定", Days: 30, PriceMicros: 10000000, Hourly: 5, Daily: 50, Monthly: 500, Enabled: true}
+	if e := p.SavePlan(ctx, plan); e != nil {
+		t.Fatal(e)
+	}
+	before, e := p.Wallet(ctx, u.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ref := "grant:" + u.ID + ":" + ids.NewUUID()
+	first, e := p.AssignPlan(ctx, u.ID, plan.ID, ref, "人工确认绑定")
+	if e != nil {
+		t.Fatal(e)
+	}
+	retry, e := p.AssignPlan(ctx, u.ID, plan.ID, ref, "重复请求")
+	if e != nil || first.ID != retry.ID {
+		t.Fatal("assignment duplicated", retry, e)
+	}
+	second, e := p.AssignPlan(ctx, u.ID, plan.ID, "grant:"+u.ID+":"+ids.NewUUID(), "替换")
+	if e != nil {
+		t.Fatal(e)
+	}
+	current, e := p.Subscription(ctx, u.ID)
+	if e != nil || current.ID != second.ID {
+		t.Fatal(current, e)
+	}
+	after, e := p.Wallet(ctx, u.ID)
+	if e != nil || before.BalanceMicros != after.BalanceMicros {
+		t.Fatal("administrative grant billed user", before, after, e)
+	}
+	var count int
+	if e = p.pool.QueryRow(ctx, `SELECT COUNT(*) FROM subscriptions WHERE user_id=$1`, u.ID).Scan(&count); e != nil || count != 2 {
+		t.Fatal("history lost or duplicate created", count, e)
+	}
+	records, e := p.Ledger(ctx, u.ID)
+	if e != nil || len(records) != 2 || records[0].AmountMicros != 0 {
+		t.Fatal(records, e)
+	}
+}
+func TestBillingWindowsUseSnapshottedZoneAndFractionalOffsets(t *testing.T) {
+	n := time.Date(2026, 10, 7, 2, 30, 0, 0, time.UTC)
+	windows := windowStartsIn(n, "Asia/Kathmandu")
+	if windows[0].Minute() != 0 || windows[0].Hour() != 8 || windows[1].Hour() != 0 {
+		t.Fatal(windows)
+	}
+	if windows[0].UTC().Hour() != 2 || windows[0].UTC().Minute() != 15 {
+		t.Fatal(windows)
+	}
+}
+
+func TestPlanTimeZoneSnapshotSurvivesWebsiteChanges(t *testing.T) {
+	p := accountPG(t)
+	ctx := context.Background()
+	record, err := p.GetSiteSettings()
+	if errors.Is(err, ErrNotFound) {
+		record = model.SiteSettingsRecord{}
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	original := record.Settings
+	defer func() {
+		current, e := p.GetSiteSettings()
+		if e == nil {
+			current.Settings = original
+			if _, e = p.SaveSiteSettings(current, current.Version); e != nil {
+				t.Error(e)
+			}
+		}
+	}()
+	record.Settings.Site.TimeZone = "Asia/Kathmandu"
+	record, err = p.SaveSiteSettings(record, record.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := accountUser(t, p)
+	plan := model.Plan{ID: ids.NewUUID(), Name: "timezone", Days: 30, Hourly: 10, Enabled: true}
+	if err = p.SavePlan(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	first, err := p.AssignPlan(ctx, u.ID, plan.ID, "grant:"+u.ID+":"+ids.NewUUID(), "zone snapshot")
+	if err != nil || first.TimeZone != "Asia/Kathmandu" {
+		t.Fatal(first, err)
+	}
+	record.Settings.Site.TimeZone = "UTC"
+	if _, err = p.SaveSiteSettings(record, record.Version); err != nil {
+		t.Fatal(err)
+	}
+	current, err := p.Subscription(ctx, u.ID)
+	if err != nil || current.TimeZone != first.TimeZone {
+		t.Fatal("website change altered purchased quota clock", current, err)
+	}
+}

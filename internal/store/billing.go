@@ -26,10 +26,27 @@ type BillingStore interface {
 	CallLogs(context.Context, string) ([]model.CallLog, error)
 }
 
-func windowStarts(now time.Time) []time.Time {
-	now = now.In(time.FixedZone("billing", 8*3600))
-	return []time.Time{now.Truncate(time.Hour), time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()), time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())}
+func windowStarts(now time.Time) []time.Time { return windowStartsIn(now, model.DefaultTimeZone) }
+func windowStartsIn(now time.Time, zone string) []time.Time {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		loc = time.FixedZone("billing", 8*3600)
+	}
+	n := now.In(loc)
+	return []time.Time{time.Date(n.Year(), n.Month(), n.Day(), n.Hour(), 0, 0, 0, loc), time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc), time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, loc)}
 }
+func siteBillingZone(ctx context.Context, tx pgx.Tx) (string, error) {
+	var zone string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(settings->'site'->>'time_zone','Asia/Shanghai') FROM site_settings WHERE id=1`).Scan(&zone)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.DefaultTimeZone, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return model.NormalizeTimeZone(zone)
+}
+
 func (p *Postgres) Wallet(ctx context.Context, id string) (model.Wallet, error) {
 	w := model.Wallet{Currency: "CNY"}
 	err := p.pool.QueryRow(ctx, `SELECT balance_micros,held_micros FROM wallets WHERE user_id=$1`, id).Scan(&w.BalanceMicros, &w.HeldMicros)
@@ -120,11 +137,11 @@ func (p *Postgres) SavePlan(ctx context.Context, v model.Plan) error {
 }
 func subscriptionRow(row pgx.Row) (model.Subscription, error) {
 	var s model.Subscription
-	err := row.Scan(&s.ID, &s.UserID, &s.PlanID, &s.PlanName, &s.Hourly, &s.Daily, &s.Monthly, &s.StartsAt, &s.ExpiresAt)
+	err := row.Scan(&s.ID, &s.UserID, &s.PlanID, &s.PlanName, &s.Hourly, &s.Daily, &s.Monthly, &s.StartsAt, &s.ExpiresAt, &s.TimeZone)
 	return s, err
 }
 func (p *Postgres) Subscription(ctx context.Context, id string) (*model.Subscription, error) {
-	v, err := subscriptionRow(p.pool.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at FROM subscriptions WHERE user_id=$1 AND starts_at<=NOW() AND expires_at>NOW() ORDER BY expires_at DESC LIMIT 1`, id))
+	v, err := subscriptionRow(p.pool.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone FROM subscriptions WHERE user_id=$1 AND starts_at<=NOW() AND expires_at>NOW() ORDER BY expires_at DESC LIMIT 1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -140,7 +157,7 @@ func (p *Postgres) PurchasePlan(ctx context.Context, id, planID, ref string) (mo
 	if err != nil {
 		return model.Subscription{}, err
 	}
-	old, e := subscriptionRow(tx.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at FROM subscriptions WHERE id=$1 AND user_id=$2`, ref, id))
+	old, e := subscriptionRow(tx.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone FROM subscriptions WHERE id=$1 AND user_id=$2`, ref, id))
 	if e == nil {
 		if old.PlanID != planID {
 			return old, ErrConflict
@@ -173,8 +190,13 @@ func (p *Postgres) PurchasePlan(ctx context.Context, id, planID, ref string) (mo
 		}
 	}
 
-	s := model.Subscription{ID: ref, UserID: id, PlanID: plan.ID, PlanName: plan.Name, Hourly: plan.Hourly, Daily: plan.Daily, Monthly: plan.Monthly, StartsAt: n, ExpiresAt: n.AddDate(0, 0, plan.Days)}
-	_, err = tx.Exec(ctx, `INSERT INTO subscriptions(id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, s.ID, id, s.PlanID, s.PlanName, s.Hourly, s.Daily, s.Monthly, s.StartsAt, s.ExpiresAt)
+	zone, e := siteBillingZone(ctx, tx)
+	if e != nil {
+		return model.Subscription{}, e
+	}
+	loc, _ := time.LoadLocation(zone)
+	s := model.Subscription{TimeZone: zone, ID: ref, UserID: id, PlanID: plan.ID, PlanName: plan.Name, Hourly: plan.Hourly, Daily: plan.Daily, Monthly: plan.Monthly, StartsAt: n, ExpiresAt: n.In(loc).AddDate(0, 0, plan.Days).UTC()}
+	_, err = tx.Exec(ctx, `INSERT INTO subscriptions(id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, s.ID, id, s.PlanID, s.PlanName, s.Hourly, s.Daily, s.Monthly, s.StartsAt, s.ExpiresAt, s.TimeZone)
 	if err != nil {
 		return s, err
 	}
@@ -202,12 +224,12 @@ func (p *Postgres) BeginCharge(ctx context.Context, userID, apiID string, price 
 	if err = tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1`, userID).Scan(&status); err != nil || status != "active" {
 		return c, ErrNotFound
 	}
-	sub, err := subscriptionRow(tx.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at FROM subscriptions WHERE user_id=$1 AND starts_at<=$2 AND expires_at>$2 ORDER BY expires_at DESC LIMIT 1`, userID, now))
+	sub, err := subscriptionRow(tx.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone FROM subscriptions WHERE user_id=$1 AND starts_at<=$2 AND expires_at>$2 ORDER BY expires_at DESC LIMIT 1`, userID, now))
 	if err == nil {
 		c.PlanID = sub.ID
 		price = 0
 		c.PriceMicros = 0
-		starts := windowStarts(now)
+		starts := windowStartsIn(now, sub.TimeZone)
 		limits := []int64{sub.Hourly, sub.Daily, sub.Monthly}
 		kinds := []string{"hour", "day", "month"}
 		for i, kind := range kinds {
@@ -252,7 +274,8 @@ func (p *Postgres) FinishCharge(ctx context.Context, c model.Charge, success boo
 		return err
 	}
 	stored := c
-	err = tx.QueryRow(ctx, `SELECT outcome,price_micros,subscription_id,created_at FROM api_charges WHERE id=$1 AND user_id=$2 FOR UPDATE`, c.ID, c.UserID).Scan(&stored.Outcome, &stored.PriceMicros, &stored.PlanID, &stored.CreatedAt)
+	zone := model.DefaultTimeZone
+	err = tx.QueryRow(ctx, `SELECT outcome,price_micros,subscription_id,created_at,COALESCE((SELECT time_zone FROM subscriptions WHERE id=api_charges.subscription_id),'Asia/Shanghai') FROM api_charges WHERE id=$1 AND user_id=$2 FOR UPDATE`, c.ID, c.UserID).Scan(&stored.Outcome, &stored.PriceMicros, &stored.PlanID, &stored.CreatedAt, &zone)
 	if err != nil {
 		return err
 	}
@@ -275,7 +298,7 @@ func (p *Postgres) FinishCharge(ctx context.Context, c model.Charge, success boo
 	}
 	if !success && stored.PlanID != "" {
 		for i, kind := range []string{"hour", "day", "month"} {
-			if _, err = tx.Exec(ctx, `UPDATE usage_windows SET used=GREATEST(0,used-1) WHERE user_id=$1 AND subscription_id=$2 AND window_kind=$3 AND window_start=$4`, c.UserID, stored.PlanID, kind, windowStarts(stored.CreatedAt)[i]); err != nil {
+			if _, err = tx.Exec(ctx, `UPDATE usage_windows SET used=GREATEST(0,used-1) WHERE user_id=$1 AND subscription_id=$2 AND window_kind=$3 AND window_start=$4`, c.UserID, stored.PlanID, kind, windowStartsIn(stored.CreatedAt, zone)[i]); err != nil {
 				return err
 			}
 		}
@@ -352,7 +375,7 @@ func (p *Postgres) Usage(ctx context.Context, id string, now time.Time) (map[str
 	if err != nil || sub == nil {
 		return out, err
 	}
-	starts := windowStarts(now)
+	starts := windowStartsIn(now, sub.TimeZone)
 	for i, kind := range []string{"hour", "day", "month"} {
 		var used int64
 		err = p.pool.QueryRow(ctx, `SELECT used FROM usage_windows WHERE user_id=$1 AND subscription_id=$2 AND window_kind=$3 AND window_start=$4`, id, sub.ID, kind, starts[i]).Scan(&used)
@@ -362,4 +385,56 @@ func (p *Postgres) Usage(ctx context.Context, id string, now time.Time) (map[str
 		out[[]string{"hourly", "daily", "monthly"}[i]] = used
 	}
 	return out, nil
+}
+
+// AssignPlan grants a plan without charging the user's wallet. It is idempotent
+// and explicitly expires earlier active/queued plans without deleting history.
+func (p *Postgres) AssignPlan(ctx context.Context, userID, planID, ref, note string) (model.Subscription, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return model.Subscription{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = lockWallet(ctx, tx, userID); err != nil {
+		return model.Subscription{}, err
+	}
+	var status string
+	if err = tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&status); err != nil {
+		return model.Subscription{}, err
+	}
+	if status != "active" {
+		return model.Subscription{}, ErrNotFound
+	}
+	old, e := subscriptionRow(tx.QueryRow(ctx, `SELECT id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone FROM subscriptions WHERE id=$1 AND user_id=$2`, ref, userID))
+	if e == nil {
+		if old.PlanID != planID {
+			return old, ErrConflict
+		}
+		return old, tx.Commit(ctx)
+	}
+	if !errors.Is(e, pgx.ErrNoRows) {
+		return old, e
+	}
+	var plan model.Plan
+	err = tx.QueryRow(ctx, `SELECT id,name,days,hourly,daily,monthly FROM plans WHERE id=$1 FOR SHARE`, planID).Scan(&plan.ID, &plan.Name, &plan.Days, &plan.Hourly, &plan.Daily, &plan.Monthly)
+	if err != nil {
+		return model.Subscription{}, err
+	}
+	zone, err := siteBillingZone(ctx, tx)
+	if err != nil {
+		return model.Subscription{}, err
+	}
+	loc, _ := time.LoadLocation(zone)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err = tx.Exec(ctx, `UPDATE subscriptions SET expires_at=LEAST(expires_at,$2) WHERE user_id=$1 AND expires_at>$2`, userID, now); err != nil {
+		return model.Subscription{}, err
+	}
+	sub := model.Subscription{ID: ref, UserID: userID, PlanID: plan.ID, PlanName: plan.Name, Hourly: plan.Hourly, Daily: plan.Daily, Monthly: plan.Monthly, TimeZone: zone, StartsAt: now, ExpiresAt: now.In(loc).AddDate(0, 0, plan.Days).UTC()}
+	if _, err = tx.Exec(ctx, `INSERT INTO subscriptions(id,user_id,plan_id,plan_name,hourly,daily,monthly,starts_at,expires_at,time_zone) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, sub.ID, sub.UserID, sub.PlanID, sub.PlanName, sub.Hourly, sub.Daily, sub.Monthly, sub.StartsAt, sub.ExpiresAt, sub.TimeZone); err != nil {
+		return sub, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO wallet_ledger(id,user_id,kind,reference,note,amount_micros,balance_micros) SELECT $1,$2,'admin_plan',$3,$4,0,balance_micros FROM wallets WHERE user_id=$2`, ids.NewUUID(), userID, "assignment:"+ref, note); err != nil {
+		return sub, err
+	}
+	return sub, tx.Commit(ctx)
 }
