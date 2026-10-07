@@ -33,8 +33,8 @@ func TestEmailIsSeparateAndRecoveryIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.Authenticate("reader@example.test", "ReadMe88"); err == nil {
-		t.Fatal("contact email was accepted as username")
+	if emailUser, _, emailErr := s.Authenticate("reader@example.test", "ReadMe88"); emailErr != nil || emailUser.ID != u.ID {
+		t.Fatal("email login did not select the same account", emailErr)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

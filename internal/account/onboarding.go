@@ -9,13 +9,10 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
-
-var onboardingUsername = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$`)
 
 const onboardingCookie = "api_manager_onboarding"
 
@@ -187,7 +184,7 @@ func (s *Service) onboarding(w http.ResponseWriter, r *http.Request, cfg model.S
 	write(w, 201, map[string]bool{"registered": true})
 }
 func ValidOnboardingBasics(q payload) bool {
-	if !onboardingUsername.MatchString(q.Username) || len([]byte(q.Password)) < 8 || len([]byte(q.Password)) > 72 {
+	if !user.ValidUsername(q.Username) || !user.ValidPassword(q.Password) {
 		return false
 	}
 	return utf8.RuneCountInString(strings.TrimSpace(q.Nickname)) >= 1 && utf8.RuneCountInString(q.Nickname) <= 64

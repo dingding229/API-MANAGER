@@ -1,0 +1,3 @@
+export function LoadingPlaceholder({className='',compact=false}:{className?:string;compact?:boolean}) {
+ return <section className={'ui-placeholder '+(compact?'compact ':'')+className} role="status" aria-label="内容加载中" aria-busy="true"><div className="ui-placeholder-card" aria-hidden="true"><span className="ui-placeholder-line title"/><span className="ui-placeholder-line"/><span className="ui-placeholder-line short"/></div><div className="ui-placeholder-card" aria-hidden="true"><span className="ui-placeholder-line"/><span className="ui-placeholder-line"/><span className="ui-placeholder-line short"/></div></section>;
+}

@@ -63,7 +63,7 @@ func TestSelfProfileUpdateRequiresCurrentPasswordAndRevokesSession(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"admin-renamed","current_password":"a-long-initial-password"}`))
+	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"adminrenamed","current_password":"a-long-initial-password"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	NewHTTP(s).ServeHTTP(response, request)
@@ -79,7 +79,7 @@ func TestSelfProfileUpdateRequiresCurrentPasswordAndRevokesSession(t *testing.T)
 	if _, err := s.ValidateSession(token); err == nil {
 		t.Fatal("session survived self profile update")
 	}
-	if _, _, err := s.Authenticate("admin-renamed", "a-long-initial-password"); err != nil {
+	if _, _, err := s.Authenticate("adminrenamed", "a-long-initial-password"); err != nil {
 		t.Fatalf("renamed account cannot login: %v", err)
 	}
 }
@@ -93,7 +93,7 @@ func TestSelfProfileUpdateRejectsWrongCurrentPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"admin-renamed","current_password":"wrong-password"}`))
+	request := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"username":"adminrenamed","current_password":"wrong-password"}`))
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	NewHTTP(s).ServeHTTP(response, request)
@@ -102,9 +102,9 @@ func TestSelfProfileUpdateRejectsWrongCurrentPassword(t *testing.T) {
 	}
 }
 
-func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
+func TestViewerCanChangeOwnPasswordToEightCharacters(t *testing.T) {
 	s := NewService(store.NewMemory())
-	u, err := s.Create("self-reader", "old-reader-password", "member")
+	u, err := s.Create("selfreader", "old-reader-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,12 +125,12 @@ func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
 			t.Fatal("failed edit revoked session")
 		}
 	}
-	r := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"password":"密码12","current_password":"old-reader-password"}`))
+	r := httptest.NewRequest("PUT", "/auth/v1/me", strings.NewReader(`{"password":"中文密码安全验证","current_password":"old-reader-password"}`))
 	r.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != 200 {
-		t.Fatalf("eight-byte self change failed: %d %s", w.Code, w.Body.String())
+		t.Fatalf("eight-character self change failed: %d %s", w.Code, w.Body.String())
 	}
 	if _, err := s.ValidateSession(token); err == nil {
 		t.Fatal("old session survived password change")
@@ -138,7 +138,7 @@ func TestViewerCanChangeOwnPasswordToEightBytes(t *testing.T) {
 	if _, _, err := s.Authenticate(u.Username, "old-reader-password"); err == nil {
 		t.Fatal("old password still works")
 	}
-	if _, _, err := s.Authenticate(u.Username, "密码12"); err != nil {
+	if _, _, err := s.Authenticate(u.Username, "中文密码安全验证"); err != nil {
 		t.Fatal("new password rejected")
 	}
 }

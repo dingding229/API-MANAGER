@@ -28,6 +28,7 @@ var defaultPermissions = []model.Permission{
 	{Code: "plugin.manage", Description: "管理插件配置"},
 	{Code: "api.test", Description: "在公开文档中执行在线测试"},
 	{Code: "user.read", Description: "查看用户、角色与权限"},
+	{Code: "user.security.reset", Description: "重置用户双重验证与恢复码"},
 	{Code: "user.delete", Description: "删除用户（保留账务与审计）"},
 	{Code: "user.manage", Description: "创建用户与分配角色"},
 	{Code: "audit.read", Description: "查看审计日志"},

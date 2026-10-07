@@ -92,7 +92,7 @@ jobs:
         env:
           TEST_ACCOUNT_DSN: postgres://api_manager:ci-disposable-only@127.0.0.1:5432/api_account_review_ci?sslmode=disable
           TEST_PLUGIN_CACHE_DSN: postgres://api_manager:ci-disposable-only@127.0.0.1:5432/api_account_review_ci?sslmode=disable
-        run: go test -race -p 1 ./internal/store ./internal/account
+        run: go test -race -p 1 ./internal/store ./internal/account ./internal/api
       - name: Static and vulnerability analysis
         run: |
           go vet ./...
@@ -265,8 +265,8 @@ jobs:
           session=login['token']
           assert call('GET','/auth/v1/me',session=session)[0]==200
           assert login['user']['username']=='admin' and login['user']['email']=='admin@example.test'
-          status,profile_user=call('POST','/admin/v1/users',session=session,data={'username':'contact-user','email':'contact@example.test','password':'UiRead88','role':'member'})
-          assert status==201 and profile_user['username']=='contact-user' and profile_user['email']=='contact@example.test'
+          status,profile_user=call('POST','/admin/v1/users',session=session,data={'username':'contactuser','email':'contact@example.test','password':'UiRead88','role':'member'})
+          assert status==201 and profile_user['username']=='contactuser' and profile_user['email']=='contact@example.test'
           assert call('GET','/admin/v1/overview',session=session)[0]==200
           assert call('GET','/admin/v1/settings')[0]==401
           status,settings=call('GET','/admin/v1/settings',session=session)
@@ -282,9 +282,9 @@ jobs:
           assert public_catalog['site']['public_title']=='CI API documents' and public_catalog['base_url']==''
           assert 'smtp' not in json.dumps(public_catalog)
           assert call('PUT','/admin/v1/settings',session=session,data={'version':settings['version'],'site':settings['site'],'smtp':settings['smtp']})[0]==409
-          status,tenant=call('POST','/admin/v1/users',session=session,data={'username':'settings-tenant','email':'settings-tenant@example.test','password':'Viewer88','roles':['api_developer']})
+          status,tenant=call('POST','/admin/v1/users',session=session,data={'username':'settingstenant','email':'settings-tenant@example.test','password':'Viewer88','roles':['api_developer']})
           assert status==201
-          tenant_session=call('POST','/auth/v1/login',data={'username':'settings-tenant','password':'Viewer88'})[1]['token']
+          tenant_session=call('POST','/auth/v1/login',data={'username':'settingstenant','password':'Viewer88'})[1]['token']
           assert call('GET','/admin/v1/settings',session=tenant_session)[0]==403
           assert call('POST','/admin/v1/settings/smtp/test',session=tenant_session,data={'recipient':'settings-tenant@example.test'})[0]==403
 

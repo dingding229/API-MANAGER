@@ -240,6 +240,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.deletePlugin(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.Contains(r.URL.Path, "/sessions"):
 		a.manageSessions(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/users/") && strings.HasSuffix(r.URL.Path, "/two-factor") && (r.Method == "GET" || r.Method == "DELETE"):
+		a.userTwoFactor(w, r)
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/admin/v1/users/"):
 		a.deleteUser(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/admin/v1/users":
@@ -335,6 +337,8 @@ func requiredPermission(r *http.Request) string {
 		return "plugin.read"
 	case path == "/admin/v1/plugins" && r.Method == http.MethodPost, strings.HasPrefix(path, "/admin/v1/plugins/"), path == "/admin/v1/plugin-library/install" && r.Method == http.MethodPost, path == "/admin/v1/plugin-library" && r.Method == http.MethodPost:
 		return "plugin.manage"
+	case strings.HasPrefix(path, "/admin/v1/users/") && strings.HasSuffix(path, "/two-factor"):
+		return "user.security.reset"
 	case strings.HasPrefix(path, "/admin/v1/users/") && r.Method == "DELETE":
 		return "user.delete"
 	case path == "/admin/v1/users" && r.Method == http.MethodGet:

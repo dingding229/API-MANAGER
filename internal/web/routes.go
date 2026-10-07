@@ -26,13 +26,16 @@ func ValidAdminPath(value string) bool {
 func MountAdministration(mux *http.ServeMux, path string, admin, auth http.Handler) {
 	MountAdministrationWithSite(mux, path, admin, auth, nil)
 }
-func MountAdministrationWithSite(mux *http.ServeMux, path string, admin, auth http.Handler, provider func() model.PublicSiteInfo) {
+func MountAdministrationWithSite(mux *http.ServeMux, path string, admin, auth http.Handler, provider func() model.PublicSiteInfo, protect ...func(http.Handler) http.Handler) {
 	mux.Handle("/ui/", SharedStyles())
 	mux.Handle("/admin/v1/", admin)
 	mux.Handle("/auth/", auth)
 	mux.Handle("/test/v1/", auth)
 
-	console := ConsoleWithSite(path, provider)
+	var console http.Handler = ConsoleWithSite(path, provider)
+	for _, guard := range protect {
+		console = guard(console)
+	}
 	mux.Handle(path+"/", console)
 	mux.Handle(path, console)
 }

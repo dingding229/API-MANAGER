@@ -81,10 +81,10 @@ func TestWebsiteSettingsSuperAdminOnly(t *testing.T) {
 func TestMailPreviewTokenIsSessionBoundSingleUseAndSandboxed(t *testing.T) {
 	m := store.NewMemory()
 	us := user.NewService(m)
-	if e := us.EnsureInitialAdmin("preview-admin", "Password888"); e != nil {
+	if e := us.EnsureInitialAdmin("previewadmin", "Password888"); e != nil {
 		t.Fatal(e)
 	}
-	_, token, _ := us.Authenticate("preview-admin", "Password888")
+	_, token, _ := us.Authenticate("previewadmin", "Password888")
 	a := NewAdminWithUserManagement(m, plugin.NewRegistry(), us, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	service, e := sitesettings.New(context.Background(), m, "template-encryption-key-0123456789", sitesettings.Defaults(), "", us)
 	if e != nil {

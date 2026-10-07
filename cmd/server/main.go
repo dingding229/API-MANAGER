@@ -226,7 +226,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	web.MountAdministrationWithSite(mux, cfg.AdminPath, admin, authHandler, siteService.Public)
+	web.MountAdministrationWithSite(mux, cfg.AdminPath, admin, authHandler, siteService.Public, accounts.ProtectConsole)
 	mux.Handle("/api/", gatewayHandler)
 	tests := apitest.New(activeStore, userService, gatewayHandler, limiter, siteService.Public)
 	mux.Handle("/test/v1/prepare", tests)

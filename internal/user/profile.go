@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"api-manager/internal/model"
 	"golang.org/x/crypto/bcrypt"
@@ -23,7 +25,11 @@ func validEmail(value string) bool {
 	return err == nil && address.Address == value && strings.Contains(value, "@") && len(value) <= 254 && !strings.ContainsAny(value, "\r\n\x00")
 }
 func validUsername(value string) bool { return usernamePattern.MatchString(value) }
-func validPassword(value string) bool { return len(value) >= 8 && len(value) <= 72 }
+func ValidUsername(value string) bool { return validUsername(value) }
+func ValidPassword(value string) bool {
+	return utf8.ValidString(value) && utf8.RuneCountInString(value) >= 8 && len(utf16.Encode([]rune(value))) <= 24 && len(value) <= 72
+}
+func validPassword(value string) bool { return ValidPassword(value) }
 
 // UpdateProfile separates self-service reauthentication from delegated user management.
 // Credential changes and revocation of all target sessions are a single storage operation.
@@ -54,7 +60,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	if request.Username != nil {
 		username = normalizeUsername(*request.Username)
 		if username != target.Username && !validUsername(username) {
-			return model.User{}, false, fmt.Errorf("%w: use a 3 to 64 character username or a valid email address", ErrInvalidProfile)
+			return model.User{}, false, fmt.Errorf("%w: username must contain 3 to 20 letters or digits", ErrInvalidProfile)
 		}
 	}
 	email := target.Email
@@ -72,7 +78,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	passwordHash := target.PasswordHash
 	if request.Password != nil {
 		if !validPassword(*request.Password) {
-			return model.User{}, false, fmt.Errorf("%w: password must contain 8 to 72 bytes", ErrInvalidProfile)
+			return model.User{}, false, fmt.Errorf("%w: password must contain 8 to 24 characters", ErrInvalidProfile)
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*request.Password), passwordHashCost)
 		if err != nil {

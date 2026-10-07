@@ -97,11 +97,11 @@ func TestCookieSessionMutationsRequireSameOriginGuardAndProfileChangesRevokeBoth
 	if _, err := s.ValidateSession(token); err == nil {
 		t.Fatal("profile change left session valid")
 	}
-	viewer, createErr := s.Create("viewer-user", "ViewerPass888", "member")
+	viewer, createErr := s.Create("vieweruser", "ViewerPass888", "member")
 	if createErr != nil {
 		t.Fatal(createErr)
 	}
-	_, token, err = s.Authenticate("viewer-user", "ViewerPass888")
+	_, token, err = s.Authenticate("vieweruser", "ViewerPass888")
 	if err != nil {
 		t.Fatal(err)
 	}

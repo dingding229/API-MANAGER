@@ -223,7 +223,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 			return
 		}
 		uname := randomHex(8)
-		password := randomHex(32)
+		password := randomHex(12)
 		if uname == "" || password == "" {
 			write(w, 503, map[string]string{"error": "注册暂不可用"})
 			return
@@ -231,7 +231,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		if len(nickname) > 256 {
 			nickname = ""
 		}
-		u, err = s.users.CreateVerifiedUser(provider+"-"+uname, email, nickname, password, []string{role}, &model.Identity{Provider: provider, Subject: subject})
+		u, err = s.users.CreateVerifiedUser("user"+uname, email, nickname, password, []string{role}, &model.Identity{Provider: provider, Subject: subject})
 
 	}
 	if err != nil || u.Status != "active" {
@@ -326,7 +326,7 @@ func oauthReturn(v, adminPath string) string {
 	case "playground":
 		return "/playground"
 	case "admin":
-		return adminPath + "/"
+		return "/account"
 	}
 	return "/account"
 }

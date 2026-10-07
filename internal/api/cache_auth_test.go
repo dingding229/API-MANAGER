@@ -51,11 +51,11 @@ func TestReadOnlyUserCannotClearPluginCache(t *testing.T) {
 	m := store.NewMemory()
 	users := user.NewService(m)
 	_ = users.EnsureInitialAdmin("admin", "a-long-initial-password")
-	_, err := users.Create("readonly-user", "ViewerPass888", "member")
+	_, err := users.Create("readonlyuser", "ViewerPass888", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, _ := users.Authenticate("readonly-user", "ViewerPass888")
+	_, token, _ := users.Authenticate("readonlyuser", "ViewerPass888")
 	admin := NewAdminWithUserManagement(m, plugin.NewRegistry(), users, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r := httptest.NewRequest("DELETE", "/admin/v1/apis/cached/cache", strings.NewReader(`{"confirm":true}`))
 	r.Header.Set("Authorization", "Bearer "+token)

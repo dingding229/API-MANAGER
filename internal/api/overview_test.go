@@ -51,10 +51,10 @@ func TestOverviewCountsBusinessRequestsAndHonorsPermissions(t *testing.T) {
 	if err = s.UpdateRolePermissions("api_developer", []string{"api.read"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Create("minimal-user", "ReadMe88", "api_developer"); err != nil {
+	if _, err = s.Create("minimaluser", "ReadMe88", "api_developer"); err != nil {
 		t.Fatal(err)
 	}
-	_, token, err = s.Authenticate("minimal-user", "ReadMe88")
+	_, token, err = s.Authenticate("minimaluser", "ReadMe88")
 	if err != nil {
 		t.Fatal(err)
 	}

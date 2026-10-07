@@ -9,19 +9,12 @@
 </head>
 <body data-admin-path="__ADMIN_PATH__">
   <main id="app">
-    <section id="auth-loading" class="auth-loading" role="status" aria-live="polite"><div><span class="auth-spinner" aria-hidden="true"></span><h1>正在确认登录状态</h1><p>请稍候…</p><button type="button" id="retry-auth" class="secondary hidden">重新连接</button></div></section>
-    <section id="login-view" class="auth-shell hidden">
+    <section id="auth-loading" class="auth-loading" role="status" aria-live="polite"><div><span class="auth-spinner" aria-hidden="true"></span><h1 class="sr-only">正在确认登录状态</h1><p class="sr-only">请稍候…</p><button type="button" id="retry-auth" class="secondary hidden">重新连接</button></div></section>
+    <section id="setup-view" class="auth-shell hidden">
       <div class="auth-card">
         <p class="eyebrow">API MANAGER</p>
-        <h1 id="login-site-title">管理控制台</h1>
-        <p class="muted">登录后管理接口、用户与网站设置。</p>
-        <form id="login-form" class="form-stack">
-          <label class="field" for="username"><span class="field-label">用户名</span><input id="username" name="username" type="text" required autocomplete="username" placeholder="用户名"></label>
-          <label class="field" for="password"><span class="field-label">密码</span><input id="password" name="password" type="password" aria-label="密码" aria-describedby="login-password-hint" required autocomplete="current-password" maxlength="72" placeholder="密码"><span id="login-password-hint" class="field-hint">新用户请使用注册链接创建管理员账号。</span></label>
-          <button type="submit">登录</button>
-        </form>
-        <a href="/login?return=admin" class="auth-recovery-link">邮箱登录、注册与双重验证</a>
-        <button type="button" id="forgot-password" class="auth-recovery-link">忘记密码？</button>
+        <h1>注册首个管理员</h1>
+        <p class="muted">仅首次部署可用。已有账号请使用网站统一登录页面。</p>
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
       </div>
     </section>
@@ -45,7 +38,7 @@
           <button data-page="authentication" data-super-admin="true" class="hidden">注册与登录</button>
           <button data-page="settings" data-super-admin="true" class="hidden">网站设置</button>
         </nav>
-        <div class="version-status" aria-label="程序版本"><span id="current-version">版本读取中…</span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" data-permission="api.read" class="link">检查更新</button></div>
+        <div class="version-status" aria-label="程序版本"><span id="current-version" aria-label="程序版本"><span class="ui-placeholder-line" aria-hidden="true"></span></span><span id="update-status" class="small" role="status" aria-live="polite"></span><button type="button" id="check-update" data-permission="api.read" class="link">检查更新</button></div>
         <div class="account"><span id="current-user"></span><div class="account-actions"><button id="account-settings" class="link">账号设置</button><button id="logout" class="link">退出登录</button></div></div>
       </aside>
       <section class="content" aria-labelledby="page-title">

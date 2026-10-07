@@ -55,7 +55,7 @@ func TestVersionCredentialSettingsAreAdminOnlyMaskedAndRestartable(t *testing.T)
 	if e := us.EnsureInitialAdmin("admin", "Password888"); e != nil {
 		t.Fatal(e)
 	}
-	dev, _ := us.Create("read-dev", "Password888", "api_developer")
+	dev, _ := us.Create("readdev", "Password888", "api_developer")
 	_, at, _ := us.Authenticate("admin", "Password888")
 	_, dt, _ := us.Authenticate(dev.Username, "Password888")
 	makeAdmin := func() *Admin {

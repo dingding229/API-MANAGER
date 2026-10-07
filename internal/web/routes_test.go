@@ -108,7 +108,7 @@ func TestUserProfileEditingAssetsAreAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"account-settings", "data-user-profile", "user-profile-modal", "/auth/v1/me", "current_password", "password_confirm"} {
+	for _, marker := range []string{"account-settings", "data-user-edit", "user-profile-modal", "/auth/v1/me", "current_password", "password_confirm"} {
 		if !strings.Contains(string(js), marker) {
 			t.Errorf("missing profile editing asset marker: %s", marker)
 		}
@@ -136,8 +136,8 @@ func TestPasswordPolicyIsConsistentInConsole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(js), "byteLength < 8") || !strings.Contains(string(js), "8–72") {
-		t.Fatal("profile password policy not eight bytes")
+	if !strings.Contains(string(js), "passwordLength < 8") || !strings.Contains(string(js), "8–24") {
+		t.Fatal("profile password policy is not 8 to 24 characters")
 	}
 	if strings.Contains(string(js)+string(html), `minlength="12"`) {
 		t.Fatal("old password minimum remains")
@@ -152,13 +152,13 @@ func TestOverviewAndRecoveryAssets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"/admin/v1/overview", "gateway_requests_total", "overview-panels", "profile-email", "forgot-password", "reset-password"} {
+	for _, marker := range []string{"/admin/v1/overview", "gateway_requests_total", "overview-panels", "profile-email", "/login?return=admin"} {
 		if !strings.Contains(string(js), marker) {
 			t.Errorf("missing feature: %s", marker)
 		}
 	}
-	if strings.Contains(string(js), "用户名或邮箱") {
-		t.Fatal("username/email combined control remains")
+	if strings.Contains(string(js), "UTF-8 字节") {
+		t.Fatal("technical password copy remains")
 	}
 }
 
@@ -169,5 +169,27 @@ func TestSettingsRefreshDoesNotReplaceAnotherPage(t *testing.T) {
 	}
 	if !strings.Contains(string(js), "async function renderSiteSettings() {\n  if(state.page!=='settings')return;") {
 		t.Fatal("late settings response can replace another active view")
+	}
+}
+
+func TestCustomConsoleDocumentUsesServerEntryGuard(t *testing.T) {
+	mux := http.NewServeMux()
+	deny := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) })
+	guarded := false
+	guard := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			guarded = true
+			if r.URL.Path == "/staff/console/" {
+				http.Redirect(w, r, "/account", 303)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	MountAdministrationWithSite(mux, "/staff/console", deny, deny, nil, guard)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/staff/console/", nil))
+	if !guarded || w.Code != 303 || w.Header().Get("Location") != "/account" || strings.Contains(w.Body.String(), "console-view") {
+		t.Fatal("console bypassed server entry guard")
 	}
 }

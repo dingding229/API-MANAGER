@@ -135,11 +135,11 @@ func TestPostgresAccountLoginRegistrationEmailMFACSRF(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	code := mail.codes["register:"+email]
-	w, _ = call("POST", "/account/v1/register", map[string]any{"email": email, "username": "http-account", "nickname": "昵称", "password": "TestPass888", "verification_id": v["verification_id"], "code": code}, nil)
+	w, _ = call("POST", "/account/v1/register", map[string]any{"email": email, "username": "httpaccount", "nickname": "昵称", "password": "TestPass888", "verification_id": v["verification_id"], "code": code}, nil)
 	if w.Code != 201 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	u, e := p.GetUserByUsername("http-account")
+	u, e := p.GetUserByUsername("httpaccount")
 	if e != nil || !u.EmailVerified || u.Nickname != "昵称" || u.UID != u.ID {
 		t.Fatal(u, e)
 	}
@@ -234,7 +234,7 @@ func TestPostgresPaidGatewayKeyIsolationAndRefund(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	uname := "billing-" + ids.NewUUID()[:8]
+	uname := "billing" + ids.NewUUID()[:8]
 	u, e := users.CreateWithContact(uname, uname+"@example.test", "TestPass888", []string{"member"})
 	if e != nil {
 		t.Fatal(e)
@@ -322,11 +322,11 @@ func TestPostgresOwnKeyRevealAndLogsCannotCrossUsers(t *testing.T) {
 	if e = p.SaveSecuritySettings(context.Background(), model.SecuritySettings{Version: cfg.Version, DefaultRole: "member"}, ""); e != nil {
 		t.Fatal(e)
 	}
-	owner, e := users.Create("key-owner-"+ids.NewUUID()[:8], "Password888", "member")
+	owner, e := users.Create("keyowner"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := users.Create("key-other-"+ids.NewUUID()[:8], "Password888", "member")
+	other, e := users.Create("keyother"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -401,11 +401,11 @@ func TestPostgresUserCenterSessionAdministrationIsScoped(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	admin, e := users.Create("session-admin-"+ids.NewUUID()[:8], "Password888", "super_admin")
+	admin, e := users.Create("sessionadmin"+ids.NewUUID()[:8], "Password888", "super_admin")
 	if e != nil {
 		t.Fatal(e)
 	}
-	member, e := users.Create("session-member-"+ids.NewUUID()[:8], "Password888", "member")
+	member, e := users.Create("sessionmembe"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -476,7 +476,7 @@ func TestPostgresAdminOperationsDoNotRequireOTPButLoginStillDoes(t *testing.T) {
 	}
 	defer p.Close()
 	users := user.NewService(p)
-	u, e := users.Create("otp-admin-"+ids.NewUUID()[:8], "Password888", "super_admin")
+	u, e := users.Create("otpadmin"+ids.NewUUID()[:8], "Password888", "super_admin")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -520,7 +520,7 @@ func TestPostgresAdminOperationsDoNotRequireOTPButLoginStillDoes(t *testing.T) {
 		s.ServeHTTP(w, r)
 		return w
 	}
-	target, e := users.Create("grant-user-"+ids.NewUUID()[:8], "Password888", "member")
+	target, e := users.Create("grantuser"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -595,11 +595,11 @@ func TestPostgresIPPolicyRequiresOwnerAndPasswordAndPreservesRotation(t *testing
 	}
 	defer p.Close()
 	us := user.NewService(p)
-	u, e := us.Create("net-user-"+ids.NewUUID()[:8], "Password888", "member")
+	u, e := us.Create("netuser"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := us.Create("net-other-"+ids.NewUUID()[:8], "Password888", "member")
+	other, e := us.Create("netother"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -659,7 +659,7 @@ func TestPostgresPersonalTimeZonePersistsWithoutResettingUsage(t *testing.T) {
 	}
 	defer p.Close()
 	us := user.NewService(p)
-	u, e := us.Create("zone-user-"+ids.NewUUID()[:8], "Password888", "member")
+	u, e := us.Create("zoneuser"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}

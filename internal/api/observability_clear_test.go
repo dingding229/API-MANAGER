@@ -22,10 +22,10 @@ func TestLogCleanupRequiresDedicatedPermissionAndConfirmation(t *testing.T) {
 	users := user.NewService(memory)
 	sessions := map[string]string{}
 	for _, role := range []string{"super_admin", "api_developer", "member"} {
-		if _, err := users.Create(role, "Password88", role); err != nil {
+		if _, err := users.Create(strings.ReplaceAll(role, "_", ""), "Password88", role); err != nil {
 			t.Fatal(err)
 		}
-		_, token, err := users.Authenticate(role, "Password88")
+		_, token, err := users.Authenticate(strings.ReplaceAll(role, "_", ""), "Password88")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -198,7 +198,7 @@ func TestLogCleanupRoleCannotBeGrantedByAnOrdinaryUserManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := NewAdminWithUserManagement(memory, plugin.NewRegistry(), users, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	r := httptest.NewRequest("POST", "/admin/v1/users", strings.NewReader(`{"username":"unapproved-cleaner","password":"Password88","role":"log-cleaner"}`))
+	r := httptest.NewRequest("POST", "/admin/v1/users", strings.NewReader(`{"username":"unapprovedcleaner","password":"Password88","role":"log-cleaner"}`))
 	r.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
 	admin.ServeHTTP(w, r)

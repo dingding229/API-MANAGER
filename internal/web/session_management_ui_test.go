@@ -14,7 +14,7 @@ func TestPersonalSessionsAndKeysHaveOnlyUserCenterEntry(t *testing.T) {
 	if !strings.Contains(string(js), `location.assign('/account'`) {
 		t.Fatal("user-center entry missing")
 	}
-	if !strings.Contains(string(html), `id="login-view" class="auth-shell hidden"`) || !strings.Contains(string(js), `$('#auth-loading')?.classList.add('hidden')`) {
-		t.Fatal("login paints before session check")
+	if strings.Contains(string(html), `id="login-form"`) || !strings.Contains(string(html), `id="auth-loading"`) || !strings.Contains(string(js), `$('#auth-loading')?.classList.add('hidden')`) {
+		t.Fatal("console must not render a separate login form")
 	}
 }

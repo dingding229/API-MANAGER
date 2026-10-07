@@ -60,7 +60,7 @@ type sessionStore interface {
 	DeleteSession(string) error
 }
 
-var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,31}$`)
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9]{3,20}$`)
 var dummyPasswordHash = func() []byte {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("dummy-password-check"), passwordHashCost)
 	return hash
@@ -123,7 +123,7 @@ func (s *Service) CreateVerifiedUser(username, email, nickname, password string,
 func (s *Service) PrepareUser(username, email, password string, roles []string) (model.User, error) {
 	username, email = normalizeUsername(username), normalizeEmail(email)
 	if !validUsername(username) || (email != "" && !validEmail(email)) || !validPassword(password) {
-		return model.User{}, errors.New("valid username, optional email and password with 8 to 72 bytes are required")
+		return model.User{}, errors.New("用户名须为 3–20 位字母或数字，密码须为 8–24 个字符")
 	}
 	roles = normalizeRoles(roles)
 	if len(roles) == 0 {
@@ -279,8 +279,21 @@ func (s *Service) EnsureInitialAdmin(username, password string) error {
 func (s *Service) Authenticate(username, password string) (model.User, string, error) {
 	return s.authenticate(username, password, nil)
 }
+func (s *Service) lookupLogin(identifier string) (model.User, error) {
+	value := strings.ToLower(strings.TrimSpace(identifier))
+	if validEmail(value) {
+		result, err := s.store.GetUserByEmail(value)
+		if !errors.Is(err, store.ErrNotFound) {
+			return result, err
+		}
+	}
+	return s.store.GetUserByUsername(value)
+}
 func (s *Service) authenticate(username, password string, r *http.Request) (model.User, string, error) {
-	user, lookupErr := s.store.GetUserByUsername(strings.ToLower(strings.TrimSpace(username)))
+	if len(password) > 72 {
+		return model.User{}, "", ErrInvalidCredentials
+	}
+	user, lookupErr := s.lookupLogin(username)
 	hash := []byte(user.PasswordHash)
 	if lookupErr != nil || len(hash) == 0 {
 		hash = dummyPasswordHash
@@ -292,7 +305,10 @@ func (s *Service) authenticate(username, password string, r *http.Request) (mode
 	return s.StartSession(user, r)
 }
 func (s *Service) VerifyPassword(username, password string) (model.User, error) {
-	user, lookupErr := s.store.GetUserByUsername(strings.ToLower(strings.TrimSpace(username)))
+	if len(password) > 72 {
+		return model.User{}, ErrInvalidCredentials
+	}
+	user, lookupErr := s.lookupLogin(username)
 	hash := []byte(user.PasswordHash)
 	if lookupErr != nil || len(hash) == 0 {
 		hash = dummyPasswordHash

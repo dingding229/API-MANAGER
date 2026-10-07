@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,21 @@ func TestOAuthAndMFAStateNeverReachBusinessPlugins(t *testing.T) {
 	StripSessionSetCookies(h)
 	if v := h.Values("Set-Cookie"); len(v) != 1 || v[0] != "business=kept" {
 		t.Fatal(v)
+	}
+}
+
+func TestAdminEntryProofNeverFlowsToBusinessAPIs(t *testing.T) {
+	r := httptest.NewRequest("GET", "https://example.test/api/example", nil)
+	r.Header.Set("Cookie", "api_manager_admin_entry=private; business=kept")
+	StripUserSessionCookies(r)
+	if r.Header.Get("Cookie") != "business=kept" {
+		t.Fatal("admin entry leaked upstream")
+	}
+	headers := http.Header{}
+	headers.Add("Set-Cookie", "api_manager_admin_entry=forged; Path=/")
+	headers.Add("Set-Cookie", "business=kept; Path=/")
+	StripSessionSetCookies(headers)
+	if len(headers.Values("Set-Cookie")) != 1 || !strings.HasPrefix(headers.Get("Set-Cookie"), "business=") {
+		t.Fatal("business endpoint may forge an administrative entry")
 	}
 }

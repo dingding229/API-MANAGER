@@ -19,8 +19,8 @@ func TestDeveloperAPIManagementIsOwnerScoped(t *testing.T) {
 	if e := us.EnsureInitialAdmin("admin", "Password888"); e != nil {
 		t.Fatal(e)
 	}
-	d1, _ := us.Create("dev-one", "Password888", "api_developer")
-	d2, _ := us.Create("dev-two", "Password888", "api_developer")
+	d1, _ := us.Create("devone", "Password888", "api_developer")
+	d2, _ := us.Create("devtwo", "Password888", "api_developer")
 	_, one, _ := us.Authenticate(d1.Username, "Password888")
 	_, two, _ := us.Authenticate(d2.Username, "Password888")
 	_, at, _ := us.Authenticate("admin", "Password888")

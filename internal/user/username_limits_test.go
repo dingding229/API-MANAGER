@@ -8,12 +8,12 @@ import (
 )
 
 func TestUsernamesHaveBoundedNewIdentifiersAndPreserveLegacy(t *testing.T) {
-	for _, v := range []string{"abc", strings.Repeat("a", 32), "abc.def-1_2"} {
+	for _, v := range []string{"abc", strings.Repeat("a", 20), "Abc123"} {
 		if !validUsername(v) {
 			t.Fatal("valid name", v)
 		}
 	}
-	for _, v := range []string{"ab", strings.Repeat("a", 33), "abc@example.test", "<img>", "abc def"} {
+	for _, v := range []string{"ab", strings.Repeat("a", 21), "abc@example.test", "<img>", "abc def", "abc.def", "abc_def", "abc-def"} {
 		if validUsername(v) {
 			t.Fatal("unsafe name", v)
 		}

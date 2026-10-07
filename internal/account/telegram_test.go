@@ -99,7 +99,7 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 	}
 	defer p.Close()
 	us := user.NewService(p)
-	u, e := us.Create("telegram-user-"+ids.NewUUID()[:8], "Password888", "member")
+	u, e := us.Create("telegramuser"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -281,7 +281,7 @@ func TestPostgresTelegramOnboardingRequiresVerifiedEmailAndOneUse(t *testing.T) 
 	}
 	var proof map[string]string
 	json.Unmarshal(w.Body.Bytes(), &proof)
-	username := "tg-" + ids.NewUUID()[:8]
+	username := "tg" + ids.NewUUID()[:8]
 	body := map[string]any{"username": username, "email": email, "password": "Password888", "nickname": "用户", "verification_id": proof["verification_id"], "code": "wrong"}
 	if w := call("/complete", body); w.Code != 403 {
 		t.Fatal("unverified mailbox accepted", w.Code)

@@ -1,4 +1,5 @@
 'use client';
+import {LoadingPlaceholder} from './loading-placeholder';
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, Clipboard, Code2, Download, FileCode2, Folder, KeyRound, ListFilter, Menu, RefreshCw, Search, ShieldCheck, UnlockKeyhole, X, Zap } from 'lucide-react';
@@ -126,7 +127,7 @@ function Directory(props: DirectoryProps) {
   const filtering = Boolean(props.query || props.method !== 'all' || props.authentication !== 'all' || props.category !== 'all');
   return <div className="directory-inner">
     <div className="directory-views"><strong>接口目录</strong></div>
-    <div className="directory-count" role="status" aria-live="polite">{props.loading ? '正在加载…' : `${props.apis.length} / ${props.total} 个公开接口`}<span>{props.categories.length} 个分类</span></div>
+    <div className="directory-count" role="status" aria-live="polite">{props.loading ? <span className="ui-placeholder-line" aria-hidden="true"/> : `${props.apis.length} / ${props.total} 个公开接口`}<span>{props.categories.length} 个分类</span></div>
     <details className="directory-filters" open={filtering}><summary><ListFilter size={15} aria-hidden="true" />筛选接口<ChevronDown size={14} aria-hidden="true" /></summary><div><label>请求方法<select value={props.method} onChange={event => props.onMethod(event.target.value)}><option value="all">全部方法</option>{props.methods.map(method => <option key={method}>{method}</option>)}</select></label><label>认证方式<select value={props.authentication} onChange={event => props.onAuth(event.target.value)}><option value="all">全部认证方式</option><option value="api_key">KEY 认证</option><option value="none">无需验证</option></select></label><label>接口分类<select value={props.category} onChange={event => props.onCategory(event.target.value)}><option value="all">全部分类</option>{props.categories.map(category => <option key={category}>{category}</option>)}</select></label>{filtering && <button type="button" className="quiet-button filter-reset" onClick={props.onReset}><X size={13} aria-hidden="true" />重置筛选</button>}</div></details>
     <nav className="endpoint-navigation" aria-label="已公开接口">{groups.map(category => <details key={category} className="endpoint-group" open><summary><Folder size={14} aria-hidden="true" /><strong>{category}</strong><span>{props.apis.filter(api => api.category === category).length}</span><ChevronDown size={13} aria-hidden="true" /></summary><div>{props.apis.filter(api => api.category === category).map(api => <button type="button" key={api.id} className={`endpoint-link${props.view === 'reference' && props.selected === api.id ? ' active' : ''}`} aria-current={props.view === 'reference' && props.selected === api.id ? 'page' : undefined} onClick={() => props.onSelect(api.id)}><strong>{api.title}</strong></button>)}</div></details>)}{!props.loading && !props.apis.length && <p className="directory-empty">暂无匹配接口。</p>}</nav>
     <p className="directory-footer"><ShieldCheck size={14} aria-hidden="true" />公开目录不包含管理配置或调用密钥。</p>
@@ -134,6 +135,7 @@ function Directory(props: DirectoryProps) {
 }
 
 function PageState({ title, subtitle, loading, retry, retryLabel = '重新加载' }: { title: string; subtitle: string; loading?: boolean; retry?: () => void; retryLabel?: string }) {
+  if(loading)return <LoadingPlaceholder className="document-state"/>;
   return <section id="api-documentation" className="document-state" tabIndex={-1} role={loading ? 'status' : 'region'} aria-label={title}><span className="state-icon" aria-hidden="true">{loading ? <RefreshCw size={24} /> : <FileCode2 size={24} />}</span><h1>{title}</h1><p>{subtitle}</p>{retry && <button type="button" className="primary-button" onClick={retry}>{retryLabel}</button>}</section>;
 }
 function Guide({ site, baseUrl, apis, onReference }: { site: SiteInfo; baseUrl: string; apis: ApiDoc[]; onReference: () => void }) {
@@ -145,7 +147,7 @@ function Guide({ site, baseUrl, apis, onReference }: { site: SiteInfo; baseUrl: 
     <div className="guide-hero"><div><h1>从首次调用到接入你的程序</h1><p className="guide-description">按照接入步骤准备账号、凭据与参数，再处理响应和常见错误。具体接口字段请查阅接口文档。</p></div><span className="guide-count"><strong>{apis.length}</strong> 个公开接口</span></div>
     {site.announcement&&<p className="public-announcement">{site.announcement}</p>}
     <nav className="guide-nav" aria-label="指南章节"><a href="#guide-start">开始接入</a><a href="#guide-auth">账号与认证</a><a href="#guide-example">调用示例</a><a href="#guide-errors">响应与排查</a><a href="#guide-faq">常见问题</a></nav>
-    <div className="guide-origin"><span>接口调用地址</span><code>{baseUrl||'正在读取…'}</code><CopyButton text={baseUrl} label="复制调用地址" disabled={!baseUrl} /></div>
+    <div className="guide-origin"><span>接口调用地址</span><code>{baseUrl||<span className="ui-placeholder-line" aria-hidden="true"/>}</code><CopyButton text={baseUrl} label="复制调用地址" disabled={!baseUrl} /></div>
     <section id="guide-start" className="guide-section"><SectionTitle>三步开始接入</SectionTitle><div className="guide-step-grid">
       <div><span>01</span><h3>选择适合的接口</h3><p>按分类、用途或请求路径查找接口。同一接口的多种调用方式合并展示，切换方法后查看对应参数。</p><button type="button" className="quiet-button" onClick={onReference}>浏览接口文档<ArrowRight size={14} aria-hidden="true" /></button></div>
       <div><span>02</span><h3>准备请求参数</h3><p>填写必需的路径、查询、请求头及请求内容。编辑区会同步生成代码，不会自动发送请求。</p><small>写入操作前，请确认数据和调用范围。</small></div>

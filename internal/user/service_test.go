@@ -18,10 +18,10 @@ func TestCreateWithRolesEnforcesPasswordLengthAndCost(t *testing.T) {
 	if _, err := service.Create("short@example.com", "1234567", "member"); err == nil {
 		t.Fatal("7-byte password was accepted")
 	}
-	if _, err := service.Create("eight-byte-user", "12345678", "member"); err != nil {
+	if _, err := service.Create("eightbyteuser", "12345678", "member"); err != nil {
 		t.Fatalf("8-byte password was rejected: %v", err)
 	}
-	created, err := service.Create("valid-user", "123456789012", "member")
+	created, err := service.Create("validuser", "123456789012", "member")
 	if err != nil {
 		t.Fatalf("12-byte password was rejected: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestExistingAccountsAreNotResetAndSessionHashesArePersisted(t *testing.T) {
 	if err := s.EnsureInitialAdmin("admin", "original-password"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureInitialAdmin("another-admin", "replacement-password"); err != nil {
+	if err := s.EnsureInitialAdmin("anotheradmin", "replacement-password"); err != nil {
 		t.Fatal(err)
 	}
 	u, token, err := s.Authenticate("admin", "original-password")
@@ -94,11 +94,11 @@ func TestDisabledUserSessionIsImmediatelyRejected(t *testing.T) {
 
 func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
 	s := NewService(store.NewMemory())
-	u, err := s.Create("viewer-two", "viewer-password", "member")
+	u, err := s.Create("viewertwo", "viewer-password", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := s.Authenticate("viewer-two", "viewer-password")
+	_, token, err := s.Authenticate("viewertwo", "viewer-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestReenablingUserDoesNotReviveOldSessions(t *testing.T) {
 	if _, err = s.ValidateSession(token); err == nil {
 		t.Fatal("disabled/re-enabled account revived a revoked session")
 	}
-	if _, _, err = s.Authenticate("viewer-two", "viewer-password"); err != nil {
+	if _, _, err = s.Authenticate("viewertwo", "viewer-password"); err != nil {
 		t.Fatal("re-enabled user cannot log in")
 	}
 }
@@ -147,7 +147,7 @@ func TestUpdateProfileReauthenticatesSelfAndRevokesSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	username := "renamed-admin"
+	username := "renamedadmin"
 	password := "new-admin-password"
 	updated, revoked, err := s.UpdateProfile(admin.ID, admin.ID, model.UpdateUserProfileRequest{Username: &username, Password: &password, CurrentPassword: "admin-password"})
 	if err != nil {

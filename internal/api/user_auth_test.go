@@ -70,7 +70,7 @@ func TestAdminCanUpdateBasicInfoOfNonPrivilegedUserAndRevokesSessions(t *testing
 		t.Fatal(err)
 	}
 	a := NewAdminWithUserManagement(m, plugin.NewRegistry(), users, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	r := httptest.NewRequest("PUT", "/admin/v1/users/"+reader.ID+"/profile", strings.NewReader(`{"username":"reader-renamed","password":"reader-new-password"}`))
+	r := httptest.NewRequest("PUT", "/admin/v1/users/"+reader.ID+"/profile", strings.NewReader(`{"username":"readerrenamed","password":"reader-new-password"}`))
 	r.Header.Set("Authorization", "Bearer "+adminSession)
 	w := httptest.NewRecorder()
 	a.ServeHTTP(w, r)
@@ -80,7 +80,7 @@ func TestAdminCanUpdateBasicInfoOfNonPrivilegedUserAndRevokesSessions(t *testing
 	if _, err := users.ValidateSession(readerSession); err == nil {
 		t.Fatal("target session survived admin password update")
 	}
-	if _, _, err := users.Authenticate("reader-renamed", "reader-new-password"); err != nil {
+	if _, _, err := users.Authenticate("readerrenamed", "reader-new-password"); err != nil {
 		t.Fatalf("new target credentials rejected: %v", err)
 	}
 }
@@ -100,7 +100,7 @@ func TestReaderCannotUpdateUserProfileThroughAdminRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewAdminWithUserManagement(m, plugin.NewRegistry(), users, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	r := httptest.NewRequest("PUT", "/admin/v1/users/"+reader.ID+"/profile", strings.NewReader(`{"username":"reader-renamed"}`))
+	r := httptest.NewRequest("PUT", "/admin/v1/users/"+reader.ID+"/profile", strings.NewReader(`{"username":"readerrenamed"}`))
 	r.Header.Set("Authorization", "Bearer "+readerSession)
 	w := httptest.NewRecorder()
 	a.ServeHTTP(w, r)

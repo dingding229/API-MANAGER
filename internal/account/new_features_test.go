@@ -30,15 +30,15 @@ func TestPostgresCredentialRotationCardsAndRevokedPermissions(t *testing.T) {
 	}
 	defer p.Close()
 	us := user.NewService(p)
-	admin, e := us.Create("new-admin-"+ids.NewUUID()[:8], "Password888", "super_admin")
+	admin, e := us.Create("newadmin"+ids.NewUUID()[:8], "Password888", "super_admin")
 	if e != nil {
 		t.Fatal(e)
 	}
-	u, e := us.Create("new-user-"+ids.NewUUID()[:8], "Password888", "member")
+	u, e := us.Create("newuser"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}
-	other, e := us.Create("other-"+ids.NewUUID()[:8], "Password888", "member")
+	other, e := us.Create("other"+ids.NewUUID()[:8], "Password888", "member")
 	if e != nil {
 		t.Fatal(e)
 	}

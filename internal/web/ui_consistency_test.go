@@ -54,7 +54,7 @@ button.disabled=true;await withAction(button,'保存中…',async()=>calls++);as
 }
 
 func TestSetupFailureRestoresFieldsWithoutUnrelatedSettingsVariables(t *testing.T) {
-	setup := consoleFunction(t, "async function initSetup()", "\ninitSetup();")
+	setup := consoleFunction(t, "async function initSetup()", "\nsetupReadiness=initSetup();")
 	runConsoleRegression(t, `const assert=require('node:assert/strict');
 const field=value=>({value,disabled:false,setCustomValidity(){},focus(){}});
 const elements={key:field('preview-only-key'),username:field('preview-admin'),email:field('admin@example.test'),password:field('Password88'),confirm:field('Password88')};
@@ -63,12 +63,12 @@ const form={elements,reportValidity:()=>true,querySelectorAll:()=>fields};
 let removed=false,noticeText='';const section={innerHTML:'',querySelector:s=>s==='form'?form:message,remove(){removed=true}};
 const card={append(){}};
 const document={createElement:()=>section};
-const $=s=>s==='#login-view .auth-card'?card:field('');
-let pendingSetupKey='',setupFragment=null;
+const $=s=>s==='#setup-view .auth-card'?card:field('');
+let pendingSetupKey='',setupFragment=null,setupReadiness;let destination='';const location={replace(v){destination=v}};
 let shouldFail=true;const api=async(path,options)=>{if(!options)return {available:true};if(!shouldFail)return {};const e=Error('invalid setup key');e.status=400;throw e};
 const withSubmitting=async(form,text,action)=>action();const notice=text=>{noticeText=text};
 `+setup+`
-(async()=>{await initSetup();await form.onsubmit({preventDefault(){}});assert.equal(form._saving,false);assert.ok(fields.every(f=>!f.disabled));assert.ok(message.textContent.includes('注册失败'));shouldFail=false;await form.onsubmit({preventDefault(){}});assert.equal(removed,true);assert.ok(fields.every(f=>!f.disabled&&f.value===''));assert.ok(noticeText.includes('注册成功'));})().catch(e=>{console.error(e);process.exit(1)});`)
+(async()=>{await initSetup();await form.onsubmit({preventDefault(){}});assert.equal(form._saving,false);assert.ok(fields.every(f=>!f.disabled));assert.ok(message.textContent.includes('注册失败'));shouldFail=false;await form.onsubmit({preventDefault(){}});assert.equal(removed,true);assert.ok(fields.every(f=>!f.disabled&&f.value===''));assert.equal(destination,'/login?return=admin&registered=1');})().catch(e=>{console.error(e);process.exit(1)});`)
 }
 
 func TestWebsiteSettingsFailureRestoresEditableFieldsAndPasswordPolicy(t *testing.T) {
@@ -96,7 +96,7 @@ func TestConsoleSharedComponentsAndAuditGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	js := string(raw)
-	for _, marker := range []string{"bindModalKeyboard(modal, close)", "management-grid", "page._auditRequest !== request", `class="empty spaced-split"`, "restrictForm($('#user-form'), 'user.manage')"} {
+	for _, marker := range []string{"bindModalKeyboard(modal, close)", "management-grid", "page._auditRequest !== request", `class="ui-placeholder"`, "restrictForm($('#user-form'), 'user.manage')"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("missing shared console behavior: %s", marker)
 		}
@@ -116,7 +116,7 @@ func TestConsoleSharedComponentsAndAuditGuards(t *testing.T) {
 }
 
 func TestModalKeyboardNavigationStaysInsideDialog(t *testing.T) {
-	handler := consoleFunction(t, "function bindModalKeyboard(", "function authErrorMessage(")
+	handler := consoleFunction(t, "function bindModalKeyboard(", "function showConsole(")
 	runConsoleRegression(t, `const assert=require('node:assert/strict');
 const document={activeElement:null};
 const first={focus(){document.activeElement=this}},last={focus(){document.activeElement=this}};
@@ -216,9 +216,30 @@ func TestCredentialDialogsAuditDetailsAndXSSSafeSinks(t *testing.T) {
 	}
 }
 
-func TestUserManagementUsesDirectActionsWithoutHiddenMenu(t *testing.T) {
- source:=consoleFunction(t,"function userActions(","async function renderUsers")
- if strings.Contains(source,"更多操作")||strings.Contains(source,"<details") {t.Fatal("user operations hidden in dropdown")}
- for _,name:=range []string{"data-user-profile","data-user-roles","data-bind-user-plan","data-user-usage","data-user-delete"}{if !strings.Contains(source,name){t.Fatal("missing direct user action",name)}}
- raw,e:=assets.ReadFile("assets/app.js");if e!=nil{t.Fatal(e)};if !strings.Contains(string(raw),"user-actions-row"){t.Fatal("direct operations have no dedicated full-width row")}
+func TestUserManagementUsesSingleEditEntryAndGroupedDialog(t *testing.T) {
+	source := consoleFunction(t, "function userActions(", "async function renderUsers")
+	if strings.Contains(source, "更多操作") || strings.Contains(source, "<details") {
+		t.Fatal("hidden user action menu")
+	}
+	if strings.Count(source, "<button") != 1 || !strings.Contains(source, "data-user-edit") {
+		t.Fatal("user list must have one edit button")
+	}
+	raw, _ := assets.ReadFile("assets/enhancements.js")
+	dialog := string(raw)
+	for _, part := range []string{"openUserEditor", "data-editor-tab", "data-editor-reset-2fa", "openProfileModal", "openRoleModal", "openPlanBinding", "openDeleteUser"} {
+		if !strings.Contains(dialog, part) {
+			t.Fatal("missing editor capability", part)
+		}
+	}
+}
+
+func TestUserSubEditorsReturnOnlyOnUserClose(t *testing.T) {
+	for _, tc := range []struct{ start, end, close string }{{"function closeRoleModal(", "function openRoleModal(", "closeRoleModal"}, {"function closeProfileModal(", "function profileErrorMessage(", "closeProfileModal"}} {
+		handler := consoleFunction(t, tc.start, tc.end)
+		runConsoleRegression(t, `const assert=require('node:assert/strict');let returned=0,removed=0;
+const modal={_saving:false,_previousInert:false,_previousOverflow:'',querySelectorAll:()=>[],remove(){removed++},_onReturn(){returned++}};
+const app={inert:true};const $=s=>s==='#app'?app:modal;const document={body:{style:{overflow:'hidden'}}};
+`+handler+`
+`+tc.close+`();assert.equal(returned,1);assert.equal(removed,1);`+tc.close+`(true);assert.equal(returned,1);assert.equal(removed,2);`)
+	}
 }

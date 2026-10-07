@@ -61,7 +61,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Path
-	if method, known := map[string]string{"/auth/v1/login": "POST", "/test/v1/login": "POST", "/account/v1/mfa-login": "POST", "/account/v1/send-code": "POST", "/account/v1/register": "POST", "/account/v1/email-login": "POST"}[path]; known && r.Method != method {
+	if method, known := map[string]string{"/auth/v1/login": "POST", "/test/v1/login": "POST", "/account/v1/mfa-login": "POST", "/account/v1/send-code": "POST", "/account/v1/register": "POST", "/account/v1/email-login": "POST", "/account/v1/admin-entry": "POST"}[path]; known && r.Method != method {
 		w.Header().Set("Allow", method)
 		write(w, 405, map[string]string{"error": "method not allowed"})
 		return
@@ -155,6 +155,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			write(w, 403, map[string]string{"error": "请求来源不正确"})
 			return
 		}
+	}
+	if path == "/account/v1/admin-entry" && r.Method == "POST" {
+		s.createAdminEntry(w, r, u)
+		return
 	}
 	if path == "/account/v1/session-users" && r.Method == "GET" {
 		if !s.users.Can(u.ID, "user.read") {
@@ -315,8 +319,8 @@ func (s *Service) sendCode(w http.ResponseWriter, r *http.Request, cfg model.Sec
 		write(w, 400, map[string]string{"error": "验证码用途不正确"})
 		return
 	}
-	if req.Purpose == "register" && !emailDomainAllowed(cfg, req.Email) {
-		write(w, 400, map[string]string{"error": "邮箱后缀不在允许注册的范围内"})
+	if (req.Purpose == "register" || req.Purpose == "email-login") && !emailDomainAllowed(cfg, req.Email) {
+		write(w, 400, map[string]string{"error": "邮箱后缀不在支持列表中"})
 		return
 	}
 	if (req.Purpose == "register" && !cfg.RegistrationEnabled) || (req.Purpose == "email-login" && !cfg.EmailLoginEnabled) {
@@ -394,7 +398,7 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request, cfg model.Sec
 		return
 	}
 	if !emailDomainAllowed(cfg, req.Email) {
-		write(w, 400, map[string]string{"error": "邮箱后缀不在允许注册的范围内"})
+		write(w, 400, map[string]string{"error": "邮箱后缀不在支持列表中"})
 		return
 	}
 	if err := s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, "register"); err != nil {
@@ -452,6 +456,10 @@ func (s *Service) emailLogin(w http.ResponseWriter, r *http.Request, cfg model.S
 	v, err := s.verifyCode(r.Context(), req.VerificationID, "email-login", req.Code, s.binding(r))
 	if err != nil {
 		write(w, 403, map[string]string{"error": "验证码无效"})
+		return
+	}
+	if !emailDomainAllowed(cfg, v.Subject) {
+		write(w, 403, map[string]string{"error": "此邮箱后缀不在支持列表，请使用密码或已绑定的授权账号登录"})
 		return
 	}
 	u, err := s.store.GetUserByEmail(v.Subject)
