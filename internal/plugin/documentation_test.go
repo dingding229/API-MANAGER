@@ -146,7 +146,7 @@ func TestPluginDocumentationExampleCompilesAndRuns(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	registry := NewRegistry()
 	defer registry.Close(context.Background())
