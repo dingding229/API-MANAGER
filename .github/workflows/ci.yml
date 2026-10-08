@@ -92,7 +92,7 @@ jobs:
         env:
           TEST_PLUGIN_HOST_WASM: "1"
           TEST_PLUGIN_DOCS_WASM: "1"
-        run: go test -p 1 ./internal/plugin -run 'TestWASMHost|TestPluginDocumentation|TestPluginDocumented|TestPluginDevelopment' -count=1
+        run: go test -p 1 ./internal/plugin -run 'TestWASMHost|TestPluginDocumentation|TestPluginDocumented|TestPluginDevelopment|TestPluginUpdate' -count=1
       - name: Test persistent billing, verification, sessions and plugin cache
         env:
           TEST_ACCOUNT_DSN: postgres://api_manager:ci-disposable-only@127.0.0.1:5432/api_account_review_ci?sslmode=disable

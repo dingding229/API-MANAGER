@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"api-manager/internal/model"
 )
@@ -31,9 +32,12 @@ type LibraryEntry struct {
 }
 
 type Library struct {
-	root    string
-	manager *Manager
-	mu      sync.Mutex
+	root        string
+	manager     *Manager
+	mu          sync.Mutex
+	viewMu      sync.Mutex
+	viewEntries []LibraryEntry
+	viewAt      time.Time
 }
 
 func NewLibrary(root string, manager *Manager) *Library {
@@ -102,6 +106,13 @@ func (l *Library) verifyPackageChecksum(dir string, manifest Manifest, wasmBytes
 
 // List shows only well-formed local packages within the configured directory.
 func (l *Library) List() ([]LibraryEntry, error) {
+	if l != nil {
+		l.viewMu.Lock()
+		defer l.viewMu.Unlock()
+		if time.Since(l.viewAt) < 2*time.Second {
+			return l.withInstalled(l.viewEntries), nil
+		}
+	}
 	if l == nil || l.manager == nil || l.root == "" {
 		return []LibraryEntry{}, nil
 	}
@@ -149,12 +160,15 @@ func (l *Library) List() ([]LibraryEntry, error) {
 		}
 		return entries[i].Name < entries[j].Name
 	})
+	l.viewEntries = append([]LibraryEntry(nil), entries...)
+	l.viewAt = time.Now()
 	return entries, nil
 }
 
 // Publish copies a previously verified installed package into the local library.
 // This is a local operation and never performs a remote download.
 func (l *Library) Publish(pluginID string) (LibraryEntry, error) {
+	defer l.invalidateView()
 	if l == nil || l.manager == nil {
 		return LibraryEntry{}, errors.New("plugin library is disabled")
 	}
@@ -282,6 +296,9 @@ func readLibraryFile(directory, name string, max int64) ([]byte, error) {
 }
 
 func (l *Library) Install(ctx context.Context, name, version string) (model.Plugin, error) {
+	if l != nil {
+		defer l.invalidateView()
+	}
 	if l == nil || l.manager == nil {
 		return model.Plugin{}, errors.New("plugin library is disabled")
 	}
@@ -291,3 +308,18 @@ func (l *Library) Install(ctx context.Context, name, version string) (model.Plug
 	}
 	return l.manager.Upload(ctx, manifest, wasm)
 }
+
+func (l *Library) withInstalled(entries []LibraryEntry) []LibraryEntry {
+	out := append([]LibraryEntry(nil), entries...)
+	installed := map[string]model.Plugin{}
+	for _, p := range l.manager.List() {
+		installed[p.Name+"\x00"+p.Version] = p
+	}
+	for i := range out {
+		p, ok := installed[out[i].Name+"\x00"+out[i].Version]
+		out[i].Installed = ok
+		out[i].InstalledID = p.ID
+	}
+	return out
+}
+func (l *Library) invalidateView() { l.viewMu.Lock(); l.viewAt = time.Time{}; l.viewMu.Unlock() }

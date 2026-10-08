@@ -475,3 +475,23 @@ form input::placeholder, form textarea::placeholder { color: var(--control-muted
 /* Header close controls are icon-only; footer buttons carry navigation text. */
 .modal-heading .modal-close{display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0;white-space:nowrap;line-height:1}
 .modal-heading .modal-close svg{display:block;flex:none;width:20px;height:20px;pointer-events:none}
+
+.call-log-detail-dialog{width:min(760px,calc(100vw - 32px))}
+.log-detail-section{margin:20px 0}.log-detail-section h3{font-size:15px;margin:0 0 12px}
+.log-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 20px;margin:0}
+.log-detail-grid>div{min-width:0;padding:12px;background:var(--surface-muted,#f8fafc);border:1px solid var(--line,#e2e8f0);border-radius:8px}
+.log-detail-grid dt{font-size:12px;color:var(--muted,#64748b);margin-bottom:6px}
+.log-detail-grid dd{display:flex;align-items:start;gap:10px;margin:0;min-width:0}
+.log-detail-grid code{font:13px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;min-width:0;flex:1}
+.log-detail-grid .log-detail-copy{flex-shrink:0;min-height:36px;padding:6px 10px;font-size:12px;white-space:nowrap}
+@media(max-width:600px){.log-detail-grid{grid-template-columns:1fr}}
+
+.plugin-version{display:grid!important;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center}
+.plugin-version-info{min-width:0}.plugin-version-title{flex-wrap:wrap}.plugin-version-title strong{overflow-wrap:anywhere}
+.plugin-version-actions{display:flex!important;flex-direction:column;align-items:flex-end;gap:8px;min-width:0}
+.plugin-action-primary,.plugin-action-secondary{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.plugin-version-actions button{min-height:40px;white-space:nowrap;flex:0 0 auto;margin:0;padding:9px 12px;font-size:12px}
+.plugin-library-status{color:var(--muted);font-size:12px}
+@media(max-width:900px){.plugin-version{grid-template-columns:1fr!important}.plugin-version-actions{align-items:flex-start}.plugin-action-primary,.plugin-action-secondary{justify-content:flex-start}}
+.plugin-contract-warning{color:#a16207;background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:2px 6px;font-size:12px;white-space:normal}
+.confirmation-preference{grid-column:1/-1}.confirmation-preference .security-card-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}

@@ -32,6 +32,10 @@ import (
 // Route is documentation for a public API that the plugin author supports.
 // Uploading a plugin does not automatically publish or authorize this route.
 type Route struct {
+	Description       string            `yaml:"description" json:"description"`
+	ParametersSchema  map[string]any    `yaml:"parameters_schema" json:"parameters_schema"`
+	RequestSchema     map[string]any    `yaml:"request_schema" json:"request_schema"`
+	ResponseSchema    map[string]any    `yaml:"response_schema,omitempty" json:"response_schema,omitempty"`
 	Name              string            `yaml:"name" json:"name"`
 	Method            string            `yaml:"method" json:"method"`
 	Path              string            `yaml:"path" json:"path"`
@@ -218,16 +222,27 @@ func (r *Registry) LoadWASMDirectory(ctx context.Context, directory string) erro
 
 // LoadWASMBytes compiles and validates the exact plugin bytes.
 func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes []byte) error {
+	handler, e := r.prepareWASM(ctx, manifestBytes, wasmBytes)
+	if e != nil {
+		return e
+	}
+	r.Register(handler)
+	return nil
+}
+func (r *Registry) prepareWASM(ctx context.Context, manifestBytes, wasmBytes []byte) (*wasmHandler, error) {
 	manifest, err := ParseManifest(manifestBytes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	runtimeConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	if r.cache != nil {
+		runtimeConfig = runtimeConfig.WithCompilationCache(r.cache)
+	}
 	if manifest.Limits.MemoryMB > 0 {
 		// #nosec G115 -- ParseManifest bounds MemoryMB to 1..256 before this conversion.
 		pages64 := uint64((manifest.Limits.MemoryMB*1024*1024 + 65535) / 65536)
 		if pages64 > math.MaxUint32 {
-			return errors.New("plugin memory limit exceeds runtime maximum")
+			return nil, errors.New("plugin memory limit exceeds runtime maximum")
 		}
 		runtimeConfig = runtimeConfig.WithMemoryLimitPages(uint32(pages64))
 	}
@@ -236,29 +251,28 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 	// preopened files, environment variables, or network access.
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
 		_ = runtime.Close(ctx)
-		return fmt.Errorf("initialize restricted WASI: %w", err)
+		return nil, fmt.Errorf("initialize restricted WASI: %w", err)
 	}
 	if err := r.instantiateHost(ctx, runtime, manifest); err != nil {
 		_ = runtime.Close(ctx)
-		return fmt.Errorf("initialize plugin host: %w", err)
+		return nil, fmt.Errorf("initialize plugin host: %w", err)
 	}
 	compiled, err := runtime.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		_ = runtime.Close(ctx)
-		return fmt.Errorf("compile wasm module: %w", err)
+		return nil, fmt.Errorf("compile wasm module: %w", err)
 	}
 	if err := validateWASMABI(compiled); err != nil {
 		_ = compiled.Close(ctx)
 		_ = runtime.Close(ctx)
-		return err
+		return nil, err
 	}
 	timeout := time.Duration(manifest.Limits.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
 	sum := sha256.Sum256(append(append([]byte(nil), manifestBytes...), wasmBytes...))
-	r.Register(&wasmHandler{registry: r, revision: hex.EncodeToString(sum[:]), manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout})
-	return nil
+	return &wasmHandler{registry: r, revision: hex.EncodeToString(sum[:]), manifest: manifest, runtime: runtime, compiled: compiled, timeout: timeout}, nil
 }
 
 func validateWASMABI(compiled wazero.CompiledModule) error {

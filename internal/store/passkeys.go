@@ -84,7 +84,7 @@ func (p *Postgres) DeletePasskey(ctx context.Context, userID, id string) error {
 	if result.RowsAffected() != 1 {
 		return ErrNotFound
 	}
-	if _, e = tx.Exec(ctx, `UPDATE users SET auth_revision=auth_revision+1,updated_at=NOW() WHERE id=$1`, userID); e != nil {
+	if _, e = tx.Exec(ctx, `UPDATE users SET auth_revision=auth_revision+1,confirmation_method=CASE WHEN EXISTS(SELECT 1 FROM user_passkeys WHERE user_id=$1) THEN confirmation_method ELSE 'password' END,updated_at=NOW() WHERE id=$1`, userID); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1`, userID); e != nil {

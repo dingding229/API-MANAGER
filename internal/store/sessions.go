@@ -106,7 +106,7 @@ func (p *Postgres) CreateSession(session model.Session) error {
 	if _, err = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id=$1 AND key_hash IN (SELECT key_hash FROM user_sessions WHERE user_id=$1 ORDER BY expires_at DESC OFFSET 19)`, session.UserID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO user_sessions(key_hash,user_id,expires_at,session_id,created_at,last_seen_at,login_ip,last_ip,peer_ip,ip_source,user_agent,device) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, session.Hash, session.UserID, session.ExpiresAt, session.ID, session.CreatedAt, session.LastSeenAt, session.LoginIP, session.LastIP, session.PeerIP, session.IPSource, session.UserAgent, session.Device); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO user_sessions(key_hash,user_id,expires_at,session_id,created_at,last_seen_at,login_ip,last_ip,peer_ip,ip_source,user_agent,device,device_binding_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, session.Hash, session.UserID, session.ExpiresAt, session.ID, session.CreatedAt, session.LastSeenAt, session.LoginIP, session.LastIP, session.PeerIP, session.IPSource, session.UserAgent, session.Device, session.DeviceBindingHash); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -115,7 +115,7 @@ func (p *Postgres) GetSession(hash string) (model.Session, error) {
 	ctx, cancel := dbContext()
 	defer cancel()
 	var s model.Session
-	err := p.pool.QueryRow(ctx, `SELECT key_hash,user_id,expires_at,session_id,created_at,last_seen_at,login_ip,last_ip,peer_ip,ip_source,user_agent,device FROM user_sessions WHERE key_hash=$1`, hash).Scan(&s.Hash, &s.UserID, &s.ExpiresAt, &s.ID, &s.CreatedAt, &s.LastSeenAt, &s.LoginIP, &s.LastIP, &s.PeerIP, &s.IPSource, &s.UserAgent, &s.Device)
+	err := p.pool.QueryRow(ctx, `SELECT key_hash,user_id,expires_at,session_id,created_at,last_seen_at,login_ip,last_ip,peer_ip,ip_source,user_agent,device,device_binding_hash FROM user_sessions WHERE key_hash=$1`, hash).Scan(&s.Hash, &s.UserID, &s.ExpiresAt, &s.ID, &s.CreatedAt, &s.LastSeenAt, &s.LoginIP, &s.LastIP, &s.PeerIP, &s.IPSource, &s.UserAgent, &s.Device, &s.DeviceBindingHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Session{}, ErrNotFound
 	}

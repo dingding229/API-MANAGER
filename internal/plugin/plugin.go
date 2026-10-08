@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"github.com/tetratelabs/wazero"
 	"net/http"
 	"sort"
 	"sync"
@@ -20,28 +21,68 @@ type Registry struct {
 	settings map[string]settingSnapshot
 	mu       sync.RWMutex
 	handlers map[string]Handler
+	entries  map[string]*handlerLease
+	cache    wazero.CompilationCache
 }
 
 func NewRegistry() *Registry {
-	return &Registry{handlers: make(map[string]Handler)}
+	return &Registry{handlers: make(map[string]Handler), entries: make(map[string]*handlerLease), cache: wazero.NewCompilationCache()}
 }
 
+type handlerLease struct {
+	mu      sync.Mutex
+	handler Handler
+	refs    int
+	retired bool
+	closed  bool
+}
+
+func (e *handlerLease) retire() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.retired = true
+	closeNow := e.refs == 0 && !e.closed
+	if closeNow {
+		e.closed = true
+	}
+	e.mu.Unlock()
+	if closeNow {
+		closeHandler(e.handler)
+	}
+}
+func (e *handlerLease) release() {
+	e.mu.Lock()
+	e.refs--
+	closeNow := e.refs == 0 && e.retired && !e.closed
+	if closeNow {
+		e.closed = true
+	}
+	e.mu.Unlock()
+	if closeNow {
+		closeHandler(e.handler)
+	}
+}
 func (r *Registry) Register(handler Handler) {
 	r.mu.Lock()
-	previous := r.handlers[handler.Name()]
+	if r.entries == nil {
+		r.entries = map[string]*handlerLease{}
+	}
+	previous := r.entries[handler.Name()]
 	r.handlers[handler.Name()] = handler
+	r.entries[handler.Name()] = &handlerLease{handler: handler}
 	r.mu.Unlock()
-	closeHandler(previous)
+	previous.retire()
 }
-
 func (r *Registry) Unregister(name string) {
 	r.mu.Lock()
-	previous := r.handlers[name]
+	previous := r.entries[name]
 	delete(r.handlers, name)
+	delete(r.entries, name)
 	r.mu.Unlock()
-	closeHandler(previous)
+	previous.retire()
 }
-
 func closeHandler(handler Handler) {
 	wasm, ok := handler.(*wasmHandler)
 	if !ok || wasm == nil {
@@ -52,15 +93,21 @@ func closeHandler(handler Handler) {
 	_ = wasm.runtime.Close(ctx)
 }
 
-// Acquire holds a read lease for an in-flight call; replacement waits before closing its runtime.
+// An invocation owns only its entry lease, never the registry mutex. Replacements
+// can proceed while old requests complete, without recursive RWMutex deadlocks.
 func (r *Registry) Acquire(name string) (Handler, func(), bool) {
 	r.mu.RLock()
-	handler, ok := r.handlers[name]
+	entry, ok := r.entries[name]
 	if !ok {
 		r.mu.RUnlock()
 		return nil, func() {}, false
 	}
-	return handler, r.mu.RUnlock, true
+	entry.mu.Lock()
+	entry.refs++
+	entry.mu.Unlock()
+	r.mu.RUnlock()
+	var once sync.Once
+	return entry.handler, func() { once.Do(entry.release) }, true
 }
 
 func (r *Registry) Get(name string) (Handler, bool) {
@@ -72,23 +119,17 @@ func (r *Registry) Get(name string) (Handler, bool) {
 
 func (r *Registry) Close(ctx context.Context) error {
 	r.mu.Lock()
-	handlers := make([]Handler, 0, len(r.handlers))
-	for _, handler := range r.handlers {
-		handlers = append(handlers, handler)
+	entries := make([]*handlerLease, 0, len(r.entries))
+	for _, entry := range r.entries {
+		entries = append(entries, entry)
 	}
+	r.handlers = map[string]Handler{}
+	r.entries = map[string]*handlerLease{}
 	r.mu.Unlock()
-	var firstErr error
-	for _, handler := range handlers {
-		if wasm, ok := handler.(*wasmHandler); ok {
-			if err := wasm.compiled.Close(ctx); err != nil && firstErr == nil {
-				firstErr = err
-			}
-			if err := wasm.runtime.Close(ctx); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
+	for _, entry := range entries {
+		entry.retire()
 	}
-	return firstErr
+	return nil
 }
 
 func (r *Registry) List() []string {

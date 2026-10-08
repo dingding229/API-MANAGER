@@ -231,3 +231,72 @@ func TestPluginDocumentedHostExampleCompilesAndRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginUpdatePreservesIdentityAndContractsAndRejectsMissingDeclaration(t *testing.T) {
+	if os.Getenv("TEST_PLUGIN_DOCS_WASM") != "1" {
+		t.Skip("real compiler fixture required")
+	}
+	source := pluginDocumentation(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "plugin.go")
+	if e := os.WriteFile(file, []byte(documentationBlock(t, source, "go", 0)), 0600); e != nil {
+		t.Fatal(e)
+	}
+	command := exec.Command("go", "build", "-buildmode=c-shared", "-o", filepath.Join(dir, "plugin.wasm"), file)
+	command.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if out, e := command.CombinedOutput(); e != nil {
+		t.Fatalf("compile: %s %v", out, e)
+	}
+	wasm, e := os.ReadFile(filepath.Join(dir, "plugin.wasm"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	memory := store.NewMemory()
+	st := &documentationSettingsStore{Memory: memory, data: map[string]string{}, versions: map[string]int64{}}
+	registry := NewRegistry()
+	manager := NewManager(st, registry, filepath.Join(dir, "installed"), 20<<20, nil)
+	manager.SetSettingsKey("test-update-key-0123456789abcdefghijkl")
+	ctx := context.Background()
+	manifest := []byte(documentationBlock(t, source, "yaml", 0))
+	item, e := manager.Upload(ctx, manifest, wasm)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = manager.Enable(ctx, item.ID); e != nil {
+		t.Fatal(e)
+	}
+	contract, e := manager.Contract(item.Name, "/api/hello", []string{"GET"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	params, _ := json.Marshal(contract.ParametersSchema)
+	request, _ := json.Marshal(contract.RequestSchema)
+	a := model.API{ID: "update-fixture", Plugin: item.Name, Path: "/api/hello", Method: "GET", AuthMode: "api_key", ParametersSchema: params, RequestSchema: request}
+	if e = memory.CreateAPI(a); e != nil {
+		t.Fatal(e)
+	}
+	parsed, _ := ParseManifest(manifest)
+	parsed.Version = "1.1.0"
+	manifest, _ = yaml.Marshal(parsed)
+	updateStart := time.Now()
+	next, e := manager.Update(ctx, item.ID, manifest, wasm)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Logf("warm-cache plugin version replacement: %s", time.Since(updateStart))
+	if next.ID != item.ID || !next.Enabled || next.Version != "1.1.0" {
+		t.Fatal("update changed plugin identity/state", next)
+	}
+	if _, ok := registry.Get(item.Name); !ok {
+		t.Fatal("updated runtime absent")
+	}
+	bad := []byte("name: hello-tools\nversion: 1.2.0\nruntime: wasm\nentrypoint: plugin.wasm\nroutes:\n- name: hello\n  method: GET\n  path: /api/hello\n  auth_mode: api_key\n")
+	if _, e = manager.Update(ctx, item.ID, bad, wasm); e == nil {
+		t.Fatal("missing request contract accepted")
+	}
+	after, _ := memory.GetPlugin(item.ID)
+	if after.Version != "1.1.0" {
+		t.Fatal("failed update changed active record")
+	}
+	defer registry.Close(ctx)
+}

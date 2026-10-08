@@ -159,8 +159,7 @@ func (s *Service) ReauthenticateAdmin(r *http.Request, password, token string) e
 	if auth.PasskeyConfirmed(r.Context(), u.ID) {
 		return nil
 	}
-	_, e = s.users.VerifyPassword(u.Username, password)
-	return e
+	return s.verifyConfirmation(r, u, password)
 }
 func (s *Service) userUsage(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("user_id")

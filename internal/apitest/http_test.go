@@ -16,9 +16,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+var testingDevices sync.Map
 
 func fixture(t *testing.T) (*Handler, *store.Memory, *user.Service, string, Request, *gateway.Gateway) {
 	t.Helper()
@@ -30,6 +33,7 @@ func fixture(t *testing.T) (*Handler, *store.Memory, *user.Service, string, Requ
 	if err != nil {
 		t.Fatal(err)
 	}
+	testingDevices.Store(token, auth.NewDeviceToken(r))
 	n := time.Now()
 	a := model.API{ID: "fixture", Name: "test", Method: "GET", Path: "/api/demo", AuthMode: "api_key", PublicVisible: true, PublicTestEnabled: true, Enabled: true, PublishedAt: &n, UpdatedAt: n, ResponseStatus: 200, ResponseBody: `{"ok":true}`}
 	_ = m.CreateAPI(a)
@@ -48,6 +52,9 @@ func req(path, token string, input input) *http.Request {
 	r.RemoteAddr = "192.0.2.1:1111"
 	if token != "" {
 		r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
+		if device, ok := testingDevices.Load(token); ok {
+			r.AddCookie(&http.Cookie{Name: auth.DeviceCookie, Value: device.(string)})
+		}
 	}
 	return r
 }
@@ -166,6 +173,7 @@ func TestTestPermissionCoversDisplayedMethodsAndExpiredTicketIsRejected(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	testingDevices.Store(token, auth.NewDeviceToken(r))
 	a, _ := m.GetAPI("fixture")
 	a.Methods = []string{"GET", "POST"}
 	_ = m.UpdateAPI(a)
@@ -190,5 +198,76 @@ func TestTestPermissionCoversDisplayedMethodsAndExpiredTicketIsRejected(t *testi
 	h.ServeHTTP(w, req("/test/v1/invoke", token, input{Request: payload, Ticket: ticket}))
 	if w.Code != 403 {
 		t.Fatal("expired grant used", w.Code)
+	}
+}
+
+func TestOnlineTestUsesBoundDeviceRatherThanChangingLoginIP(t *testing.T) {
+	h, _, _, token, payload, _ := fixture(t)
+	r := req("/test/v1/prepare", token, input{Request: payload})
+	r.RemoteAddr = "198.51.100.99:4242"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal("same bound browser rejected after source IP changed", w.Code, w.Body.String())
+	}
+	r = req("/test/v1/prepare", token, input{Request: payload})
+	r.Header.Set("Cookie", auth.SessionCookie+"="+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("session cookie alone bypassed device binding", w.Code)
+	}
+}
+func TestDeviceCookieNeverReachesBusinessPlugins(t *testing.T) {
+	r := httptest.NewRequest("GET", "https://example.test/api/demo", nil)
+	r.AddCookie(&http.Cookie{Name: auth.DeviceCookie, Value: "private-device-token"})
+	r.AddCookie(&http.Cookie{Name: "business", Value: "ok"})
+	auth.StripUserSessionCookies(r)
+	if strings.Contains(r.Header.Get("Cookie"), "private-device-token") || !strings.Contains(r.Header.Get("Cookie"), "business=ok") {
+		t.Fatal("device cookie leaked or business cookie lost")
+	}
+}
+
+func TestLegacyBrowserSessionCanBindDeviceOnceFromItsExistingTrustedSource(t *testing.T) {
+	h, m, u, token, payload, _ := fixture(t)
+	session, e := u.CurrentSession(token)
+	if e != nil {
+		t.Fatal(e)
+	}
+	session.DeviceBindingHash = ""
+	session.LoginIP = "198.51.100.40"
+	if e = m.CreateSession(session); e != nil {
+		t.Fatal(e)
+	}
+	r := req("/test/v1/prepare", token, input{Request: payload})
+	r.Header.Set("Cookie", auth.SessionCookie+"="+token)
+	r.RemoteAddr = "198.51.100.40:4242"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatal("legacy browser could not bind device", w.Code, w.Body.String())
+	}
+	bound, _ := u.CurrentSession(token)
+	if bound.DeviceBindingHash == "" {
+		t.Fatal("device binding not saved")
+	}
+	found := false
+	for _, c := range w.Result().Cookies() {
+		if c.Name == auth.DeviceCookie {
+			found = true
+			if !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteStrictMode {
+				t.Fatal("unsafe device cookie")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("device cookie not issued")
+	}
+	r = req("/test/v1/prepare", token, input{Request: payload})
+	r.Header.Set("Cookie", auth.SessionCookie+"="+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 {
+		t.Fatal("legacy device binding could be replaced by cookie alone")
 	}
 }

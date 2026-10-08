@@ -4,7 +4,7 @@ function moneyMicros(raw,allowNegative=false){
  if(!pattern.test(value))throw new Error('金额最多支持 6 位小数，请不要使用科学计数法。');const sign=value.startsWith('-')?-1n:1n;const [whole,fraction='']=value.replace(/^-/,'').split('.');const number=sign*(BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0')));if(number>1000000000000000n||number< -1000000000000000n)throw new Error('金额超出允许范围');return Number(number);
 }
 const moneyText=value=>(Number(value||0)/1000000).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:6});
-function authenticationFields(){return `<label class="field"><span class="field-label">验证方式</span><select name="confirmation_method" data-passkey-choice><option value="password">密码确认</option><option value="passkey">通行密钥确认</option></select></label><p class="field-hint" data-passkey-hint hidden>提交时使用已绑定的通行密钥确认此操作。</p><label class="field"><span class="field-label">当前管理员密码</span><input type="password" name="current_password" data-password-confirm autocomplete="current-password" maxlength="72" required></label><div data-captcha></div>`;}
+function authenticationFields(){return `<p class="field-hint" data-confirmation-hint>按用户中心设置的确认方式验证。</p><label class="field"><span class="field-label">当前密码</span><input type="password" name="current_password" data-password-confirm autocomplete="current-password" maxlength="72" required></label><div data-captcha></div>`;}
 
 async function mountAccountCaptcha(root,action='sensitive'){
  if(action==='sensitive'||action==='oauth')return {value:()=>'',reset:()=>{}};

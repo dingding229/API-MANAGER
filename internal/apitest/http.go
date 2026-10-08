@@ -8,6 +8,7 @@ import (
 	"api-manager/internal/model"
 	"api-manager/internal/ratelimit"
 	"api-manager/internal/store"
+	"api-manager/internal/user"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -85,8 +86,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := httpx.Client(r)
-	agent := r.UserAgent()
-	if session.LoginIP == "" || session.LoginIP != client.IP || session.UserAgent != agent || len(agent) > 512 {
+	agent := user.NormalizedAgent(r.UserAgent())
+	if session.DeviceBindingHash == "" && r.URL.Path == "/test/v1/prepare" && session.UserAgent == agent && agent != "" && session.LoginIP == client.IP && session.LoginIP != "" {
+		if st, ok := h.store.(store.DeviceBindingStore); ok {
+			binding, e := auth.AssignDevice(r)
+			if e != nil || st.BindSessionDevice(r.Context(), session.Hash, u.ID, agent, binding) != nil {
+				reply(w, 403, "设备确认已变化，请刷新后重试。")
+				return
+			}
+			session.DeviceBindingHash = binding
+			auth.SetDeviceCookie(w, r, true)
+		}
+	}
+	deviceBound := session.DeviceBindingHash != ""
+	if (deviceBound && (!auth.DeviceMatches(r, session.DeviceBindingHash) && auth.HashAPIKey(auth.NewDeviceToken(r)) != session.DeviceBindingHash || !user.SameBrowserDevice(session.UserAgent, agent))) || (!deviceBound && (session.LoginIP == "" || session.LoginIP != client.IP || session.UserAgent != agent)) {
 		h.users.RecordAudit(audit.Actor{ID: u.ID, Type: "user", Email: u.Username}, r, "api.test.denied", "api_test", "", 403, map[string]any{"reason": "source_changed"})
 		reply(w, 403, "登录设备或来源已变化，请重新登录后测试。")
 		return

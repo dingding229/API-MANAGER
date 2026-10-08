@@ -272,7 +272,8 @@ type AuditLogPage struct {
 }
 
 type Session struct {
-	AuthRevision int64 `json:"-"`
+	DeviceBindingHash string `json:"-"`
+	AuthRevision      int64  `json:"-"`
 	// Creation-only guards prevent a login verified against old credentials from
 	// creating a usable session after a concurrent rename or password reset.
 	AuthenticatedEmail        string    `json:"-"`

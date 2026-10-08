@@ -184,6 +184,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.identities(w, r, u)
 		return
 	}
+	if path == "/account/v1/confirmation-settings" {
+		s.confirmationSettings(w, r, u, cfg)
+		return
+	}
 	if path == "/account/v1/me" && r.Method == "GET" {
 		a, e := s.accounts.Account(r.Context(), u.ID)
 		if e != nil {
@@ -196,7 +200,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return a.TimeZone
 			}
 			return s.siteInfo().TimeZone
-		}(), "personal_time_zone": a.TimeZone, "levels": roles, "permissions": s.store.GetUserPermissions(u.ID)})
+		}(), "personal_time_zone": a.TimeZone, "confirmation_method": func() string {
+			if st, ok := s.store.(store.ConfirmationStore); ok {
+				method, e := st.ConfirmationMethod(r.Context(), u.ID)
+				if e == nil {
+					return method
+				}
+			}
+			return "password"
+		}(), "levels": roles, "permissions": s.store.GetUserPermissions(u.ID)})
 		return
 	}
 	if path == "/account/v1/basic" && r.Method == "PUT" {
@@ -515,7 +527,7 @@ func (s *Service) totp(w http.ResponseWriter, r *http.Request, u model.User, cfg
 		return
 	}
 	if !auth.PasskeyConfirmed(r.Context(), u.ID) {
-		if _, err := s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
+		if err := s.verifyConfirmation(r, u, req.CurrentPassword); err != nil {
 			write(w, 403, map[string]string{"error": "当前密码不正确"})
 			return
 		}

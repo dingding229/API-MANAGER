@@ -335,7 +335,15 @@ func (s *Service) StartSession(user model.User, r *http.Request) (model.User, st
 		info = httpx.Client(r)
 		agent = cleanAgent(r.UserAgent())
 	}
-	if err := sessions.CreateSession(model.Session{ID: ids.NewUUID(), CreatedAt: created, LastSeenAt: created, LoginIP: info.IP, LastIP: info.IP, PeerIP: info.PeerIP, IPSource: info.Source, UserAgent: agent, Device: deviceLabel(agent), Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedEmail: user.Email, AuthRevision: user.AuthRevision, AuthenticatedUsername: user.Username, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
+	binding := ""
+	var err error
+	if r != nil {
+		binding, err = auth.AssignDevice(r)
+		if err != nil {
+			return model.User{}, "", err
+		}
+	}
+	if err := sessions.CreateSession(model.Session{DeviceBindingHash: binding, ID: ids.NewUUID(), CreatedAt: created, LastSeenAt: created, LoginIP: info.IP, LastIP: info.IP, PeerIP: info.PeerIP, IPSource: info.Source, UserAgent: agent, Device: deviceLabel(agent), Hash: auth.HashAPIKey(token), UserID: user.ID, ExpiresAt: time.Now().Add(s.ttl), AuthenticatedEmail: user.Email, AuthRevision: user.AuthRevision, AuthenticatedUsername: user.Username, AuthenticatedPasswordHash: user.PasswordHash}); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return model.User{}, "", ErrInvalidCredentials
 		}

@@ -1,6 +1,6 @@
 # 插件开发规范
 
-本文说明 API Manager 当前实现的 WebAssembly 插件契约，适用于 `v0.3.45` 的插件运行边界。前面的基础示例不需要网络或持久化。第 11 节另提供受控网络与插件会话接口。
+本文说明 API Manager 当前实现的 WebAssembly 插件契约，适用于 `v0.3.46` 的插件运行边界。前面的基础示例不需要网络或持久化。第 11 节另提供受控网络与插件会话接口。
 
 **先明确三件事：**
 
@@ -81,6 +81,35 @@ routes:
     method: GET
     path: /api/hello
     auth_mode: api_key
+    description: 返回问候内容。
+    parameters_schema:
+      type: object
+      additionalProperties: false
+      required: [path, query, header]
+      properties:
+        path:
+          type: object
+          description: 路径参数，无参数。
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          description: 查询参数。
+          properties:
+            name:
+              type: string
+              description: 称呼，省略时使用默认称呼。
+              maxLength: 80
+              examples: [Alice]
+          additionalProperties: false
+        header:
+          type: object
+          description: 无自定义请求头，允许标准 HTTP 请求头。
+          properties: {}
+          additionalProperties: true
+    request_schema:
+      type: 'null'
+      description: 不发送请求正文。
     example_query:
       name: Alice
 settings_schema:
@@ -558,6 +587,34 @@ capabilities: [network, session_storage]
 limits:
   timeout_ms: 5000
   memory_mb: 64
+routes:
+  - name: 插件会话示例
+    method: GET
+    path: /api/host-session-demo
+    auth_mode: api_key
+    description: 演示受控会话与外部请求，不返回外部登录秘密。
+    parameters_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        path:
+          type: object
+          description: 无路径参数。
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          description: 无查询参数。
+          properties: {}
+          additionalProperties: false
+        header:
+          type: object
+          description: 无自定义请求头。
+          properties: {}
+          additionalProperties: true
+    request_schema:
+      type: 'null'
+      description: 不发送正文。
 ```
 
 超级管理员在“插件 → 当前版本 → 能力权限”独立设置：
@@ -749,3 +806,14 @@ func main(){}
 | `internal/model/plugin_cache.go` | 缓存配置与大小限制。 |
 
 Go 工具链的 WebAssembly reactor 与 `go:wasmexport` 支持可参见 [Go 官方发布说明](https://go.dev/doc/go1.24#wasm)。该链接说明编译器能力，不代表本项目已开放 WASI 的网络、文件或数据库能力。
+
+
+## 15. 严格请求参数与插件更新
+
+新上传、安装和更新的包必须声明至少一个 `routes` 项。每个接口均须提供 `parameters_schema` 和 `request_schema`；无参数也不能省略。参数结构只包含显式的 `path`、`query`、`header` 三个对象，路径与查询必须拒绝未知字段；每个参数必须说明类型和用途。路径模板中的占位符必须全部声明，不能多声明不存在的路径参数。无正文的接口使用 `request_schema: {type: 'null'}`。不允许 `$ref`、`$dynamicRef`、外部结构加载或过深的结构。
+
+通过插件创建接口时，主程序根据插件名称、路径和请求方式选择声明，自动保存参数校验与说明，后台补填值不能替换声明。同一路径多种方法的参数结构必须一致，避免拆成多个含糊接口。公开文档和在线测试读取这些已保存的插件结构。
+
+在“已安装插件 → 更新”上传同名的新版本清单和 WASM。插件编号、设置、能力授权、持久化会话及计费配置保留；已绑定接口同步新参数说明。新版本移除已绑定路由、缺少参数声明、结构不兼容或无法编译时会拒绝更新，旧运行版本继续工作。旧模块在正在执行的调用完成后释放，不会为更新而中断其他接口。
+
+旧插件没有参数声明时不会被静默补上假说明；新安装或重新启用会被拒绝。请先按本规范发布带完整声明的新版本。更新后保留旧包目录用于人工回退与审计，不覆盖历史包。

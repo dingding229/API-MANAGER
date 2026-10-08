@@ -21,10 +21,12 @@ func testingSecure(r *http.Request) bool {
 }
 func setTestingCookie(w http.ResponseWriter, r *http.Request, token string, production bool) {
 	clearLegacyTestingCookie(w, r, production)
+	auth.SetDeviceCookie(w, r, production)
 	// #nosec G124 -- Secure is always true in production; plaintext cookies are permitted only for explicitly non-production HTTP previews. HttpOnly and SameSiteStrict are mandatory.
 	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})
 }
 func clearTestingCookie(w http.ResponseWriter, r *http.Request, production bool) {
+	http.SetCookie(w, &http.Cookie{Name: auth.DeviceCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	clearLegacyTestingCookie(w, r, production)
 	// #nosec G124 -- Secure is always true in production; plaintext cookies are permitted only for explicitly non-production HTTP previews. HttpOnly and SameSiteStrict are mandatory.
 	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: production || testingSecure(r), SameSite: http.SameSiteStrictMode})

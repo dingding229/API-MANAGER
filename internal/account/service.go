@@ -317,7 +317,7 @@ func (s *Service) reauthenticateAction(r *http.Request, u model.User, req payloa
 		return nil
 	}
 	var err error
-	if _, err = s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
+	if err = s.verifyConfirmation(r, u, req.CurrentPassword); err != nil {
 		return err
 	}
 	if strings.HasPrefix(r.URL.Path, "/account/v1/admin/") {

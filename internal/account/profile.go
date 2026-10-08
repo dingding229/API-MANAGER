@@ -2,6 +2,7 @@ package account
 
 import (
 	"api-manager/internal/model"
+	"api-manager/internal/store"
 	"api-manager/internal/user"
 	"context"
 	"fmt"
@@ -18,6 +19,17 @@ func (s *Service) profileGuard(actorID, targetID string, request model.UpdateUse
 	actor, err := s.store.GetUserByID(actorID)
 	if err != nil {
 		return user.ErrProfileForbidden
+	}
+	if !request.PasskeyConfirmed {
+		if st, ok := s.store.(store.ConfirmationStore); ok {
+			method, e := st.ConfirmationMethod(ctx, actorID)
+			if e != nil {
+				return e
+			}
+			if method == "passkey" {
+				return user.ErrCurrentPassword
+			}
+		}
 	}
 	if actorID != targetID && !request.PasskeyConfirmed {
 		if _, err := s.users.VerifyPassword(actor.Username, request.CurrentPassword); err != nil {

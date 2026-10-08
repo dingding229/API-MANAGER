@@ -239,6 +239,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.publishPluginLibrary(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/admin/v1/plugin-library/install":
 		a.installPluginLibrary(w, r)
+	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/update"):
+		a.updateManagedPlugin(w, r)
 	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/status"):
 		a.updatePluginStatus(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/"):
@@ -398,6 +400,12 @@ func (a *Admin) createAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Method = normalizeAPIMethod(request.Method)
+	if request.Plugin != "" {
+		if err := a.applyPluginContract(&request); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -434,6 +442,12 @@ func (a *Admin) updateAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request.Method = normalizeAPIMethod(request.Method)
+	if request.Plugin != "" {
+		if err := a.applyPluginContract(&request); err != nil {
+			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	if err := validateAPIRequest(request, a.productionMode); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

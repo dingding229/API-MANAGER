@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"api-manager/internal/ids"
@@ -36,6 +37,8 @@ type PluginStore interface {
 }
 
 type Manager struct {
+	compileMu             sync.Mutex
+	changeMu              sync.Mutex
 	settingsKey           string
 	store                 PluginStore
 	registry              *Registry
@@ -88,6 +91,9 @@ func (m *Manager) upload(ctx context.Context, manifestBytes, wasmBytes []byte) (
 	if err != nil {
 		return model.Plugin{}, fmt.Errorf("%w: %v", ErrInvalidPackage, err)
 	}
+	if err = ValidateRequestContracts(manifest); err != nil {
+		return model.Plugin{}, fmt.Errorf("%w: %v", ErrInvalidPackage, err)
+	}
 	if !safePluginComponent.MatchString(manifest.Name) || !safePluginComponent.MatchString(manifest.Version) {
 		return model.Plugin{}, fmt.Errorf("%w: plugin name and version may contain only letters, digits, dots, underscores, and hyphens", ErrInvalidPackage)
 	}
@@ -117,7 +123,7 @@ func (m *Manager) upload(ctx context.Context, manifestBytes, wasmBytes []byte) (
 	if err := os.WriteFile(filepath.Join(staging, manifest.Entrypoint), wasmBytes, 0o600); err != nil {
 		return model.Plugin{}, fmt.Errorf("write wasm module: %w", err)
 	}
-	if err := validateWASMDirectory(ctx, staging); err != nil {
+	if err := m.validateWASMDirectory(ctx, staging); err != nil {
 		return model.Plugin{}, fmt.Errorf("%w: %v", ErrInvalidPackage, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o750); err != nil {
@@ -141,6 +147,8 @@ func (m *Manager) upload(ctx context.Context, manifestBytes, wasmBytes []byte) (
 }
 
 func (m *Manager) Enable(ctx context.Context, id string) (model.Plugin, error) {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
 	item, err := m.store.GetPlugin(id)
 	if err != nil {
 		return model.Plugin{}, err
@@ -157,6 +165,9 @@ func (m *Manager) Enable(ctx context.Context, id string) (model.Plugin, error) {
 	}
 	manifest, err := ParseManifest(manifestBytes)
 	if err != nil {
+		return model.Plugin{}, err
+	}
+	if err = ValidateRequestContracts(manifest); err != nil {
 		return model.Plugin{}, err
 	}
 	if hasCapability(manifest, "database_write") && !m.databaseWritesEnabled {
@@ -181,6 +192,8 @@ func (m *Manager) Enable(ctx context.Context, id string) (model.Plugin, error) {
 }
 
 func (m *Manager) Disable(id string) (model.Plugin, error) {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
 	item, err := m.store.GetPlugin(id)
 	if err != nil {
 		return model.Plugin{}, err
@@ -195,6 +208,8 @@ func (m *Manager) Disable(id string) (model.Plugin, error) {
 }
 
 func (m *Manager) Delete(id string) (model.Plugin, error) {
+	m.changeMu.Lock()
+	defer m.changeMu.Unlock()
 	item, err := m.store.GetPlugin(id)
 	if err != nil {
 		return model.Plugin{}, err
@@ -225,6 +240,8 @@ func (m *Manager) LoadEnabled(ctx context.Context) error {
 			manifest, parseErr := ParseManifest(manifestBytes)
 			if parseErr != nil {
 				err = parseErr
+			} else if contractErr := ValidateRequestContracts(manifest); contractErr != nil {
+				err = contractErr
 			} else if hasCapability(manifest, "database_write") && !m.databaseWritesEnabled {
 				err = errors.New("plugin requests database_write but plugin database writes are disabled")
 			}
@@ -360,8 +377,13 @@ func jsonEqual(a, b []byte) bool {
 	return string(encodedLeft) == string(encodedRight)
 }
 
-func validateWASMDirectory(ctx context.Context, directory string) error {
+func (m *Manager) validateWASMDirectory(ctx context.Context, directory string) error {
+	m.compileMu.Lock()
+	defer m.compileMu.Unlock()
 	registry := NewRegistry()
+	if m.registry != nil {
+		registry.cache = m.registry.cache
+	}
 	defer registry.Close(context.Background())
 	if err := registry.LoadWASMDirectory(ctx, directory); err != nil {
 		return fmt.Errorf("validate WASM plugin: %w", err)

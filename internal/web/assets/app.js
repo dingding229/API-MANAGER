@@ -839,7 +839,7 @@ async function renderPlugins() {
       can('api.read') ? api('/admin/v1/apis') : Promise.resolve([]),
       can('plugin.read') ? api('/admin/v1/plugin-library') : Promise.resolve([]),
     ]);
-    const managed = result.managed || [];
+    const managed = result.managed || [];state.cache.managedPlugins=managed;
     // Versions share a plugin name and the same API routes; show usage only once per name.
     const unique = [...new Map(managed.map(item => [item.name, managed.find(version => version.name === item.name && version.enabled) || item])).values()];
     const usage = unique.map(item => pluginUsage(item, apis)).join('') || '<div class="plugin-empty">还没有托管插件。上传并启用 WASM 插件后，可以在这里配置调用路由。</div>';
@@ -869,6 +869,7 @@ async function renderPlugins() {
         </section>
       </div>`;
     if ($('#plugin-upload-form')) $('#plugin-upload-form').onsubmit = uploadPlugin;
+    $$('#page [data-plugin-update]').forEach(button=>button.onclick=()=>openPluginUpdate(button.dataset.pluginUpdate));
     $$('#page [data-plugin-runtime]').forEach(b=>b.onclick=()=>openPluginRuntime(b.dataset.pluginRuntime));
     $$('#page [data-plugin-settings]').forEach(b=>b.onclick=()=>openPluginSettings(b.dataset.pluginSettings));
     $$('#page [data-plugin-status]').forEach(button => button.onclick = () => setPluginStatus(button.dataset.pluginStatus, button.dataset.enabled === 'true'));
@@ -882,6 +883,7 @@ async function renderPlugins() {
 
 async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode = 'api_key', title = '') {
   if (!can('api.write')) return;
+  const managed=(state.cache.managedPlugins||[]).find(item=>item.name===pluginName);let spec=managed?.manifest;if(typeof spec==='string'){try{spec=JSON.parse(spec)}catch{spec=null}}const route=spec?.routes?.find(r=>r.path===path&&r.method===method);if(!route?.parameters_schema||!route?.request_schema){notice('插件未声明完整请求参数，不能生成接口');return}
   state.page = 'apis';
   await renderPage();
   const form = $('#api-form');
@@ -889,11 +891,13 @@ async function openPluginRouteDraft(pluginName, path, method = 'GET', authMode =
   form.elements.name.value = title || `${pluginName} · ${path.split('/').pop()}`;
   form.querySelectorAll('input[name="methods"]').forEach(input => { input.checked = input.value === method; });
   form.elements.auth_mode.value = authMode === 'none' ? 'none' : 'api_key';
-  form.elements.path.value = path;
+  form.elements.path.value = path;form.elements.path.dispatchEvent(new Event('input'));
   form.elements.plugin.value = pluginName;
   form.elements.plugin.dispatchEvent(new Event('input'));
+  for(const key of ['parameters_schema','request_schema','response_schema']){if(form.elements[key]){form.elements[key].value=JSON.stringify(route[key]||{},null,2);form.elements[key].readOnly=true}}
+  form.elements.description.value=route.description||'';
   form.scrollIntoView({behavior:'smooth', block:'start'});
-  notice('已预填路径和插件名称；确认后保存草稿，再点击“发布”。', true);
+  notice('已预填路径和插件名称；参数说明已从插件载入；确认后保存草稿，再点击“发布”。', true);
 }
 
 function shellQuote(value) { return "'" + String(value).replaceAll("'", "'\"'\"'") + "'"; }
@@ -969,11 +973,12 @@ async function installPluginLibrary(name, version) {
 }
 
 function pluginRow(item, library = []) {
+  let manifest=item.manifest||{};if(typeof manifest==='string'){try{manifest=JSON.parse(manifest)}catch{manifest={}}};const declared=Array.isArray(manifest.routes)&&manifest.routes.length>0&&manifest.routes.every(route=>route.parameters_schema&&route.request_schema);
   const action = item.enabled ? `<button class="secondary" data-plugin-status="${esc(item.id)}" data-enabled="false">禁用</button>` : `<button data-plugin-status="${esc(item.id)}" data-enabled="true">启用</button>`;
   const inLibrary = library.some(entry => entry.name === item.name && entry.version === item.version);
-  const publish = can('plugin.manage') && !inLibrary ? `<button class="secondary" data-plugin-library-publish="${esc(item.id)}">加入插件库</button>` : (inLibrary ? '<span class="small">已入库</span>' : '');
+  const publish = can('plugin.manage') && !inLibrary ? `<button class="secondary" data-plugin-library-publish="${esc(item.id)}">加入插件库</button>` : '';
   const uninstall = can('plugin.manage') ? `<button class="danger" data-plugin-uninstall="${esc(item.id)}" data-plugin-name="${esc(item.name)}" data-plugin-version="${esc(item.version)}" data-enabled="${item.enabled ? 'true' : 'false'}">卸载</button>` : '';
-  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span><span>WASM 插件</span><code title="SHA-256: ${esc(item.checksum || '')}">${esc((item.checksum || '').slice(0, 12))}…</code></div></div><div class="plugin-version-actions">${can('plugin.manage') ? action + `<button class="secondary" data-plugin-settings="${esc(item.id)}">设置</button>${(state.user?.roles||[state.user?.role]).includes('super_admin')?`<button class="secondary" data-plugin-runtime="${esc(item.id)}">能力权限</button>`:''}` + publish + uninstall : ''}</div></div>`;
+  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span>${inLibrary?'<span class="plugin-library-status">已加入插件库</span>':''}${!declared?'<span class="plugin-contract-warning">缺少参数声明，请更新</span>':''}<code title="SHA-256: ${esc(item.checksum || '')}">${esc((item.checksum || '').slice(0, 12))}…</code></div></div><div class="plugin-version-actions">${can('plugin.manage') ? '<div class="plugin-action-primary">'+action + `<button class="secondary" data-plugin-settings="${esc(item.id)}">设置</button>${(state.user?.roles||[state.user?.role]).includes('super_admin')?`<button class="secondary" data-plugin-runtime="${esc(item.id)}">能力权限</button>`:''}` +`<button class="secondary" data-plugin-update="${esc(item.id)}">更新</button></div><div class="plugin-action-secondary">`+publish+uninstall+'</div>' : ''}</div></div>`;
 }
 
 async function uploadPlugin(event) {

@@ -141,7 +141,7 @@ func (p *Postgres) CompletePasswordResetVerified(hash, newHash string, expectedR
 	if status != "active" || name != r.Username || email != r.Email || password != r.PasswordHash || !time.Now().Before(r.ExpiresAt) {
 		return "", ErrNotFound
 	}
-	if _, err = tx.Exec(ctx, `UPDATE users SET password_hash=$2,auth_revision=auth_revision+1,updated_at=NOW() WHERE id=$1`, id, newHash); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE users SET password_hash=$2,auth_revision=auth_revision+1,confirmation_method='password',updated_at=NOW() WHERE id=$1`, id, newHash); err != nil {
 		return "", err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM password_resets WHERE user_id=$1`, id); err != nil {

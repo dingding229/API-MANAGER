@@ -98,3 +98,8 @@ func (s *Service) TouchSession(token string, r *http.Request) {
 		}
 	}
 }
+
+func NormalizedAgent(value string) string { return cleanAgent(value) }
+func SameBrowserDevice(a, b string) bool {
+	return deviceLabel(cleanAgent(a)) == deviceLabel(cleanAgent(b))
+}

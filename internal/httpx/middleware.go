@@ -76,7 +76,7 @@ func LimitRequestBody(maxBodyBytes, maxPluginUploadBytes int64, next http.Handle
 			databaseUpload.ServeHTTP(w, r)
 			return
 		}
-		if r.Method == http.MethodPost && r.URL.Path == "/admin/v1/plugins" {
+		if (r.Method == http.MethodPost && r.URL.Path == "/admin/v1/plugins") || (r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/update")) {
 			pluginUpload.ServeHTTP(w, r)
 			return
 		}
