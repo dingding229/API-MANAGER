@@ -39,6 +39,9 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 	if err != nil || actor.Status != "active" {
 		return model.User{}, false, ErrProfileForbidden
 	}
+	if request.PasskeyConfirmed && request.PasskeyAuthRevision != actor.AuthRevision {
+		return model.User{}, false, ErrCurrentPassword
+	}
 	target, err := s.store.GetUserByID(userID)
 	if err != nil {
 		return model.User{}, false, err
@@ -47,7 +50,7 @@ func (s *Service) UpdateProfile(actorID, userID string, request model.UpdateUser
 		if !request.AdminOperation && !s.Can(actorID, "account.security") {
 			return model.User{}, false, ErrProfileForbidden
 		}
-		if len(request.CurrentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(target.PasswordHash), []byte(request.CurrentPassword)) != nil {
+		if !request.PasskeyConfirmed && (len(request.CurrentPassword) > 72 || bcrypt.CompareHashAndPassword([]byte(target.PasswordHash), []byte(request.CurrentPassword)) != nil) {
 			return model.User{}, false, ErrCurrentPassword
 		}
 	} else if !s.canEditProfile(actorID, target) {

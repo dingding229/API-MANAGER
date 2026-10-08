@@ -38,3 +38,16 @@
 
 .account-loading-shell{max-width:1050px;margin:64px auto;padding:0 24px;min-height:520px;grid-template-columns:1fr 1fr}.account-loading-shell .ui-placeholder-card{min-height:420px;align-content:start;gap:28px}.account-content,.account-call-logs{position:relative}.account-loading-indicator{position:absolute;top:4px;right:4px;width:28px;height:28px;display:grid;place-items:center}.account-content[aria-busy="true"] .account-empty{visibility:hidden}.account-loading-indicator .auth-spinner{width:18px;height:18px;margin:0;border-width:2px}.account-call-logs>.account-loading-indicator{top:10px;right:10px}
 @media(max-width:767px){.account-loading-shell{grid-template-columns:1fr;margin:32px auto;min-height:440px}.account-loading-shell .ui-placeholder-card:first-child{display:none}}
+
+/* Passkey controls follow the shared account form and management panel tokens. */
+.confirmation-fields{border:0;margin:0;padding:0;display:grid;gap:16px;min-inline-size:0}
+.confirmation-fields legend{font-size:.9rem;font-weight:650;margin-bottom:12px}
+.passkey-login-button{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;margin-top:14px}
+.security-passkeys{min-width:0;grid-column:1/-1}
+.security-passkeys .security-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.security-passkeys .security-card-heading .account-status{flex-shrink:0}
+.security-passkeys .security-card-heading h2{margin-bottom:8px}
+.security-passkeys .security-card-heading p{margin:0;color:var(--muted)}
+.passkey-list{display:grid;gap:8px;margin:16px 0}
+.security-passkeys .security-setting-row>div{min-width:0;overflow-wrap:anywhere}
+.security-passkeys .account-actions button{display:inline-flex;gap:8px;align-items:center;justify-content:center}

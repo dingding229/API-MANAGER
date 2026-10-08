@@ -69,5 +69,5 @@ func StripSessionSetCookies(headers http.Header) {
 }
 
 func managementCookie(name string) bool {
-	return name == "api_manager_admin_entry" || name == SessionCookie || name == "api_manager_test_session" || name == "api_manager_mfa" || strings.HasPrefix(name, "api_manager_oauth_")
+	return name == "api_manager_admin_entry" || name == SessionCookie || name == "api_manager_test_session" || name == "api_manager_mfa" || strings.HasPrefix(name, "api_manager_oauth_") || strings.HasPrefix(name, "api_manager_passkey_")
 }

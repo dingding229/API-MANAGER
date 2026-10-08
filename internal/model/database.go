@@ -16,12 +16,13 @@ type DatabaseTable struct {
 	IndexBytes  int64    `json:"index_bytes"`
 }
 type DatabaseRows struct {
-	Table    string           `json:"table"`
-	Columns  []string         `json:"columns"`
-	Items    []map[string]any `json:"items"`
-	Page     int              `json:"page"`
-	PageSize int              `json:"page_size"`
-	HasMore  bool             `json:"has_more"`
+	Primary  []map[string]json.RawMessage `json:"-"`
+	Table    string                       `json:"table"`
+	Columns  []string                     `json:"columns"`
+	Items    []map[string]any             `json:"items"`
+	Page     int                          `json:"page"`
+	PageSize int                          `json:"page_size"`
+	HasMore  bool                         `json:"has_more"`
 }
 type DatabaseSnapshotTable struct {
 	Name    string            `json:"name"`

@@ -94,3 +94,24 @@ func SharedStyles() http.Handler {
 		}
 	})
 }
+
+// PasskeyClient is a public, embedded script shared by both UI surfaces.
+func PasskeyClient() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" && r.Method != "HEAD" {
+			w.WriteHeader(405)
+			return
+		}
+		data, e := assets.ReadFile("assets/passkeys.js")
+		if e != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-cache")
+		if r.Method == "GET" {
+			_, _ = w.Write(data)
+		}
+	})
+}

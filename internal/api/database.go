@@ -53,7 +53,7 @@ func (a *Admin) ConfigureDatabaseManagement(dir string, restart func(), maintena
 	a.database.restart = restart
 }
 func (a *Admin) databasePassword(r *http.Request, password string) bool {
-	return a.credentialGuard != nil && password != "" && a.credentialGuard(r, password, "") == nil
+	return a.credentialGuard != nil && a.credentialGuard(r, password, "") == nil
 }
 func (a *Admin) databaseFile(id string) (string, error) {
 	if !databaseBackupName.MatchString(id) || a.database.dir == "" {
@@ -205,6 +205,10 @@ func (a *Admin) databaseHandler(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			writeJSON(w, 400, map[string]string{"error": "表名或页码无效"})
 		} else {
+			if e = a.attachDatabaseLocators(r, &data); e != nil {
+				writeJSON(w, 503, nil)
+				return
+			}
 			writeJSON(w, 200, data)
 		}
 		return

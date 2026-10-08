@@ -19,12 +19,12 @@ func (s *Service) profileGuard(actorID, targetID string, request model.UpdateUse
 	if err != nil {
 		return user.ErrProfileForbidden
 	}
-	if actorID != targetID {
+	if actorID != targetID && !request.PasskeyConfirmed {
 		if _, err := s.users.VerifyPassword(actor.Username, request.CurrentPassword); err != nil {
 			return user.ErrCurrentPassword
 		}
 	}
-	if !request.AdminOperation {
+	if !request.AdminOperation && !request.PasskeyConfirmed {
 		if err := s.checkMFA(ctx, actorID, request.TOTPCode); err != nil {
 			return fmt.Errorf("%w: 双重验证失败", user.ErrProfileForbidden)
 		}

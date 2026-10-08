@@ -156,6 +156,9 @@ func (s *Service) ReauthenticateAdmin(r *http.Request, password, token string) e
 	if e != nil {
 		return e
 	}
+	if auth.PasskeyConfirmed(r.Context(), u.ID) {
+		return nil
+	}
 	_, e = s.users.VerifyPassword(u.Username, password)
 	return e
 }

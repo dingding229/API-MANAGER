@@ -70,6 +70,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, map[string]any{"time_zone": s.siteInfo().TimeZone, "website_url": s.siteInfo().WebsiteURL, "admin_path": s.adminPath, "registration": cfg.RegistrationEnabled && s.mail.MailAvailable(), "registration_enabled": cfg.RegistrationEnabled, "mail_available": s.mail.MailAvailable(), "allowed_email_domains": cfg.AllowedEmailDomains, "email_login": cfg.EmailLoginEnabled && s.mail.MailAvailable(), "github": cfg.GitHubEnabled, "google": cfg.GoogleEnabled, "telegram": cfg.TelegramEnabled, "turnstile": cfg.TurnstileEnabled, "turnstile_site_key": cfg.TurnstileSiteKey})
 		return
 	}
+	if strings.HasPrefix(path, "/account/v1/passkeys") {
+		s.passkeys(w, r, cfg)
+		return
+	}
 	if strings.HasPrefix(path, "/account/v1/onboarding") {
 		s.onboarding(w, r, cfg)
 		return
@@ -506,13 +510,15 @@ func (s *Service) totp(w http.ResponseWriter, r *http.Request, u model.User, cfg
 	if !read(w, r, &req) {
 		return
 	}
-	if err := s.verifyTurnstile(r.Context(), r, cfg, req.TurnstileToken, "sensitive"); err != nil {
+	if err := s.Guard(r, "sensitive", req.TurnstileToken); err != nil {
 		write(w, 403, map[string]string{"error": err.Error()})
 		return
 	}
-	if _, err := s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
-		write(w, 403, map[string]string{"error": "当前密码不正确"})
-		return
+	if !auth.PasskeyConfirmed(r.Context(), u.ID) {
+		if _, err := s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
+			write(w, 403, map[string]string{"error": "当前密码不正确"})
+			return
+		}
 	}
 	a, err := s.accounts.Account(r.Context(), u.ID)
 	if err != nil {
@@ -569,7 +575,7 @@ func (s *Service) totp(w http.ResponseWriter, r *http.Request, u model.User, cfg
 		return
 	}
 	if req.Purpose == "disable" {
-		if a.TOTPSecret == "" || s.checkMFA(r.Context(), u.ID, req.TOTPCode) != nil {
+		if a.TOTPSecret == "" || (!auth.PasskeyConfirmed(r.Context(), u.ID) && s.checkMFA(r.Context(), u.ID, req.TOTPCode) != nil) {
 			write(w, 403, map[string]string{"error": "请提供有效动态码或恢复码"})
 			return
 		}

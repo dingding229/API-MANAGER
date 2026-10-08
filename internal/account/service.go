@@ -259,6 +259,17 @@ func auditActor(u model.User) audit.Actor {
 func (s *Service) SetLimiter(l ratelimit.Limiter) { s.limiter = l }
 
 func (s *Service) Guard(r *http.Request, action, token string) error {
+	session, _ := auth.SessionToken(r)
+	var u model.User
+	var e error
+	if s.users != nil {
+		u, e = s.users.ValidateSession(session)
+	} else {
+		e = errors.New("user service unavailable")
+	}
+	if e == nil && auth.PasskeyConfirmed(r.Context(), u.ID) {
+		return nil
+	}
 	if action == "sensitive" || action == "oauth" {
 		return nil
 	}
@@ -302,6 +313,9 @@ func (s *Service) reauthenticate(r *http.Request, u model.User, req payload) err
 	return s.reauthenticateAction(r, u, req, "sensitive")
 }
 func (s *Service) reauthenticateAction(r *http.Request, u model.User, req payload, action string) error {
+	if auth.PasskeyConfirmed(r.Context(), u.ID) {
+		return nil
+	}
 	var err error
 	if _, err = s.users.VerifyPassword(u.Username, req.CurrentPassword); err != nil {
 		return err

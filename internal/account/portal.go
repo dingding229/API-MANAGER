@@ -320,7 +320,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 		if !read(w, r, &request) {
 			return
 		}
-		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil {
+		if e := s.ReauthenticateAdmin(r, request.CurrentPassword, request.TurnstileToken); e != nil {
 			write(w, 403, map[string]string{"error": "请验证当前管理员密码"})
 			return
 		}
@@ -429,7 +429,7 @@ func (s *Service) admin(w http.ResponseWriter, r *http.Request, u model.User, cf
 			write(w, 400, map[string]string{"error": "金额、原因和操作编号必填"})
 			return
 		}
-		if _, e := s.users.VerifyPassword(u.Username, request.CurrentPassword); e != nil {
+		if e := s.ReauthenticateAdmin(r, request.CurrentPassword, request.TurnstileToken); e != nil {
 			write(w, 403, map[string]string{"error": "重新验证失败"})
 			return
 		}

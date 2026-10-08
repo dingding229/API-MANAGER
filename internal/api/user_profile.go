@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"api-manager/internal/audit"
+	"api-manager/internal/auth"
 	"api-manager/internal/user"
 )
 
@@ -32,6 +33,13 @@ func (a *Admin) updateUserProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	request.AdminOperation = true
+	request.PasskeyConfirmed = auth.PasskeyConfirmed(r.Context(), actor.ID)
+	actorUser, e := a.store.GetUserByID(actor.ID)
+	if e != nil {
+		writeJSON(w, 401, nil)
+		return
+	}
+	request.PasskeyAuthRevision = actorUser.AuthRevision
 	updated, changed, err := a.userManager.UpdateProfile(actor.ID, id, request)
 	if err != nil {
 		user.WriteProfileError(w, err)

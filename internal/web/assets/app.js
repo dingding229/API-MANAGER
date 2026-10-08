@@ -82,7 +82,9 @@ async function api(path, options = {}) {
   const requestEpoch=authEpoch;
   const headers = {'Content-Type': 'application/json', ...(options.headers || {})};
   headers['X-API-Request'] = '1';
-  const response = await fetch(path, {...options, headers, credentials:'same-origin', cache:'no-store',signal:options.signal||((path.startsWith('/auth/')||path.startsWith('/test/'))?AbortSignal.timeout(10000):undefined)});
+  const init = {...options, headers, credentials:'same-origin', cache:'no-store',signal:options.signal||((path.startsWith('/auth/')||path.startsWith('/test/'))?AbortSignal.timeout(10000):undefined)};
+  const request=window.APIManagerPasskeys?await window.APIManagerPasskeys.prepare(path,init):new Request(path,init);
+  const response=await fetch(request);
   const body = await response.json().catch(() => ({}));
   if (response.status === 401 && state.user && requestEpoch===authEpoch) { clearSession(); const expired=new Error('登录已过期，请重新登录');expired.status=401;throw expired; }
   if (!response.ok) {

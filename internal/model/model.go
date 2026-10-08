@@ -144,15 +144,17 @@ type CreateUserRequest struct {
 // UpdateUserProfileRequest never accepts role, status, or password hashes.
 // Omitted password preserves the existing password; an explicit empty one is invalid.
 type UpdateUserProfileRequest struct {
-	AdminOperation   bool    `json:"-"`
-	Username         *string `json:"username,omitempty"`
-	Email            *string `json:"email,omitempty"`
-	Password         *string `json:"password,omitempty"`
-	CurrentPassword  string  `json:"current_password,omitempty"`
-	VerificationID   string  `json:"verification_id,omitempty"`
-	VerificationCode string  `json:"verification_code,omitempty"`
-	TurnstileToken   string  `json:"turnstile_token,omitempty"`
-	TOTPCode         string  `json:"totp_code,omitempty"`
+	AdminOperation      bool    `json:"-"`
+	PasskeyConfirmed    bool    `json:"-"`
+	PasskeyAuthRevision int64   `json:"-"`
+	Username            *string `json:"username,omitempty"`
+	Email               *string `json:"email,omitempty"`
+	Password            *string `json:"password,omitempty"`
+	CurrentPassword     string  `json:"current_password,omitempty"`
+	VerificationID      string  `json:"verification_id,omitempty"`
+	VerificationCode    string  `json:"verification_code,omitempty"`
+	TurnstileToken      string  `json:"turnstile_token,omitempty"`
+	TOTPCode            string  `json:"totp_code,omitempty"`
 }
 
 // UserProfileUpdate is an internal optimistic guard for an atomic credential update.

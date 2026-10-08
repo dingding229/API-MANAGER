@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"api-manager/internal/audit"
+	"api-manager/internal/auth"
 	"api-manager/internal/model"
 	"api-manager/internal/store"
 )
@@ -62,6 +63,8 @@ func (h *HTTP) updateOwnProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	request.PasskeyConfirmed = auth.PasskeyConfirmed(r.Context(), actor.ID)
+	request.PasskeyAuthRevision = actor.AuthRevision
 	updated, changed, err := h.service.UpdateProfile(actor.ID, actor.ID, request)
 	if err != nil {
 		WriteProfileError(w, err)

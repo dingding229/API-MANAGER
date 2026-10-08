@@ -269,9 +269,10 @@ func main() {
 		}
 		writeHealth(w, http.StatusOK, `{"status":"ready"}`)
 	})
+	mux.Handle("/ui/passkeys.js", web.PasskeyClient())
 	mux.Handle("/metrics", httpx.ProtectMetrics(metrics, cfg.MetricsToken))
 
-	handler := httpx.LimitRequestBody(cfg.MaxBodyBytes, cfg.PluginMaxBytes+(64<<10), mux)
+	handler := httpx.LimitRequestBody(cfg.MaxBodyBytes, cfg.PluginMaxBytes+(64<<10), accounts.ConfirmationMiddleware(mux))
 	handler = maintenance.Middleware(handler)
 	handler = httpx.ThrottleAdmin(limiter, handler)
 	handler = loggingMiddleware(logger, handler)
