@@ -162,6 +162,9 @@ func (m *Manager) Enable(ctx context.Context, id string) (model.Plugin, error) {
 	if hasCapability(manifest, "database_write") && !m.databaseWritesEnabled {
 		return model.Plugin{}, errors.New("plugin requests database_write but plugin database writes are disabled")
 	}
+	if err := m.activateRuntime(ctx, id); err != nil {
+		return model.Plugin{}, err
+	}
 	if err := m.activateSettings(ctx, id); err != nil {
 		return model.Plugin{}, err
 	}
@@ -226,7 +229,10 @@ func (m *Manager) LoadEnabled(ctx context.Context) error {
 				err = errors.New("plugin requests database_write but plugin database writes are disabled")
 			}
 			if err == nil {
-				if err = m.activateSettings(ctx, item.ID); err == nil {
+				if err = m.activateRuntime(ctx, item.ID); err == nil {
+					err = m.activateSettings(ctx, item.ID)
+				}
+				if err == nil {
 					err = m.registry.LoadWASMBytes(ctx, manifestBytes, wasmBytes)
 				}
 			}

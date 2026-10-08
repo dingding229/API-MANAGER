@@ -87,6 +87,9 @@ jobs:
           npm run build
           npm audit --omit=dev --audit-level=high
       - name: Test with race detector
+        env:
+          TEST_PLUGIN_HOST_WASM: "1"
+          TEST_PLUGIN_DOCS_WASM: "1"
         run: go test -race ./...
       - name: Test persistent billing, verification, sessions and plugin cache
         env:

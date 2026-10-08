@@ -153,6 +153,8 @@ func (a *Admin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/database/"):
 		a.databaseHandler(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/runtime") && (r.Method == "GET" || r.Method == "PUT"):
+		a.pluginRuntimePolicy(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/v1/plugins/") && strings.HasSuffix(r.URL.Path, "/settings") && (r.Method == "GET" || r.Method == "PUT"):
 		a.pluginSettings(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/admin/v1/roles/"):

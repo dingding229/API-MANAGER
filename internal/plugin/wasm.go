@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"api-manager/internal/auth"
 	"api-manager/internal/model"
 	"api-manager/internal/schema"
 	"github.com/tetratelabs/wazero"
@@ -74,7 +75,8 @@ func validRoute(r Route) error {
 }
 
 // Manifest describes a WebAssembly plugin package. The runtime purposefully
-// exposes no host filesystem, environment variables, or network imports.
+// exposes no host filesystem or environment variables. Optional network and
+// session host calls require both a declared capability and a runtime grant.
 type Manifest struct {
 	SettingsSchema map[string]any `yaml:"settings_schema,omitempty" json:"settings_schema,omitempty"`
 	ID             string         `yaml:"id" json:"id"`
@@ -103,13 +105,14 @@ type wasmHandler struct {
 }
 
 type wasmRequest struct {
-	Settings map[string]any      `json:"settings,omitempty"`
-	Method   string              `json:"method"`
-	Path     string              `json:"path"`
-	Query    map[string][]string `json:"query"`
-	Headers  map[string][]string `json:"headers"`
-	Body     string              `json:"body_base64"`
-	APIID    string              `json:"api_id"`
+	Settings        map[string]any             `json:"settings,omitempty"`
+	HostPermissions *model.PluginRuntimePolicy `json:"host_permissions,omitempty"`
+	Method          string                     `json:"method"`
+	Path            string                     `json:"path"`
+	Query           map[string][]string        `json:"query"`
+	Headers         map[string][]string        `json:"headers"`
+	Body            string                     `json:"body_base64"`
+	APIID           string                     `json:"api_id"`
 }
 
 type wasmResponse struct {
@@ -144,7 +147,7 @@ func ParseManifest(data []byte) (Manifest, error) {
 	}
 	seenCapabilities := make(map[string]bool)
 	for _, capability := range manifest.Capabilities {
-		if capability != "database_write" {
+		if capability != "database_write" && capability != "network" && capability != "session_storage" {
 			return Manifest{}, fmt.Errorf("unsupported plugin capability: %s", capability)
 		}
 		if seenCapabilities[capability] {
@@ -235,6 +238,10 @@ func (r *Registry) LoadWASMBytes(ctx context.Context, manifestBytes, wasmBytes [
 		_ = runtime.Close(ctx)
 		return fmt.Errorf("initialize restricted WASI: %w", err)
 	}
+	if err := r.instantiateHost(ctx, runtime, manifest); err != nil {
+		_ = runtime.Close(ctx)
+		return fmt.Errorf("initialize plugin host: %w", err)
+	}
 	compiled, err := runtime.CompileModule(ctx, wasmBytes)
 	if err != nil {
 		_ = runtime.Close(ctx)
@@ -286,7 +293,20 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 	if len(body) > 1<<20 {
 		return ErrRequestTooLarge
 	}
-	payload, err := json.Marshal(wasmRequest{Settings: w.registry.getSettings(w.Name()).Data, Method: request.Method, Path: request.URL.Path, Query: request.URL.Query(), Headers: request.Header, Body: base64.StdEncoding.EncodeToString(body), APIID: configuredAPI.ID})
+	headers := request.Header.Clone()
+	headers.Del("Authorization")
+	headers.Del("X-API-Key")
+	headers.Del("X-Passkey-Confirmation")
+	auth.StripUserSessionCookies(request)
+	headers.Set("Cookie", request.Header.Get("Cookie"))
+	if headers.Get("Cookie") == "" {
+		headers.Del("Cookie")
+	}
+	w.registry.mu.RLock()
+	services := w.registry.services
+	w.registry.mu.RUnlock()
+	permissions := services.snapshot(w.Name()).Policy
+	payload, err := json.Marshal(wasmRequest{HostPermissions: &permissions, Settings: w.registry.getSettings(w.Name()).Data, Method: request.Method, Path: request.URL.Path, Query: request.URL.Query(), Headers: headers, Body: base64.StdEncoding.EncodeToString(body), APIID: configuredAPI.ID})
 	if err != nil {
 		return fmt.Errorf("marshal wasm request: %w", err)
 	}
@@ -316,6 +336,7 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 	if !memory.Write(requestPtr, payload) {
 		return errors.New("wasm memory write failed")
 	}
+	ctx = context.WithValue(ctx, hostBudgetKey{}, &guestHostBudget{})
 	result, err := handle.Call(ctx, uint64(requestPtr), uint64(len(payload)))
 	if err != nil || len(result) != 1 {
 		return fmt.Errorf("wasm handle failed: %w", err)
@@ -377,5 +398,9 @@ func (w *wasmHandler) Handle(ctx context.Context, writer http.ResponseWriter, re
 var _ Handler = (*wasmHandler)(nil)
 
 func (w *wasmHandler) CacheRevision() string {
-	return w.revision + fmt.Sprint(w.registry.getSettings(w.Name()).Version)
+	w.registry.mu.RLock()
+	services := w.registry.services
+	w.registry.mu.RUnlock()
+	policy := services.snapshot(w.Name()).Policy
+	return w.revision + fmt.Sprint(w.registry.getSettings(w.Name()).Version) + ":" + fmt.Sprint(policy.Version)
 }

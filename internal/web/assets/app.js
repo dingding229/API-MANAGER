@@ -869,6 +869,7 @@ async function renderPlugins() {
         </section>
       </div>`;
     if ($('#plugin-upload-form')) $('#plugin-upload-form').onsubmit = uploadPlugin;
+    $$('#page [data-plugin-runtime]').forEach(b=>b.onclick=()=>openPluginRuntime(b.dataset.pluginRuntime));
     $$('#page [data-plugin-settings]').forEach(b=>b.onclick=()=>openPluginSettings(b.dataset.pluginSettings));
     $$('#page [data-plugin-status]').forEach(button => button.onclick = () => setPluginStatus(button.dataset.pluginStatus, button.dataset.enabled === 'true'));
     $$('#page [data-plugin-uninstall]').forEach(button => button.onclick = () => uninstallPlugin(button.dataset.pluginUninstall, button.dataset.pluginName, button.dataset.pluginVersion, button.dataset.enabled === 'true'));
@@ -972,7 +973,7 @@ function pluginRow(item, library = []) {
   const inLibrary = library.some(entry => entry.name === item.name && entry.version === item.version);
   const publish = can('plugin.manage') && !inLibrary ? `<button class="secondary" data-plugin-library-publish="${esc(item.id)}">加入插件库</button>` : (inLibrary ? '<span class="small">已入库</span>' : '');
   const uninstall = can('plugin.manage') ? `<button class="danger" data-plugin-uninstall="${esc(item.id)}" data-plugin-name="${esc(item.name)}" data-plugin-version="${esc(item.version)}" data-enabled="${item.enabled ? 'true' : 'false'}">卸载</button>` : '';
-  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span><span>WASM 插件</span><code title="SHA-256: ${esc(item.checksum || '')}">${esc((item.checksum || '').slice(0, 12))}…</code></div></div><div class="plugin-version-actions">${can('plugin.manage') ? action + `<button class="secondary" data-plugin-settings="${esc(item.id)}">设置</button>` + publish + uninstall : ''}</div></div>`;
+  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span><span>WASM 插件</span><code title="SHA-256: ${esc(item.checksum || '')}">${esc((item.checksum || '').slice(0, 12))}…</code></div></div><div class="plugin-version-actions">${can('plugin.manage') ? action + `<button class="secondary" data-plugin-settings="${esc(item.id)}">设置</button>${(state.user?.roles||[state.user?.role]).includes('super_admin')?`<button class="secondary" data-plugin-runtime="${esc(item.id)}">能力权限</button>`:''}` + publish + uninstall : ''}</div></div>`;
 }
 
 async function uploadPlugin(event) {

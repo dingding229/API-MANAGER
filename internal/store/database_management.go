@@ -17,11 +17,11 @@ import (
 const MaxDatabaseSnapshotBytes = 16 << 20
 
 // Dependency order is fixed. Request/file identifiers never become arbitrary SQL.
-var databaseTables = []string{"tenants", "users", "roles", "permissions", "user_roles", "role_permissions", "plugins", "apis", "api_credentials", "api_releases", "api_routes", "audit_logs", "plugin_data", "admin_bootstrap", "site_settings", "plans", "wallets", "wallet_ledger", "subscriptions", "usage_windows", "api_charges", "user_call_logs", "account_security", "user_passkeys", "external_identities", "authentication_settings", "retired_role_settings", "card_batches", "redeem_cards", "plugin_settings", "version_check_settings", "user_sessions", "password_resets", "account_verifications", "api_test_tickets", "plugin_response_cache"}
+var databaseTables = []string{"tenants", "users", "roles", "permissions", "user_roles", "role_permissions", "plugins", "apis", "api_credentials", "api_releases", "api_routes", "audit_logs", "plugin_data", "admin_bootstrap", "site_settings", "plans", "wallets", "wallet_ledger", "subscriptions", "usage_windows", "api_charges", "user_call_logs", "account_security", "user_passkeys", "external_identities", "authentication_settings", "retired_role_settings", "card_batches", "redeem_cards", "plugin_settings", "plugin_runtime_policies", "plugin_sessions", "version_check_settings", "user_sessions", "password_resets", "account_verifications", "api_test_tickets", "plugin_response_cache"}
 var transientDatabaseTables = map[string]bool{"user_sessions": true, "password_resets": true, "account_verifications": true, "api_test_tickets": true, "plugin_response_cache": true}
 
 // #nosec G101 -- Static Chinese labels for table names, not credentials or secret values.
-var databaseDescriptions = map[string]string{"users": "账号资料", "roles": "角色", "permissions": "权限目录", "user_roles": "用户角色", "role_permissions": "角色权限", "apis": "接口配置", "api_credentials": "调用凭证", "api_routes": "发布路由", "api_releases": "接口发布记录", "plugins": "插件", "plugin_data": "插件数据", "audit_logs": "审计日志", "user_call_logs": "调用日志", "wallets": "余额账户", "wallet_ledger": "余额流水", "subscriptions": "用户套餐", "plans": "套餐", "usage_windows": "套餐用量", "api_charges": "调用结算", "card_batches": "卡密批次", "redeem_cards": "卡密", "site_settings": "网站设置", "authentication_settings": "注册与登录设置", "account_security": "账号安全", "user_passkeys": "通行密钥", "external_identities": "授权账号", "user_sessions": "登录会话", "plugin_response_cache": "插件缓存", "plugin_settings": "插件设置", "version_check_settings": "更新设置", "tenants": "租户预留", "admin_bootstrap": "首次注册状态", "password_resets": "密码找回请求", "account_verifications": "验证请求", "api_test_tickets": "在线测试授权", "retired_role_settings": "历史角色设置"}
+var databaseDescriptions = map[string]string{"users": "账号资料", "roles": "角色", "permissions": "权限目录", "user_roles": "用户角色", "role_permissions": "角色权限", "apis": "接口配置", "api_credentials": "调用凭证", "api_routes": "发布路由", "api_releases": "接口发布记录", "plugins": "插件", "plugin_data": "插件数据", "audit_logs": "审计日志", "user_call_logs": "调用日志", "wallets": "余额账户", "wallet_ledger": "余额流水", "subscriptions": "用户套餐", "plans": "套餐", "usage_windows": "套餐用量", "api_charges": "调用结算", "card_batches": "卡密批次", "redeem_cards": "卡密", "site_settings": "网站设置", "authentication_settings": "注册与登录设置", "account_security": "账号安全", "user_passkeys": "通行密钥", "external_identities": "授权账号", "user_sessions": "登录会话", "plugin_response_cache": "插件缓存", "plugin_settings": "插件设置", "plugin_runtime_policies": "插件能力设置", "plugin_sessions": "插件会话", "version_check_settings": "更新设置", "tenants": "租户预留", "admin_bootstrap": "首次注册状态", "password_resets": "密码找回请求", "account_verifications": "验证请求", "api_test_tickets": "在线测试授权", "retired_role_settings": "历史角色设置"}
 
 func allowedDatabaseTable(name string) bool {
 	for _, v := range databaseTables {
@@ -331,6 +331,9 @@ func (p *Postgres) RestoreDatabaseSnapshot(ctx context.Context, snapshot model.D
 	}
 	// Reset the serial sequence before writing a restore receipt, including a new installation.
 	if _, e = tx.Exec(ctx, `SELECT setval(pg_get_serial_sequence('public.audit_logs','id'),GREATEST(COALESCE((SELECT MAX(id) FROM audit_logs),0),COALESCE(pg_sequence_last_value(pg_get_serial_sequence('public.audit_logs','id')::regclass),0),1),TRUE)`); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `SELECT setval('plugin_session_version_seq',GREATEST((SELECT last_value FROM plugin_session_version_seq),COALESCE((SELECT MAX(version) FROM plugin_sessions),0)+1))`); e != nil {
 		return e
 	}
 	if _, e = tx.Exec(ctx, `INSERT INTO audit_logs(actor_type,action,resource_type,details,status_code) VALUES('system','database.restore.commit','database',jsonb_build_object('snapshot_created_at',$1::text),200)`, snapshot.CreatedAt.Format(time.RFC3339)); e != nil {

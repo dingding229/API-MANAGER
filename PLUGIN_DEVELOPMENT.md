@@ -1,12 +1,12 @@
 # 插件开发规范
 
-本文说明 API Manager 当前实现的 WebAssembly 插件契约，适用于 `v0.3.41` 的插件运行边界。本文中的示例不需要读取数据库、连接网络或访问宿主文件系统。
+本文说明 API Manager 当前实现的 WebAssembly 插件契约，适用于 `v0.3.42` 的插件运行边界。前面的基础示例不需要网络或持久化。第 11 节另提供受控网络与插件会话接口。
 
 **先明确三件事：**
 
 1. 插件包是 `manifest.yaml` 和一个 `.wasm` 文件；上传、安装、启用和接口发布是不同操作。
 2. 插件实现 `memory`、`alloc`、`handle` 导出；不是通过启动 HTTP 服务器或把输出写到 stdout 返回结果。
-3. 主程序负责 API 鉴权、参数检查、计费与缓存。插件只处理传入的业务请求，不获得管理权限，也不能直接操作主程序数据库。
+3. 主程序负责 API 鉴权、参数检查、计费与缓存。插件只处理传入的业务请求，不获得管理权限，也不能直接操作主程序数据库；可在授权后使用独立的插件会话存储接口。
 
 ## 目录
 
@@ -539,27 +539,151 @@ Schema 与数据要求：
 - 缓存内容加密存储。缓存命中时返回 `X-Plugin-Cache: HIT`；参与缓存但未命中时为 `MISS`。请求不符合缓存条件时可能没有该头。
 - 缓存读写不可用时会执行插件或返回已生成结果；它不是插件数据持久化或执行结果“恰好一次”的保证。
 - 设置变更、接口变更和插件升级会改变缓存选择；管理员也可主动清理旧缓存。
-- 命中缓存仍执行鉴权、参数检查、调用计费和套餐用量检查。
+- 命中缓存仍执行鉴权、参数检查、调用计费和套餐用量检查，但不会运行插件或执行 host call。
 
-涉及写操作、随机数、实时信息或外部副作用的接口，不应仅因追求速度就开启 POST 缓存。数据库缓存与 Cloudflare/CDN 缓存独立，不能据此把鉴权或计费 HTTP 响应设为公共 CDN 缓存。
+涉及登录会话变化、外部写操作、随机数、实时信息或其他副作用的接口，应关闭接口响应缓存，或返回 `Cache-Control: no-store`，避免缓存命中跳过本次 host 操作。数据库缓存与 Cloudflare/CDN 缓存独立，不能据此把鉴权或计费 HTTP 响应设为公共 CDN 缓存。
 
-## 11. 数据库写入与网络访问
+## 11. 外部网络与插件会话
 
-当前能力边界如下：
+### 11.1 声明与授权
 
-| 能力 | 当前是否可由 WASM 使用 |
+在清单中声明需要的能力，主程序仍默认关闭。仅声明能力不会自动获得权限。请求 JSON 的 `host_permissions` 对象会说明当前授予的能力，插件也可以在自己的业务设置中进一步选择是否使用；业务设置不能放宽后台授权：
+
+```yaml
+name: host-session-demo
+version: 1.0.0
+runtime: wasm
+entrypoint: plugin.wasm
+capabilities: [network, session_storage]
+limits:
+  timeout_ms: 5000
+  memory_mb: 64
+```
+
+超级管理员在“插件 → 当前版本 → 能力权限”独立设置：
+
+| 设置 | 作用 |
 | --- | --- |
-| 读取请求与本版本 `settings` | 可以。 |
-| 返回 HTTP 状态、头和正文 | 可以，受响应限制及网关过滤约束。 |
-| 主程序自动保存响应缓存 | 可以，由接口缓存配置决定，不是插件 host call。 |
-| 直接执行 SQL / 连接 PostgreSQL、Redis | 不可以。 |
-| 通过 `database_write` 声明直接写数据库 | 不可以；当前没有为 WASM 注册数据库写入 host 函数。 |
-| `net/http`、裸 socket 等外部网络请求 | 不可以；未提供可用网络能力。 |
-| 读取宿主文件、环境变量、Docker Socket | 不可以。 |
+| 允许外部网络请求 | 只允许访问已填写的 HTTPS 来源地址；默认关闭。 |
+| 来源地址 | 精确地址，如 `https://example.com`，不含路径或通配符；可填写非默认 HTTPS 端口。 |
+| 请求超时 / 响应大小 | 单次请求最多 30 秒，响应最多 1 MiB；还受插件本次调用总超时约束。 |
+| 会话保存到数据库 | 加密保存到主程序数据库，可在程序重启后读取；默认关闭。 |
+| 会话缓存 | 在主程序内存缓存加密会话数据，不保留到下次重启；默认关闭。 |
+| 会话有效期 | 默认 3600 秒，最大 30 天；插件可为每次写入选择更短的时间。 |
+| 允许会话不自动过期 | 独立、默认关闭。只有持久化模式且已授权时可传 `ttl_seconds: 0`。 |
+| 条目与大小限制 | 每插件最多 4096 条、单条最多 256 KiB，配置的乘积不超过 64 MiB。全局内存缓存最多 64 MiB、8192 条。 |
 
-`database_write` 是当前清单解析器认识的预留声明。系统默认 `PLUGIN_DATABASE_WRITES_ENABLED=false`，带此声明的包不能启用；即使系统开关打开，当前也不会因此获得 WASM 数据库 ABI。源码中的宿主侧 `DatabaseWriter` 只是受身份、键名、JSON 和大小限制的预留边界，不是已经开放的插件导入函数。
+能力权限 HTTP 接口为 `GET /admin/v1/plugins/{plugin_id}/runtime` 和 `PUT /admin/v1/plugins/{plugin_id}/runtime`。修改需 `plugin.manage`、超级管理员身份与密码或通行密钥确认；请求为 `{"policy": {...}, "current_password": "..."}`。`policy.version` 为读取时的版本，版本冲突须刷新后重试。插件业务设置仍使用第 9 节的 `/settings`，两者不可互相覆盖。
 
-需要调用外部服务时，可使用主程序已有的上游接口功能，或设计独立业务服务。不要在文档或代码中假设 WASM 已能通过 `http.Get` 请求外网，也不要尝试绕过运行边界。
+### 11.2 Host ABI
+
+模块可以导入：
+
+```go
+//go:wasmimport api_manager host_call
+func hostCall(requestPtr, requestLen, responsePtr, responseCap uint32) uint64
+```
+
+参数均为本次模块的线性内存地址/长度。请求为 UTF-8 JSON，不超过 384 KiB；**调用前必须准备至少 2 MiB 的响应缓冲区**。返回高 32 位为响应 JSON 长度、低 32 位为 ABI 状态：`0` 成功写入响应、`1` 内存或缓冲区无效、`2` 输出编码失败。ABI 状态非零时，不可将缓冲区作为成功响应读取。
+
+主程序先检查缓冲区，再执行操作，不允许通过“先探测响应长度、再重试”的方式重复发起有副作用的请求。有效缓冲区中的统一响应为 `{"ok":true,"result":...}` 或 `{"ok":false,"error":"..."}`。每次插件调用最多 32 次 host call；初始化函数不可发起外部请求或会话操作。
+
+### 11.3 外部请求
+
+```json
+{"operation":"http_request","http":{"url":"https://example.com/api/data","method":"POST","headers":{"Content-Type":["application/json"]},"body_base64":"e30="}}
+```
+
+成功的 `result` 与第 5 节一样，包含 `status`、`headers`、`body_base64`。输入正文最多 256 KiB，HTTP 状态码由外部服务决定。默认不跟随重定向；收到 3xx 时，插件只能在再次通过允许地址检查后显式发起新请求。
+
+- 只支持受控的 HTTPS HTTP 请求，不开放裸 TCP/UDP、宿主代理、任意 socket、私有 CA 或 TLS 校验跳过。
+- 域名在建立连接时解析；所有解析结果必须是普通公网地址，再连接已经检查的数字地址，避免 DNS 重绑定。环回、内网、云元数据、链路本地、特殊地址及 IPv6 地址转换/隧道范围不允许访问。
+- 不自动转发入站 Authorization、X-API-Key、网站登录 Cookie 或网站确认凭据。插件只能显式提交自己的外部认证信息，例如后台秘密设置中的外部 Authorization。
+- Host、连接控制、代理认证和转发控制头不可覆盖。不会自动管理或跨来源发送 Cookie。
+- 允许地址是授予插件的网络边界，不是业务用户授权。插件作者仍须验证外部操作的业务权限，不能把授权仅托付给来源地址检查。
+
+### 11.4 会话操作
+
+会话是插件自己的 JSON 数据，可保存外部服务 Cookie、访问令牌或其他状态，不是网站登录会话。命名空间由主程序绑定到**安装记录 ID**，插件不能指定其他插件的身份。
+
+```json
+{"operation":"session_get","session":{"key":"external.login","persist":true,"fresh":true}}
+```
+
+成功返回 `found`、找到时的 `value`、`version` 与可选 `expires_at`。`fresh: true` 在持久化模式下绕过内存，适用于更新前检查最新版本。未找到或已过期返回 `found:false`。
+
+```json
+{"operation":"session_put","session":{"key":"external.login","persist":true,"version":0,"ttl_seconds":3600,"value":{"cookie":"EXTERNAL_SERVICE_COOKIE"}}}
+```
+
+- `persist:true` 选择数据库；`persist:false` 选择进程缓存。省略时优先选择已授权的数据库模式，否则选择已授权的缓存模式。
+- 两种模式的版本号独立，同名键不会互相覆盖。版本号是不可推断的正整数，不保证连续递增一步；必须使用读取或保存返回的版本。`version:0` 仅用于新增；修改时使用读取结果的版本，冲突时重新读取并决定是否重试。
+- `ttl_seconds` 省略时使用默认时间；不可超过后台上限。`0` 仅在“允许不自动过期”及数据库保存均已开启时有效。
+- 键名为 1–128 位字母、数字、点、下划线、冒号或短横线，首字符须为字母或数字。
+- 保存值为合法、有限深度的 JSON，受后台大小与条目限制。数据库和内存均使用插件/键绑定的加密封装；不会保存可读的秘密值。
+
+```json
+{"operation":"session_delete","session":{"key":"external.login","persist":true,"version":1}}
+```
+
+删除也需要当前版本，避免删除其他并发请求更新后的会话。关闭能力立即拒绝后续操作并清空受影响的内存缓存；关闭不会自动删除数据库里的未过期数据。删除插件会通过数据库外键一并删除其会话。
+
+**Cookie 使用流程**：插件发起外部登录请求 → 解析该服务返回的 Set-Cookie → 按用户、外部来源和用途选择不同的会话键 → 保存 Cookie 与对应有效期 → 后续读取并显式设置该来源请求的 Cookie 头。不得把外部 Cookie/Token 返回到公开 API、公开目录或日志。外部服务自己的有效期仍有效，不因本地会话保存时间更长而延长。
+
+会话默认按插件隔离，不自动按业务用户隔离。多用户业务必须选择不同的键，并在插件业务逻辑中校验使用者。不要把未经验证的查询参数直接作为其他用户的会话键。
+
+### 11.5 可编译的示例
+
+下面演示缓存会话与外部请求，并只向业务调用者返回成功状态。编译命令与第 7 节相同；使用本节的清单，安装后分别授权所需能力。
+
+```go
+package main
+
+import (
+ "encoding/base64"
+ "encoding/json"
+ "unsafe"
+)
+var buffers [][]byte
+//go:wasmimport api_manager host_call
+func hostCall(requestPtr,requestLen,responsePtr,responseCap uint32)uint64
+func callHost(request any)map[string]any{
+ input,_:=json.Marshal(request)
+ output:=make([]byte,2<<20)
+ result:=hostCall(uint32(uintptr(unsafe.Pointer(&input[0]))),uint32(len(input)),uint32(uintptr(unsafe.Pointer(&output[0]))),uint32(len(output)))
+ if uint32(result)!=0{return map[string]any{"ok":false,"error":"host buffer failure"}}
+ var response map[string]any
+ if json.Unmarshal(output[:uint32(result>>32)],&response)!=nil{return map[string]any{"ok":false,"error":"invalid host response"}}
+ return response
+}
+//go:wasmexport alloc
+func alloc(size uint32)uint32{b:=make([]byte,size);buffers=append(buffers,b);return uint32(uintptr(unsafe.Pointer(&b[0])))}
+//go:wasmexport handle
+func handle(ptr,size uint32)uint64{
+ // Cache-only and durable modes are explicitly selected per operation.
+ // For update, read the stored version first and pass it back as version.
+ current:=callHost(map[string]any{"operation":"session_get","session":map[string]any{"key":"demo.session","persist":false}})
+ version:=float64(0)
+ if value,ok:=current["result"].(map[string]any);ok{if v,ok:=value["version"].(float64);ok{version=v}}
+ saved:=callHost(map[string]any{"operation":"session_put","session":map[string]any{"key":"demo.session","persist":false,"version":version,"ttl_seconds":60,"value":map[string]any{"message":"session-ready"}}})
+ fetched:=callHost(map[string]any{"operation":"session_get","session":map[string]any{"key":"demo.session","persist":false}})
+ external:=callHost(map[string]any{"operation":"http_request","http":map[string]any{"url":"https://example.com/","method":"GET"}})
+ // The external response/cookie/token stays inside the plugin. Never expose
+ // such secrets in your business API response merely to verify connectivity.
+ status:=map[string]any{"storage_ok":saved["ok"],"session_found":fetched["ok"],"network_ok":external["ok"]}
+ body,_:=json.Marshal(status)
+ response,_:=json.Marshal(map[string]any{"status":200,"headers":map[string][]string{"Content-Type":{"application/json"},"Cache-Control":{"no-store"}},"body_base64":base64.StdEncoding.EncodeToString(body)})
+ output:=alloc(uint32(len(response)));copy(unsafe.Slice((*byte)(unsafe.Pointer(uintptr(output))),len(response)),response)
+ return uint64(output)<<32|uint64(len(response))
+}
+func main(){}
+```
+
+此示例的外部目标为 `https://example.com`，请在后台明确授权该来源。网络能力关闭时会收到拒绝，不会绕过权限。如果只演示缓存，单独声明和授权 `session_storage` 即可。
+
+### 11.6 保持关闭的边界
+
+宿主文件系统、环境变量、Docker Socket、任意 SQL、直接 PostgreSQL/Redis 连接和裸 socket 仍不开放。`database_write` 仍是预留声明：当前没有为 WASM 注册任意数据库写入 host 函数。会话持久化只提供上述按插件隔离、加密和限额的接口。
 
 ## 12. 插件版本与升级
 

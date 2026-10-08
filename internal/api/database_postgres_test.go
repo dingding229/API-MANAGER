@@ -82,8 +82,8 @@ func TestPostgresDatabaseAPIBackupImportRestoreAndPasswordGate(t *testing.T) {
 		}
 	}
 	result := call("POST", "/reveal", map[string]any{"table": "users", "primary": map[string]string{"id": u.ID}, "current_password": "Password888"})
-	if result.Code != 400 || strings.Contains(result.Body.String(), "$2") {
-		t.Fatal("login password material exposed", result.Code)
+	if result.Code != 200 || !strings.Contains(result.Body.String(), "$2") || strings.Contains(result.Body.String(), "Password888") {
+		t.Fatal("confirmed password digest unavailable or original password exposed", result.Code)
 	}
 	if result = call("POST", "/reveal", map[string]any{"table": "api_credentials", "primary": map[string]string{"id": "';DROP TABLE users;--"}, "current_password": "Password888"}); result.Code != 404 {
 		t.Fatal("SQL primary injection", result.Code)

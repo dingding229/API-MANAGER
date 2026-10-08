@@ -113,7 +113,7 @@ func mergeSettings(old, patch map[string]any) map[string]any {
 	}
 	return out
 }
-func (m *Manager) SetSettingsKey(key string) { m.settingsKey = key }
+func (m *Manager) SetSettingsKey(key string) { m.settingsKey = key; m.configureRuntime() }
 func (m *Manager) settingsFor(ctx context.Context, id string) (Manifest, map[string]any, int64, error) {
 	item, e := m.store.GetPlugin(id)
 	if e != nil {

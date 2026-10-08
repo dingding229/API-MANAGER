@@ -33,6 +33,8 @@ func databaseRecoverableFields(table string, row map[string]any, master string) 
 		out["encrypted_code"] = master + ":cards"
 	case "version_check_settings":
 		out["encrypted_token"] = master + ":version"
+	case "plugin_sessions":
+		out["encrypted_value"] = master + ":plugin-session:" + fmt.Sprint(row["plugin_id"]) + ":" + fmt.Sprint(row["key_hash"])
 	case "plugin_response_cache":
 		out["encrypted_response"] = master + ":plugin-cache:" + fmt.Sprint(row["cache_key"])
 	}
@@ -92,7 +94,7 @@ func (a *Admin) databaseReveal(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 409, map[string]string{"error": "加密字段无法读取，请核对部署密钥"})
 			return
 		}
-		if column == "encrypted_secrets" || column == "encrypted_settings" || column == "encrypted_response" {
+		if column == "encrypted_secrets" || column == "encrypted_settings" || column == "encrypted_response" || column == "encrypted_value" {
 			var structured any
 			decoder := json.NewDecoder(strings.NewReader(plain))
 			decoder.UseNumber()

@@ -119,7 +119,7 @@ func TestPluginDevelopmentDocumentationMatchesRuntimeContract(t *testing.T) {
 	if _, e = ParseManifest(raw); e != nil {
 		t.Fatal("settings schema example", e)
 	}
-	for _, required := range []string{"没有为 WASM 注册数据库写入 host 函数", "version", "remove_fields", "plugin_cache", "Cache-Control", "GOOS=wasip1 GOARCH=wasm", "-buildmode=c-shared"} {
+	for _, required := range []string{"没有为 WASM 注册任意数据库写入 host 函数", "version", "remove_fields", "plugin_cache", "Cache-Control", "GOOS=wasip1 GOARCH=wasm", "-buildmode=c-shared"} {
 		if !strings.Contains(source, required) {
 			t.Fatal("missing documented contract", required)
 		}
@@ -185,4 +185,49 @@ func TestPluginDocumentationExampleCompilesAndRuns(t *testing.T) {
 	invoke(http.MethodPost, "/api/hello", 405, "此插件仅支持 GET")
 	invoke(http.MethodGet, "/api/hello?name="+strings.Repeat("x", 65), 400, "name 不能超过 64 个字符")
 	invoke(http.MethodGet, "/api/hello", 200, "您好，访客")
+}
+
+func TestPluginDocumentedHostExampleCompilesAndRuns(t *testing.T) {
+	if os.Getenv("TEST_PLUGIN_DOCS_WASM") != "1" {
+		t.Skip("set TEST_PLUGIN_DOCS_WASM=1 to compile the documented host example")
+	}
+	source := pluginDocumentation(t)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "host-plugin.go")
+	if e := os.WriteFile(file, []byte(documentationBlock(t, source, "go", 2)), 0600); e != nil {
+		t.Fatal(e)
+	}
+	command := exec.Command("go", "build", "-buildmode=c-shared", "-o", filepath.Join(dir, "plugin.wasm"), file)
+	command.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if output, e := command.CombinedOutput(); e != nil {
+		t.Fatalf("documented host example did not compile: %s %v", output, e)
+	}
+	wasm, e := os.ReadFile(filepath.Join(dir, "plugin.wasm"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	manifest := []byte(documentationBlock(t, source, "yaml", 2))
+	parsed, e := ParseManifest(manifest)
+	if e != nil {
+		t.Fatal(e)
+	}
+	registry := NewRegistry()
+	registry.services, _ = testHostServices()
+	registry.services.setPolicy(parsed.Name, "plugin-doc-host", defaultRuntimePolicy(model.PluginRuntimePolicy{Version: 1, SessionCache: true}))
+	if e = registry.LoadWASMBytes(context.Background(), manifest, wasm); e != nil {
+		t.Fatal(e)
+	}
+	defer registry.Close(context.Background())
+	handler, _ := registry.Get(parsed.Name)
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "https://example.test/api/demo", nil)
+		if e = handler.Handle(context.Background(), w, r, model.API{ID: "test"}); e != nil {
+			t.Fatal(e)
+		}
+		var result map[string]bool
+		if json.Unmarshal(w.Body.Bytes(), &result) != nil || !result["storage_ok"] || !result["session_found"] || result["network_ok"] {
+			t.Fatal("documented host session/CAS/network denial behavior differs", w.Body.String())
+		}
+	}
 }
