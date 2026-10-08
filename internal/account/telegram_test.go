@@ -85,6 +85,119 @@ func TestTelegramAuthorizationUsesPKCEAndSameOriginCallback(t *testing.T) {
 	}
 }
 
+// Only the OAuth challenge/settings boundary is needed by the start endpoint.
+type telegramAuthorizationStore struct {
+	store.AccountStore
+	settings  model.SecuritySettings
+	challenge model.Verification
+	writes    int
+}
+
+func (s *telegramAuthorizationStore) PutVerification(_ context.Context, v model.Verification) error {
+	s.challenge = v
+	s.writes++
+	return nil
+}
+func (s *telegramAuthorizationStore) SecuritySettings(context.Context) (model.SecuritySettings, string, error) {
+	return s.settings, "", nil
+}
+
+func TestTelegramAuthorizationIncludesConfiguredOrigin(t *testing.T) {
+	for _, website := range []string{"https://configured.example.test", "https://configured.example.test/", "https://configured.example.test:8443/"} {
+		t.Run(website, func(t *testing.T) {
+			st := &telegramAuthorizationStore{settings: model.SecuritySettings{TelegramEnabled: true, TelegramClientID: "123456", TelegramSecret: "server-only", WebsiteURL: "https://old.example.test"}}
+			mail := &websiteMail{fakeMail: &fakeMail{}, info: model.PublicSiteInfo{WebsiteURL: website}}
+			s := &Service{accounts: st, key: "0123456789abcdefghijklmnopqrstuvwxyz", mail: mail, adminPath: "/admin"}
+			// Even a same-origin request on an alias cannot change the configured
+			// origin or callback, and proxy headers cannot supply either value.
+			r := httptest.NewRequest("POST", "https://alias.example.test/account/v1/oauth/telegram/start", strings.NewReader(`{"return_to":"home"}`))
+			r.Header.Set("Origin", "https://alias.example.test")
+			r.Header.Set("X-API-Request", "1")
+			r.Header.Set("X-Forwarded-Host", "attacker.example.test")
+			r.Header.Set("Forwarded", "host=attacker.example.test;proto=http")
+			r.Header.Set("User-Agent", "regression")
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, r)
+			if w.Code != 200 || st.writes != 1 {
+				t.Fatal("authorization not started", w.Code, w.Body.String())
+			}
+			var result map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			authorize, err := url.Parse(result["url"])
+			if err != nil || authorize.Scheme != "https" || authorize.Host != "oauth.telegram.org" || authorize.Path != "/auth" {
+				t.Fatal("invalid authorization endpoint", err)
+			}
+			q := authorize.Query()
+			origin := strings.TrimSuffix(website, "/")
+			if q.Get("origin") != origin || len(q["origin"]) != 1 || q.Get("redirect_uri") != origin+"/account/v1/oauth/telegram/callback" {
+				t.Fatal("origin or callback did not use configured website")
+			}
+			if q.Get("response_type") != "code" || q.Get("scope") != "openid profile" || q.Get("client_id") != "123456" || q.Get("code_challenge_method") != "S256" {
+				t.Fatal("OIDC authorization contract changed")
+			}
+			if q.Get("state") == "" || len(q.Get("nonce")) != 64 || q.Get("code_challenge") == "" || q.Has("client_secret") || strings.Contains(w.Body.String(), "server-only") || strings.Contains(w.Body.String(), "attacker.example.test") {
+				t.Fatal("missing protection or leaked secret/untrusted host")
+			}
+			plain, err := auth.DecryptSecret(s.key+":oauth", st.challenge.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved oauthState
+			if err := json.Unmarshal([]byte(plain), &saved); err != nil {
+				t.Fatal(err)
+			}
+			hash := sha256.Sum256([]byte(saved.Verifier))
+			if len(saved.Verifier) != 64 || q.Get("code_challenge") != base64.RawURLEncoding.EncodeToString(hash[:]) || saved.Redirect != q.Get("redirect_uri") || saved.Nonce != q.Get("nonce") || saved.ReturnTo != "/" {
+				t.Fatal("PKCE/state binding changed")
+			}
+			id, secret, ok := strings.Cut(q.Get("state"), ":")
+			if !ok || st.challenge.ID != id || st.challenge.CodeHash != auth.HashAPIKey(secret) || st.challenge.Subject != saved.Nonce || st.challenge.Purpose != "oauth:telegram" || st.challenge.Binding != auth.HashAPIKey(saved.Nonce+"\nregression") {
+				t.Fatal("persisted challenge not bound to authorization")
+			}
+			cookies := w.Result().Cookies()
+			if len(cookies) != 1 || cookies[0].Name != "api_manager_oauth_telegram" || cookies[0].Value != saved.Nonce || cookies[0].Path != "/account/v1/oauth/telegram" || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 300 {
+				t.Fatal("OAuth cookie protections changed")
+			}
+		})
+	}
+}
+
+func TestTelegramAuthorizationRejectsInvalidWebsiteOrigin(t *testing.T) {
+	for _, website := range []string{"", "http://example.test", "//example.test", "https:///", "https://user:password@example.test", "https://example.test/account", "https://example.test//", "https://example.test/%2F", "https://example.test?", "https://example.test?origin=https://attacker.test", "https://example.test#callback", "https://example.test:bad", "javascript:alert(1)", "https://example.test\r\nX-Header: value"} {
+		t.Run(website, func(t *testing.T) {
+			st := &telegramAuthorizationStore{}
+			s := &Service{accounts: st, key: "test-encryption-key"}
+			r := httptest.NewRequest("POST", "https://example.test/account/v1/oauth/telegram/start", strings.NewReader(`{}`))
+			r.Header.Set("Origin", "https://example.test")
+			r.Header.Set("X-API-Request", "1")
+			w := httptest.NewRecorder()
+			s.oauth(w, r, model.SecuritySettings{TelegramEnabled: true, WebsiteURL: website})
+			if w.Code != 503 || st.writes != 0 || len(w.Result().Cookies()) != 0 {
+				t.Fatal("invalid website started authorization", w.Code)
+			}
+		})
+	}
+}
+
+func TestTelegramAuthorizationStillRequiresSameOriginRequest(t *testing.T) {
+	for _, origin := range []string{"", "https://attacker.example.test", "null", "https://example.test/path"} {
+		t.Run(origin, func(t *testing.T) {
+			st := &telegramAuthorizationStore{}
+			s := &Service{accounts: st}
+			r := httptest.NewRequest("POST", "https://example.test/account/v1/oauth/telegram/start", strings.NewReader(`{}`))
+			r.Header.Set("Origin", origin)
+			r.Header.Set("X-API-Request", "1")
+			w := httptest.NewRecorder()
+			s.oauth(w, r, model.SecuritySettings{TelegramEnabled: true, WebsiteURL: "https://example.test"})
+			if w.Code != 403 || st.writes != 0 || len(w.Result().Cookies()) != 0 {
+				t.Fatal("cross-origin authorization accepted", w.Code)
+			}
+		})
+	}
+}
+
 func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) {
 	dsn := os.Getenv("TEST_ACCOUNT_DSN")
 	if dsn == "" {
@@ -124,18 +237,24 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 	if e != nil {
 		t.Fatal(e)
 	}
-	nonce := ""
+	nonce, expectedChallenge := "", ""
+	tokenExchanges := 0
 	subject := "telegram-subject-" + ids.NewUUID()
 	s.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
 		var body []byte
 		switch r.URL.String() {
 		case telegramIssuer + "/token":
+			tokenExchanges++
 			id, secret, ok := r.BasicAuth()
 			if !ok || id != "123456" || secret != "test-client-secret" {
 				t.Fatal("wrong OIDC client authentication")
 			}
 			if e := r.ParseForm(); e != nil || len(r.Form.Get("code_verifier")) != 64 || r.Form.Get("client_secret") != "" {
 				t.Fatal("PKCE/code exchange invalid")
+			}
+			verifierHash := sha256.Sum256([]byte(r.Form.Get("code_verifier")))
+			if base64.RawURLEncoding.EncodeToString(verifierHash[:]) != expectedChallenge || r.Form.Get("redirect_uri") != "https://example.test/account/v1/oauth/telegram/callback" || r.Form.Get("grant_type") != "authorization_code" {
+				t.Fatal("authorization code exchange is not bound to the start")
 			}
 			header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"test"}`))
 			claims, _ := json.Marshal(map[string]any{"iss": telegramIssuer, "aud": "123456", "sub": subject, "nonce": nonce, "iat": time.Now().Unix() - 1, "exp": time.Now().Unix() + 300})
@@ -170,10 +289,11 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 		var result map[string]string
 		json.Unmarshal(w.Body.Bytes(), &result)
 		authorize, e := url.Parse(result["url"])
-		if e != nil || authorize.Host != "oauth.telegram.org" || authorize.Query().Get("code_challenge_method") != "S256" {
+		if e != nil || authorize.Host != "oauth.telegram.org" || authorize.Query().Get("origin") != "https://example.test" || authorize.Query().Get("redirect_uri") != "https://example.test/account/v1/oauth/telegram/callback" || authorize.Query().Get("code_challenge_method") != "S256" {
 			t.Fatal(result)
 		}
 		nonce = authorize.Query().Get("nonce")
+		expectedChallenge = authorize.Query().Get("code_challenge")
 		callback := httptest.NewRequest("GET", "https://example.test/account/v1/oauth/telegram/callback?code=test-code&state="+url.QueryEscape(authorize.Query().Get("state")), nil)
 		callback.Header.Set("User-Agent", "review")
 		for _, cookie := range w.Result().Cookies() {
@@ -181,6 +301,14 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 		}
 		done := httptest.NewRecorder()
 		s.ServeHTTP(done, callback)
+		if done.Code == http.StatusSeeOther {
+			exchanges := tokenExchanges
+			replay := httptest.NewRecorder()
+			s.ServeHTTP(replay, callback.Clone(context.Background()))
+			if replay.Code != http.StatusForbidden || exchanges != tokenExchanges {
+				t.Fatal("used OAuth state was accepted or reached the token exchange")
+			}
+		}
 		return done
 	}
 	if w := flow(true); w.Code != 303 {

@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -205,4 +206,14 @@ func (s *Service) telegramIdentity(ctx context.Context, token, clientID, nonce s
 		c.Name = ""
 	}
 	return c.Sub, c.Name, nil
+}
+
+// telegramLoginOrigin validates the configured website before publishing it to
+// the provider. Origins cannot contain credentials, paths, queries or fragments.
+func telegramLoginOrigin(raw string) (string, error) {
+	website, err := url.Parse(raw)
+	if err != nil || website.Scheme != "https" || website.Hostname() == "" || website.User != nil || website.Opaque != "" || website.ForceQuery || website.RawQuery != "" || website.Fragment != "" || (website.Path != "" && website.Path != "/") || website.RawPath != "" {
+		return "", errors.New("invalid Telegram website origin")
+	}
+	return (&url.URL{Scheme: website.Scheme, Host: website.Host}).String(), nil
 }

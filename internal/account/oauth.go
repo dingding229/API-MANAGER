@@ -49,7 +49,16 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		endpoint = telegramIssuer + "/token"
 		scope = "openid profile"
 	}
-	redirect := strings.TrimRight(cfg.WebsiteURL, "/") + "/account/v1/oauth/" + provider + "/callback"
+	websiteOrigin := strings.TrimRight(cfg.WebsiteURL, "/")
+	if provider == "telegram" {
+		var err error
+		websiteOrigin, err = telegramLoginOrigin(cfg.WebsiteURL)
+		if err != nil {
+			write(w, 503, map[string]string{"error": "Telegram 登录的网站地址无效，请联系管理员"})
+			return
+		}
+	}
+	redirect := websiteOrigin + "/account/v1/oauth/" + provider + "/callback"
 	cookieName := "api_manager_oauth_" + provider
 	if parts[1] == "start" {
 		if r.Method != "POST" || !auth.CookieMutationAllowed(r) {
@@ -100,6 +109,9 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		hash := sha256.Sum256([]byte(verifier))
 		query := url.Values{"client_id": {clientID}, "redirect_uri": {redirect}, "response_type": {"code"}, "scope": {scope}, "state": {state}, "code_challenge": {base64.RawURLEncoding.EncodeToString(hash[:])}, "code_challenge_method": {"S256"}}
 		if provider == "telegram" {
+			// Telegram's browser authorization also requires the registered site
+			// origin. Never derive it from request Host or forwarding headers.
+			query.Set("origin", websiteOrigin)
 			query.Set("nonce", nonce)
 		}
 		// SameSite=Lax is required for the cross-site provider callback, not the main session.
