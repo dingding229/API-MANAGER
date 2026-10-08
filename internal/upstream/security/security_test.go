@@ -6,7 +6,7 @@ import (
 )
 
 func TestPublicIPRejectsInternalAndSpecialRanges(t *testing.T) {
-	for _, raw := range []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "::1", "fc00::1", "::ffff:127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::a00:1", "2002:7f00:1::1", "2001::1"} {
+	for _, raw := range []string{"127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "::1", "fc00::1", "::ffff:127.0.0.1", "64:ff9b::a9fe:a9fe", "64:ff9b:1::a00:1", "2002:7f00:1::1", "2001::1", "fec0::1", "::a00:1", "3fff::1", "5f00::1", "192.88.99.2"} {
 		if publicIP(netip.MustParseAddr(raw)) {
 			t.Fatalf("publicIP accepted %s", raw)
 		}

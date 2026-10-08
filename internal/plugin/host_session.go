@@ -160,13 +160,7 @@ func (s *pluginRuntimeServices) session(ctx context.Context, name, op string, q 
 		if old.Record.Version != q.Version {
 			return result, store.ErrConflict
 		}
-		count := 0
-		for _, v := range s.sessions[id] {
-			if !v.Persistent {
-				count++
-			}
-		}
-		if old.Record.Version == 0 && count >= p.MaxEntries {
+		if old.Record.Version == 0 && len(s.sessions[id]) >= p.MaxEntries {
 			return result, errors.New("session entry limit reached")
 		}
 		if s.cacheVersion == 0 {

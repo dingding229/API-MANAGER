@@ -257,3 +257,17 @@ func TestPluginRuntimeDoesNotLetOldModuleAdoptAnotherInstalledIdentity(t *testin
 		t.Fatal("old module adopted new installed identity")
 	}
 }
+
+func TestPluginCacheQuotaIncludesPersistentReadCache(t *testing.T) {
+	s, st := testHostServices()
+	p := defaultRuntimePolicy(model.PluginRuntimePolicy{Version: 1, SessionPersistence: true, SessionCache: true, MaxEntries: 1})
+	s.setPolicy("fixture", "owner", p)
+	st.policies["owner"] = p
+	if _, e := s.session(context.Background(), "fixture", "session_put", hostSessionRequest{Key: "durable", Value: json.RawMessage(`{"value":1}`)}); e != nil {
+		t.Fatal(e)
+	}
+	cache := false
+	if _, e := s.session(context.Background(), "fixture", "session_put", hostSessionRequest{Key: "cache", Persist: &cache, Value: json.RawMessage(`{"value":2}`)}); e == nil {
+		t.Fatal("volatile cache exceeded quota already occupied by persistent read cache")
+	}
+}
