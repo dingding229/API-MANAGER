@@ -83,7 +83,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		saved := oauthState{Provider: provider, Verifier: verifier, Redirect: redirect, ReturnTo: oauthReturn(request.ReturnTo, s.adminPath), Nonce: nonce}
 		if link {
 			saved.Purpose = "link"
-			saved.ReturnTo = "/account?view=security&linked=" + provider
+			saved.ReturnTo = linkedAccountPath(provider)
 			token, _ := auth.SessionToken(r)
 			u, e := s.users.ValidateSession(token)
 			if e != nil {
@@ -212,7 +212,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 			return
 		}
 		s.users.RecordAudit(auditActor(u), r, "account.identity.link", "identity", provider, 200, nil)
-		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account?view=security&linked="+provider, 303)
+		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+linkedAccountPath(provider), 303)
 		return
 	}
 	id, err := s.accounts.FindIdentity(r.Context(), provider, subject)
@@ -338,6 +338,19 @@ func (s *Service) providerIdentity(r *http.Request, provider, token string) (str
 	return "", "", "", errors.New("unverified email")
 }
 
+// The callback path is selected from constants, never constructed from request input.
+func linkedAccountPath(provider string) string {
+	switch provider {
+	case "github":
+		return "/account?view=security&linked=github"
+	case "google":
+		return "/account?view=security&linked=google"
+	case "telegram":
+		return "/account?view=security&linked=telegram"
+	default:
+		return "/account?view=security"
+	}
+}
 func oauthReturn(v, adminPath string) string {
 	switch v {
 	case "home":

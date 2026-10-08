@@ -495,3 +495,16 @@ func TestTelegramBindingCannotFallBackToLogin(t *testing.T) {
 		})
 	}
 }
+
+func TestLinkedAccountReturnPathIsAllowlisted(t *testing.T) {
+	for _, provider := range []string{"github", "google", "telegram"} {
+		if got := linkedAccountPath(provider); got != "/account?view=security&linked="+provider {
+			t.Fatal("incorrect binding return", provider, got)
+		}
+	}
+	for _, provider := range []string{"//evil.test", "https://evil.test", "telegram&return=https://evil.test", "telegram\r\nLocation: https://evil.test"} {
+		if got := linkedAccountPath(provider); got != "/account?view=security" {
+			t.Fatal("untrusted redirect data", got)
+		}
+	}
+}
