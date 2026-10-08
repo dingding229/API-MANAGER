@@ -243,3 +243,42 @@ const app={inert:true};const $=s=>s==='#app'?app:modal;const document={body:{sty
 `+tc.close+`();assert.equal(returned,1);assert.equal(removed,1);`+tc.close+`(true);assert.equal(returned,1);assert.equal(removed,2);`)
 	}
 }
+
+func TestPluginActionsStayInOneToolbarAndRetainPermissions(t *testing.T) {
+	helpers := consoleFunction(t, "function pluginAction(", "\nasync function uploadPlugin(")
+	runConsoleRegression(t, `const assert=require('node:assert/strict');
+let allowed=true;const can=()=>allowed,state={user:{roles:['super_admin']}};
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+`+helpers+`
+const item={id:'plugin-id',name:'<img src=x onerror=alert(1)>',version:'1.0.0',runtime:'wasm',enabled:false,manifest:{routes:[{parameters_schema:{},request_schema:{}}]}};
+let html=pluginRow(item,[]);assert.equal((html.match(/class="plugin-version-actions"/g)||[]).length,1);assert.ok(!html.includes('plugin-action-primary')&&!html.includes('plugin-action-secondary'));
+for(const attribute of ['status','settings','runtime','update','library-publish','uninstall'])assert.ok(html.includes('data-plugin-'+attribute+'="plugin-id"'));
+assert.equal((html.match(/<button /g)||[]).length,6);assert.equal((html.match(/aria-label=/g)||[]).length,7);assert.ok(!html.includes('<img'));
+html=pluginRow(item,[{name:item.name,version:item.version}]);assert.equal((html.match(/<button /g)||[]).length,5);assert.ok(html.includes('plugin-library-status'));assert.ok(!html.includes('data-plugin-library-publish'));
+state.user.roles=['api_developer'];assert.ok(!pluginRow(item).includes('data-plugin-runtime'));
+allowed=false;assert.ok(!pluginRow(item).includes('<button '));`)
+	css, _ := assets.ReadFile("assets/controls.css")
+	for _, v := range []string{"flex-direction:row;flex-wrap:nowrap", "min-width:0;white-space:nowrap", "@container plugin-panel", "plugin-action-label{white-space:nowrap}"} {
+		if !strings.Contains(string(css), v) {
+			t.Fatal("plugin toolbar safeguard missing", v)
+		}
+	}
+}
+
+func TestAPIDeletionUsesConsoleConfirmationAndCancelDoesNotDelete(t *testing.T) {
+	action := consoleFunction(t, "async function apiAction(", "\n\nfunction roleCanBeGranted(")
+	if strings.Contains(action, "!confirm(") {
+		t.Fatal("API deletion uses native browser confirmation")
+	}
+	runConsoleRegression(t, `const assert=require('node:assert/strict');let confirmed=false,calls=[],renders=0;const notice=()=>{};const renderAPIs=()=>renders++;const confirmConsoleAction=async()=>confirmed;const api=async(path,options)=>calls.push([path,options.method]);
+`+action+`
+(async()=>{await apiAction('delete','route-id');assert.equal(calls.length,0);assert.equal(renders,0);confirmed=true;await apiAction('delete','route/id');assert.deepEqual(calls,[['/admin/v1/apis/route%2Fid','DELETE']]);assert.equal(renders,1);await apiAction('unknown','id');assert.equal(calls.length,1)})().catch(e=>{console.error(e);process.exit(1)});`)
+	raw, _ := assets.ReadFile("assets/enhancements.js")
+	s := string(raw)
+	a := strings.Index(s, "function confirmConsoleAction(")
+	b := strings.Index(s[a:], "function showTextDialog(")
+	helper := s[a : a+b]
+	runConsoleRegression(t, `const assert=require('node:assert/strict');let active;const consoleDialog=(title,html,onReturn)=>{const nodes={'.dialog-confirm-message':{},'[data-confirm-action]':{},'[data-cancel-dialog]':{focus(){this.focused=true}}};const close=()=>onReturn();nodes['[data-cancel-dialog]'].onclick=close;active={nodes,close,querySelector:s=>nodes[s]};return{dialog:active,close}};
+`+helper+`
+(async()=>{const cancelled=confirmConsoleAction('删除接口','<img src=x>','删除接口');assert.equal(active.nodes['.dialog-confirm-message'].textContent,'<img src=x>');assert.equal(active.nodes['[data-cancel-dialog]'].focused,true);active.nodes['[data-cancel-dialog]'].onclick();assert.equal(await cancelled,false);const accepted=confirmConsoleAction('删除接口','删除后无法恢复','删除接口');active.nodes['[data-confirm-action]'].onclick();assert.equal(await accepted,true);const escape=confirmConsoleAction('删除接口','确认');active.close();assert.equal(await escape,false)})().catch(e=>{console.error(e);process.exit(1)});`)
+}

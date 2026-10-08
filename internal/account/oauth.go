@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-type oauthState struct{ Provider, Verifier, Redirect, UserID, SessionHash, Fingerprint, ReturnTo, Nonce string }
+type oauthState struct{ Provider, Purpose, Verifier, Redirect, UserID, SessionHash, Fingerprint, ReturnTo, Nonce string }
 
 func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.SecuritySettings) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/account/v1/oauth/"), "/")
@@ -60,7 +60,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 	}
 	redirect := websiteOrigin + "/account/v1/oauth/" + provider + "/callback"
 	cookieName := "api_manager_oauth_" + provider
-	if parts[1] == "start" {
+	if parts[1] == "start" || parts[1] == "link" {
 		if r.Method != "POST" || !auth.CookieMutationAllowed(r) {
 			write(w, 403, map[string]string{"error": "请从本站开始登录"})
 			return
@@ -69,6 +69,11 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		if !read(w, r, &request) {
 			return
 		}
+		if request.Purpose != "" && request.Purpose != "login" && request.Purpose != "link" || parts[1] == "link" && request.Purpose == "login" {
+			write(w, 400, map[string]string{"error": "授权操作无效"})
+			return
+		}
+		link := parts[1] == "link" || request.Purpose == "link"
 		verifier := randomHex(32)
 		nonce := randomHex(32)
 		if verifier == "" || nonce == "" {
@@ -76,7 +81,9 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 			return
 		}
 		saved := oauthState{Provider: provider, Verifier: verifier, Redirect: redirect, ReturnTo: oauthReturn(request.ReturnTo, s.adminPath), Nonce: nonce}
-		if request.Purpose == "link" {
+		if link {
+			saved.Purpose = "link"
+			saved.ReturnTo = "/account?view=security&linked=" + provider
 			token, _ := auth.SessionToken(r)
 			u, e := s.users.ValidateSession(token)
 			if e != nil {
@@ -184,6 +191,10 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		write(w, 403, map[string]string{"error": "第三方未提供可验证的账号资料"})
 		return
 	}
+	if saved.Purpose == "link" && (saved.UserID == "" || saved.SessionHash == "" || saved.Fingerprint == "") {
+		write(w, 403, map[string]string{"error": "绑定验证已失效，请从账号安全重新绑定"})
+		return
+	}
 	if saved.UserID != "" {
 		st, ok := s.store.(identityStore)
 		if !ok {
@@ -192,7 +203,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 		}
 		active, e := st.ActiveSession(r.Context(), saved.UserID, saved.SessionHash)
 		u, userErr := s.store.GetUserByID(saved.UserID)
-		if e != nil || userErr != nil || !active || u.Status != "active" || loginFingerprint(u) != saved.Fingerprint {
+		if e != nil || userErr != nil || !active || u.Status != "active" || loginFingerprint(u) != saved.Fingerprint || !s.users.Can(u.ID, "account.security") {
 			write(w, 403, map[string]string{"error": "绑定验证已失效"})
 			return
 		}
@@ -201,7 +212,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request, cfg model.Securi
 			return
 		}
 		s.users.RecordAudit(auditActor(u), r, "account.identity.link", "identity", provider, 200, nil)
-		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account?linked=1", 303)
+		http.Redirect(w, r, strings.TrimRight(cfg.WebsiteURL, "/")+"/account?view=security&linked="+provider, 303)
 		return
 	}
 	id, err := s.accounts.FindIdentity(r.Context(), provider, subject)

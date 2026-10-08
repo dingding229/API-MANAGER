@@ -486,12 +486,17 @@ form input::placeholder, form textarea::placeholder { color: var(--control-muted
 .log-detail-grid .log-detail-copy{flex-shrink:0;min-height:36px;padding:6px 10px;font-size:12px;white-space:nowrap}
 @media(max-width:600px){.log-detail-grid{grid-template-columns:1fr}}
 
-.plugin-version{display:grid!important;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center}
+/* Keep every plugin action in one toolbar, including uninstall and library publication. */
+.plugin-panel{container-type:inline-size;container-name:plugin-panel}
+.plugin-version{display:grid!important;grid-template-columns:minmax(0,1fr);gap:14px;align-items:center}
 .plugin-version-info{min-width:0}.plugin-version-title{flex-wrap:wrap}.plugin-version-title strong{overflow-wrap:anywhere}
-.plugin-version-actions{display:flex!important;flex-direction:column;align-items:flex-end;gap:8px;min-width:0}
-.plugin-action-primary,.plugin-action-secondary{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
-.plugin-version-actions button{min-height:40px;white-space:nowrap;flex:0 0 auto;margin:0;padding:9px 12px;font-size:12px}
+.content .plugin-version-actions{display:flex!important;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:flex-start;gap:8px;min-width:0;max-width:none;width:auto}
+.content .plugin-version-actions button:not(.link){min-height:44px;min-width:0;white-space:nowrap;flex:0 0 auto;margin:0;padding:9px 12px;font-size:12px}
+.plugin-action-icon{display:none;flex:none}.plugin-action-label{white-space:nowrap}
 .plugin-library-status{color:var(--muted);font-size:12px}
-@media(max-width:900px){.plugin-version{grid-template-columns:1fr!important}.plugin-version-actions{align-items:flex-start}.plugin-action-primary,.plugin-action-secondary{justify-content:flex-start}}
+@media(min-width:1600px){.plugin-version{grid-template-columns:minmax(0,1fr) auto}.content .plugin-version-actions{justify-content:flex-end}}
+@container plugin-panel (max-width:480px){.plugin-action-icon{display:block}.plugin-action-label{display:none}.content .plugin-version-actions button:not(.link){display:inline-flex;align-items:center;justify-content:center;width:44px;min-width:44px;padding:0}}
+@container plugin-panel (max-width:340px){.content .plugin-version-actions{gap:6px}.content .plugin-version-actions button:not(.link){width:40px;min-width:40px}}
+@container plugin-panel (max-width:300px){.content .plugin-version-actions{gap:4px}.content .plugin-version-actions button:not(.link){width:32px;min-width:32px}}
 .plugin-contract-warning{color:#a16207;background:#fefce8;border:1px solid #fde68a;border-radius:6px;padding:2px 6px;font-size:12px;white-space:normal}
 .confirmation-preference{grid-column:1/-1}.confirmation-preference .security-card-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}

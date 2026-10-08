@@ -290,7 +290,7 @@ async function renderAPIs() {
     restrictForm($('#api-form'), 'api.write'); restrictForm($('#openapi-import-form'), 'api.write');
     $('#api-form').elements.path.oninput = (event) => event.target.setCustomValidity('');
     $('#openapi-import-form').onsubmit = importOpenAPI;
-    $$('#page [data-action]').forEach((button) => button.onclick = () => apiAction(button.dataset.action, button.dataset.id));
+    $$('#page [data-action]').forEach((button) => button.onclick = () => withAction(button, button.dataset.action==='delete'?'删除中…':'处理中…', () => apiAction(button.dataset.action, button.dataset.id)));
     $$('#page [data-edit-api]').forEach((button) => button.onclick = () => editAPI(button.dataset.editApi, apis));
   } catch (error) { if (!page.isConnected) return; page.innerHTML = `<div class="empty" role="alert">${esc(error.message)}</div>`; }
 }
@@ -462,7 +462,7 @@ async function importOpenAPI(event) {
 
 async function apiAction(action, id) {
   if (!['publish', 'unpublish', 'delete'].includes(action)) return;
-  if (action === 'delete' && !confirm('确定删除该接口？')) return;
+  if (action === 'delete' && !await confirmConsoleAction('删除接口', '删除后无法恢复，已发布的调用地址也将停止使用。确定删除此接口吗？', '删除接口')) return;
   const path = `/admin/v1/apis/${encodeURIComponent(id)}`;
   try {
     await api(action === 'delete' ? path : `${path}/${action}`, {method:action === 'delete' ? 'DELETE' : 'POST'});
@@ -972,13 +972,22 @@ async function installPluginLibrary(name, version) {
   try { await api(`/admin/v1/plugin-library/install?name=${encodeURIComponent(name)}&version=${encodeURIComponent(version)}`, {method:'POST'}); notice('插件库安装成功，请启用插件', true); renderPlugins(); } catch (error) { notice(error.message); }
 }
 
+function pluginAction(label, attributes, style = 'secondary', paths = '') {
+  return `<button type="button" class="${style}" ${attributes} title="${esc(label)}" aria-label="${esc(label)}"><svg class="plugin-action-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg><span class="plugin-action-label">${esc(label)}</span></button>`;
+}
 function pluginRow(item, library = []) {
   let manifest=item.manifest||{};if(typeof manifest==='string'){try{manifest=JSON.parse(manifest)}catch{manifest={}}};const declared=Array.isArray(manifest.routes)&&manifest.routes.length>0&&manifest.routes.every(route=>route.parameters_schema&&route.request_schema);
-  const action = item.enabled ? `<button class="secondary" data-plugin-status="${esc(item.id)}" data-enabled="false">禁用</button>` : `<button data-plugin-status="${esc(item.id)}" data-enabled="true">启用</button>`;
-  const inLibrary = library.some(entry => entry.name === item.name && entry.version === item.version);
-  const publish = can('plugin.manage') && !inLibrary ? `<button class="secondary" data-plugin-library-publish="${esc(item.id)}">加入插件库</button>` : '';
-  const uninstall = can('plugin.manage') ? `<button class="danger" data-plugin-uninstall="${esc(item.id)}" data-plugin-name="${esc(item.name)}" data-plugin-version="${esc(item.version)}" data-enabled="${item.enabled ? 'true' : 'false'}">卸载</button>` : '';
-  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled ? 'is-on' : ''}">${item.enabled ? '运行中' : '未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span>${inLibrary?'<span class="plugin-library-status">已加入插件库</span>':''}${!declared?'<span class="plugin-contract-warning">缺少参数声明，请更新</span>':''}<code title="SHA-256: ${esc(item.checksum || '')}">${esc((item.checksum || '').slice(0, 12))}…</code></div></div><div class="plugin-version-actions">${can('plugin.manage') ? '<div class="plugin-action-primary">'+action + `<button class="secondary" data-plugin-settings="${esc(item.id)}">设置</button>${(state.user?.roles||[state.user?.role]).includes('super_admin')?`<button class="secondary" data-plugin-runtime="${esc(item.id)}">能力权限</button>`:''}` +`<button class="secondary" data-plugin-update="${esc(item.id)}">更新</button></div><div class="plugin-action-secondary">`+publish+uninstall+'</div>' : ''}</div></div>`;
+  const id=esc(item.id),inLibrary=library.some(entry=>entry.name===item.name&&entry.version===item.version);
+  const actions=[];
+  if(can('plugin.manage')) {
+    actions.push(pluginAction(item.enabled?'禁用':'启用',`data-plugin-status="${id}" data-enabled="${item.enabled?'false':'true'}"`,item.enabled?'secondary':'',item.enabled?'<path d="M8 5v14M16 5v14"/>':'<path d="m8 5 11 7-11 7Z"/>'));
+    actions.push(pluginAction('设置',`data-plugin-settings="${id}"`,'secondary','<path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="17" r="2"/>'));
+    if((state.user?.roles||[state.user?.role]).includes('super_admin'))actions.push(pluginAction('能力权限',`data-plugin-runtime="${id}"`,'secondary','<path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7Z"/><path d="m8 12 3 3 5-6"/>'));
+    actions.push(pluginAction('更新',`data-plugin-update="${id}"`,'secondary','<path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 7a7 7 0 0 1 12-2l2 2M4 17l2 2a7 7 0 0 0 12-2"/>'));
+    if(!inLibrary)actions.push(pluginAction('加入插件库',`data-plugin-library-publish="${id}"`,'secondary','<path d="m12 3 9 5-9 5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/>'));
+    actions.push(pluginAction('卸载',`data-plugin-uninstall="${id}" data-plugin-name="${esc(item.name)}" data-plugin-version="${esc(item.version)}" data-enabled="${item.enabled?'true':'false'}"`,'danger','<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>'));
+  }
+  return `<div class="plugin-version"><div class="plugin-version-info"><div class="plugin-version-title"><strong>${esc(item.name)}</strong><span class="plugin-state ${item.enabled?'is-on':''}">${item.enabled?'运行中':'未启用'}</span></div><div class="plugin-version-meta"><span>v${esc(item.version)}</span><span>${esc(item.runtime)}</span>${inLibrary?'<span class="plugin-library-status">已加入插件库</span>':''}${!declared?'<span class="plugin-contract-warning">缺少参数声明，请更新</span>':''}<code title="SHA-256: ${esc(item.checksum||'')}">${esc((item.checksum||'').slice(0,12))}…</code></div></div>${actions.length?`<div class="plugin-version-actions" role="group" aria-label="${esc(item.name)} 插件操作">${actions.join('')}</div>`:''}</div>`;
 }
 
 async function uploadPlugin(event) {

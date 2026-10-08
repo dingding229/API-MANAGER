@@ -269,12 +269,18 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Header: http.Header{}}, nil
 	})
+	var beforeCallback func()
 	flow := func(link bool) *httptest.ResponseRecorder {
 		payload := `{"return_to":"home"}`
 		if link {
 			payload = `{"purpose":"link","current_password":"Password888"}`
 		}
-		r := httptest.NewRequest("POST", "https://example.test/account/v1/oauth/telegram/start", strings.NewReader(payload))
+		startPath := "/account/v1/oauth/telegram/start"
+		if link {
+			startPath = "/account/v1/oauth/telegram/link"
+			payload = `{"current_password":"Password888","return_to":"home"}`
+		}
+		r := httptest.NewRequest("POST", "https://example.test"+startPath, strings.NewReader(payload))
 		r.Header.Set("Origin", "https://example.test")
 		r.Header.Set("X-API-Request", "1")
 		r.Header.Set("User-Agent", "review")
@@ -299,6 +305,10 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 		for _, cookie := range w.Result().Cookies() {
 			callback.AddCookie(cookie)
 		}
+		if beforeCallback != nil {
+			beforeCallback()
+			beforeCallback = nil
+		}
 		done := httptest.NewRecorder()
 		s.ServeHTTP(done, callback)
 		if done.Code == http.StatusSeeOther {
@@ -311,8 +321,22 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 		}
 		return done
 	}
-	if w := flow(true); w.Code != 303 {
-		t.Fatal("link failed", w.Code, w.Body.String())
+	if w := flow(true); w.Code != 303 || w.Header().Get("Location") != "https://example.test/account?view=security&linked=telegram" {
+		t.Fatal("link did not return to account security", w.Code, w.Header().Get("Location"))
+	} else {
+		for _, cookie := range w.Result().Cookies() {
+			if cookie.Name == auth.SessionCookie {
+				t.Fatal("binding replaced the signed-in account")
+			}
+		}
+	}
+	identityRequest := httptest.NewRequest("GET", "https://example.test/account/v1/identities", nil)
+	identityRequest.Header.Set("Authorization", "Bearer "+session)
+	identityResponse := httptest.NewRecorder()
+	s.ServeHTTP(identityResponse, identityRequest)
+	var providers []string
+	if identityResponse.Code != 200 || json.Unmarshal(identityResponse.Body.Bytes(), &providers) != nil || len(providers) != 1 || providers[0] != "telegram" {
+		t.Fatal("linked Telegram identity not visible", identityResponse.Code, identityResponse.Body.String())
 	}
 	w := flow(false)
 	if w.Code != 303 || w.Header().Get("Location") != "https://example.test/" {
@@ -338,6 +362,21 @@ func TestPostgresTelegramOIDCLinkLoginAndNoUnverifiedRegistration(t *testing.T) 
 	}
 	if p.CountUsers() != count {
 		t.Fatal("created account with invented email")
+	}
+	beforeCallback = func() {
+		active, err := us.CurrentSession(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := us.RevokeSession(u.ID, active.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := flow(true); w.Code != 403 || w.Header().Get("Location") != "" {
+		t.Fatal("revoked binding session logged in or linked an account", w.Code)
+	}
+	if _, err := p.FindIdentity(context.Background(), "telegram", subject); err == nil {
+		t.Fatal("linked identity after binding session was revoked")
 	}
 }
 
@@ -429,5 +468,30 @@ func TestPostgresTelegramOnboardingRequiresVerifiedEmailAndOneUse(t *testing.T) 
 	}
 	if w := call("/complete", body); w.Code != 401 {
 		t.Fatal("onboarding replayed", w.Code)
+	}
+}
+
+func TestTelegramBindingCannotFallBackToLogin(t *testing.T) {
+	for _, test := range []struct {
+		path, body string
+		status     int
+	}{
+		{"link", `{}`, 401},
+		{"start", `{"purpose":"link"}`, 401},
+		{"link", `{"purpose":"login"}`, 400},
+		{"start", `{"purpose":"unknown"}`, 400},
+	} {
+		t.Run(test.path+test.body, func(t *testing.T) {
+			st := &telegramAuthorizationStore{}
+			s := &Service{accounts: st, users: user.NewService(store.NewMemory()), key: "test-encryption-key"}
+			r := httptest.NewRequest("POST", "https://example.test/account/v1/oauth/telegram/"+test.path, strings.NewReader(test.body))
+			r.Header.Set("Origin", "https://example.test")
+			r.Header.Set("X-API-Request", "1")
+			w := httptest.NewRecorder()
+			s.oauth(w, r, model.SecuritySettings{TelegramEnabled: true, WebsiteURL: "https://example.test"})
+			if w.Code != test.status || st.writes != 0 || len(w.Result().Cookies()) != 0 || strings.Contains(w.Body.String(), `"url"`) {
+				t.Fatal("binding silently started a login", w.Code, w.Body.String())
+			}
+		})
 	}
 }

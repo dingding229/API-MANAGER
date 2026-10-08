@@ -40,7 +40,7 @@ func TestGlobalConfirmationControlsAndStructuredCallDetails(t *testing.T) {
 		t.Fatal("inline call details still stretch rows")
 	}
 	plugins, _ := assets.ReadFile("assets/app.js")
-	for _, v := range []string{"plugin-action-primary", "plugin-action-secondary", "plugin-library-status", "data-plugin-update"} {
+	for _, v := range []string{"plugin-version-actions", "plugin-action-label", "plugin-library-status", "data-plugin-update"} {
 		if !strings.Contains(string(plugins), v) {
 			t.Fatal("plugin action layout missing", v)
 		}
