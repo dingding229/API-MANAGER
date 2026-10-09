@@ -14,7 +14,7 @@ RUN go mod download
 COPY cmd/server ./cmd/server
 COPY internal ./internal
 ARG TARGETOS TARGETARCH
-ARG APP_VERSION=0.3.49-dev
+ARG APP_VERSION=0.3.50-dev
 ARG APP_REVISION=development
 ARG APP_BUILT_AT
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X api-manager/internal/version.Version=${APP_VERSION} -X api-manager/internal/version.Revision=${APP_REVISION} -X api-manager/internal/version.BuiltAt=${APP_BUILT_AT}" -o /out/api-manager ./cmd/server && mkdir -p /out/plugins /out/plugin-library /out/observability /out/database-backups
@@ -43,7 +43,7 @@ RUN curl -fsSL --retry 3 https://codeload.github.com/grafana/tempo/tar.gz/f0f3ed
     && echo 'c354a7495843161a41ad75d96dd4e8f17aabc9a5f439060cf974a57b4ef2ff85  /tmp/source.tar.gz' | sha256sum -c - \
     && mkdir -p /src && tar -xzf /tmp/source.tar.gz --strip-components=1 -C /src
 WORKDIR /src
-RUN --mount=type=cache,target=/go/pkg/mod go get google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0 github.com/apache/thrift@v0.24.0 golang.org/x/crypto@v0.55.0
+RUN --mount=type=cache,target=/go/pkg/mod go get google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0 github.com/apache/thrift@v0.24.0 golang.org/x/crypto@v0.57.0
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod GOFLAGS='-p=2 -mod=mod' CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -buildvcs=false -trimpath -ldflags='-s -w' -o /out/tempo ./cmd/tempo
 

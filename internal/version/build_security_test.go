@@ -16,7 +16,7 @@ func TestReleaseBuildRecompilesAllGoExecutablesWithPatchedToolchains(t *testing.
 		t.Fatal(err)
 	}
 	dockerfile := string(raw)
-	for _, required := range []string{"golang:1.26.9-alpine@sha256:", "golang:1.27.2-bookworm@sha256:", "GOTOOLCHAIN=local", "GOMAXPROCS=2", "golang.org/x/net@v0.60.0", "scripts/compress_assets.sh", "-tags=netgo,builtinassets"} {
+	for _, required := range []string{"golang:1.26.9-alpine@sha256:", "golang:1.27.2-bookworm@sha256:", "GOTOOLCHAIN=local", "GOMAXPROCS=2", "golang.org/x/net@v0.60.0", "golang.org/x/crypto@v0.57.0", "scripts/compress_assets.sh", "-tags=netgo,builtinassets"} {
 		if !strings.Contains(dockerfile, required) {
 			t.Fatal("missing release safeguard", required)
 		}
@@ -26,7 +26,7 @@ func TestReleaseBuildRecompilesAllGoExecutablesWithPatchedToolchains(t *testing.
 			t.Fatal("component is not rebuilt from source", component)
 		}
 	}
-	for _, obsolete := range []string{"monitoring-binaries", "api-manager:0.3.2", "FROM grafana/loki:", "FROM prom/prometheus:"} {
+	for _, obsolete := range []string{"golang.org/x/crypto@v0.55.0", "monitoring-binaries", "api-manager:0.3.2", "FROM grafana/loki:", "FROM prom/prometheus:"} {
 		if strings.Contains(dockerfile, obsolete) {
 			t.Fatal("stale binary import", obsolete)
 		}
