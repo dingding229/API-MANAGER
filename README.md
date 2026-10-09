@@ -11,15 +11,14 @@ API 网关与管理控制台，支持接口发布、API Key 管理、限流与�
 - Redis 7：分布式限流与配额
 
 ```bash
-# 私有 Docker Hub 仓库需要先登录
-docker login
-
 # 首次部署生成凭据，只需执行一次
 python3 scripts/init-production-secrets.py
 
 # 启动全部服务
 docker compose up -d
 ```
+
+若 Docker Hub 镜像仓库为私有，请先执行 `docker login`；公开镜像无需登录。
 
 初始化脚本生成 `secrets/` 目录及五个相互独立的凭据、可选 SMTP 密码和版本检查令牌文件，不会显示或覆盖已有值；升级时只补齐缺失文件。应用使用只读文件挂载读取凭据，不需要手工填写数据库地址、DSN 或加密密钥。
 
@@ -66,6 +65,7 @@ PY
 ```text
 https://实际网站域名/account/v1/oauth/github/callback
 https://实际网站域名/account/v1/oauth/google/callback
+https://实际网站域名/account/v1/oauth/telegram/callback
 ```
 
 SMTP 密码、OAuth Secret、Turnstile Secret、TOTP 绑定密钥与插件缓存使用主程序加密密钥保护；升级与备份必须保留原加密密钥。没有提供者的有效凭据时，不要开启对应功能。
@@ -101,6 +101,8 @@ docker compose up -d --force-recreate api-manager
 ```
 
 默认使用 Docker Hub 的 `latest`，无需修改镜像版本或摘要。更新不会重新生成凭据或删除数据卷。也可以执行 `make update`；该命令会先检查本地凭据和 Compose 配置。
+
+官方镜像中的主程序与五个观测组件均使用经过安全修复的 Go 工具链编译。上游源码及预构建网页资源固定到提交和校验值；发布前执行应用测试、镜像安全扫描和双平台检查。组件不会额外占用独立 Docker 服务。
 
 ## 配置
 

@@ -69,7 +69,7 @@ jobs:
           }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.7'
+          go-version: '1.26.9'
           cache: true
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -161,7 +161,7 @@ jobs:
           exit-code: '1'
 
   scan:
-    if: github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -184,27 +184,17 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
           load: true
           push: false
           platforms: linux/amd64
           tags: api-manager:scan
-      - name: Free runner toolchains and Docker build cache before image scan
-        run: |
-          # The loaded image is large; Trivy also needs temporary space to export layers.
-          # The upstream binaries are built inside Docker, so these host toolchains are unused.
-          sudo rm -rf /opt/hostedtoolcache /usr/local/swift /usr/local/share/powershell
-          docker builder prune --all --force
-          df -h /
-      - name: Scan built image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+          cache-from: type=gha,scope=api-manager-go1272-amd64
+          cache-to: type=gha,scope=api-manager-go1272-amd64,mode=max,ignore-error=true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          image-ref: api-manager:scan
-          trivy-config: security/trivy.yaml
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '1'
+          go-version: '1.26.9'
+          cache: false
       - name: Verify bundled executables and release boundary
         run: |
           set -euo pipefail
@@ -216,6 +206,12 @@ jobs:
               echo "Bundled observability executable missing: $component" >&2
               exit 1
             }
+            docker cp "$container_id:/usr/local/bin/$component" "/tmp/$component"
+            go version -m "/tmp/$component" | awk 'NR == 1 {print}' | grep -F 'go1.27.2' >/dev/null || {
+              echo "Bundled executable uses an unapproved Go toolchain: $component" >&2
+              exit 1
+            }
+            timeout 20s docker run --rm --network none --entrypoint "/usr/local/bin/$component" api-manager:scan --version
           done
           if grep -E '(^|/)data/plugins/.+|\.wasm$' /tmp/api-manager-files.txt; then
             echo 'The release image contains a bundled plugin package.' >&2
@@ -223,6 +219,23 @@ jobs:
           fi
 
 
+      - name: Free runner toolchains and Docker build cache before image scan
+        run: |
+          # The loaded image is large; Trivy also needs temporary space to export layers.
+          # The upstream binaries are built inside Docker, so these host toolchains are unused.
+          sudo rm -rf /opt/hostedtoolcache /usr/local/swift /usr/local/share/powershell
+          docker buildx prune --all --force
+          docker builder prune --all --force
+          df -h /
+      - name: Scan built image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: api-manager:scan
+          trivy-config: security/trivy.yaml
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
       - name: Test Compose username-password login and API authentication modes
         shell: bash
         run: |
@@ -367,18 +380,20 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Push private amd64 image from verified source
+      - name: Push amd64 image from verified source
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
           push: true
           platforms: linux/amd64
           build-args: |
             APP_VERSION=v${{ needs.validate.outputs.release_version }}
             APP_REVISION=${{ github.sha }}
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-amd64
+          cache-from: type=gha,scope=api-manager-go1272-amd64
+          cache-to: type=gha,scope=api-manager-go1272-amd64,mode=max,ignore-error=true
           provenance: mode=max
           sbom: true
 
@@ -414,18 +429,20 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Push private arm64 image from verified source
+      - name: Push arm64 image from verified source
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: Dockerfile.release
+          file: Dockerfile
           push: true
           platforms: linux/arm64
           build-args: |
             APP_VERSION=v${{ needs.validate.outputs.release_version }}
             APP_REVISION=${{ github.sha }}
           tags: ${{ env.IMAGE_NAME }}:staged-${{ github.sha }}-arm64
+          cache-from: type=gha,scope=api-manager-go1272-arm64
+          cache-to: type=gha,scope=api-manager-go1272-arm64,mode=max,ignore-error=true
           provenance: mode=max
           sbom: true
 
@@ -494,5 +511,5 @@ jobs:
             "${IMAGE_NAME}@${AMD64_DIGEST}" \
             "${IMAGE_NAME}@${ARM64_DIGEST}"
           docker buildx imagetools inspect "${args[1]}"
-          echo '### Private multi-platform Docker image published' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Multi-platform Docker image published' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "${published_tags[@]}" >> "$GITHUB_STEP_SUMMARY"
