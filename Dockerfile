@@ -100,7 +100,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
     go build -buildvcs=false -trimpath -tags=netgo,builtinassets -ldflags='-s -w -X github.com/prometheus/common/version.Version=3.15.0 -X github.com/prometheus/common/version.Revision=5241a27fe3c6983549fccc32f6e65917408c63cd' -o /out/prometheus ./cmd/prometheus
 
 # A fresh final filesystem: only the five monitoring binaries are copied in.
-FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime-base
+FROM ubuntu:25.10@sha256:7cc5e35f6567ee8c66d2abb4aab0fd866669e6207c237c3a8f0947a5c7f17092 AS runtime-base
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get install -y --no-install-recommends ca-certificates tzdata passwd \
     && apt-get clean \
