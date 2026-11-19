@@ -6,7 +6,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no
 COPY public-ui ./
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS builder
 WORKDIR /src
 ENV GOTOOLCHAIN=local
 COPY go.mod go.sum ./
@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 
 # Rebuild upstream binaries from immutable source archives with patched Go modules.
 # The downloaded tarballs and the Alertmanager UI release asset are SHA-256 checked.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS patched-base
+FROM --platform=$BUILDPLATFORM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS patched-base
 ARG TARGETOS TARGETARCH
 ENV GOTOOLCHAIN=local GOMAXPROCS=2 GOFLAGS=-p=2
 
